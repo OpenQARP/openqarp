@@ -2,7 +2,7 @@
 Open Quantum Application Research Package
 =========================================
 
-|ci| |coverage| |pypi| |docs| |python| |license|
+|ci| |coverage| |pypi| |docs| |python| |license| |doi|
 
 .. |ci| image:: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml/badge.svg
    :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
@@ -12,7 +12,7 @@ Open Quantum Application Research Package
    :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
    :alt: Coverage
 
-.. |pypi| image:: https://img.shields.io/pypi/v/openqarp.svg
+.. |pypi| image:: https://img.shields.io/pypi/v/openqarp
    :target: https://pypi.org/project/openqarp/
    :alt: PyPI
 
@@ -21,10 +21,16 @@ Open Quantum Application Research Package
    :alt: Documentation
 
 .. |python| image:: https://img.shields.io/badge/python-3.11+-blue.svg
+   :target: https://pypi.org/project/openqarp/
    :alt: Python 3.11+
 
 .. |license| image:: https://img.shields.io/badge/License-Apache_2.0-blue.svg
+   :target: https://github.com/OpenQARP/openqarp/blob/develop/LICENSE
    :alt: License: Apache 2.0
+
+.. |doi| image:: https://zenodo.org/badge/DOI/10.5281/zenodo.22755228.svg
+   :target: https://doi.org/10.5281/zenodo.22755228
+   :alt: DOI
 
 ----
 
@@ -202,6 +208,7 @@ the framework is in preparation; until it appears, cite the software itself
                Diez Garc{\'i}a, Marcos and Krompiec, Michal and Kirsopp, Josh},
      title  = {{OpenQARP: Open Quantum Application Research Package}},
      year   = {2026},
+     doi    = {10.5281/zenodo.22755228},
      note   = {\url{https://github.com/OpenQARP/openqarp}}
    }
 
