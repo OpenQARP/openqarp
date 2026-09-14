@@ -8,7 +8,7 @@
 **Status:** 🗄️ Example (not for implementation)
 **Author:** OpenQARP maintainers (+ Claude)
 **Reviewer:** <a named maintainer — their green-light on this plan in the Draft PR is the design approval>
-**Date:** 2026-09-15
+**Date:** 2026-09-14
 **Tier:** Standard
 **Branch:** `feature/w-state-block`
 **Scope:**
