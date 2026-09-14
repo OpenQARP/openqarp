@@ -1,0 +1,30 @@
+Notices for OpenQARP
+====================
+
+OpenQARP (Open Quantum Application Research Package)
+Copyright 2026 Fujitsu Limited
+
+Licensed under the Apache License, Version 2.0.  The license text is the
+LICENSE file distributed with this software; you may also obtain it at
+http://www.apache.org/licenses/LICENSE-2.0.
+
+This software includes third-party components, listed below.  Their copyright
+notices and full license texts are reproduced in the file LICENSES_bundled.txt
+distributed with this software; that file, not this one, is where the
+attribution and permission notices those licenses require are carried.
+
+  - qulacs csim v0.6.14 (state-vector simulation kernel) - MIT License
+    https://github.com/qulacs/qulacs
+  - Eigen 3.4.0 - Mozilla Public License 2.0
+    https://gitlab.com/libeigen/eigen
+  - nanobind v3.0.1 - BSD 3-Clause License
+    https://github.com/wjakob/nanobind
+  - tsl::robin_map (bundled with nanobind) - MIT License
+    https://github.com/Tessil/robin-map
+  - SymEngine v0.14.0 - MIT License
+    https://github.com/symengine/symengine
+  - Boost 1.88.0 (Multiprecision and header libraries) - Boost Software License 1.0
+    https://www.boost.org
+  - GNU libgomp 14.2.1 (GCC OpenMP runtime; Linux wheels only) - GPL-3.0 with
+    GCC Runtime Library Exception 3.1
+    https://gcc.gnu.org

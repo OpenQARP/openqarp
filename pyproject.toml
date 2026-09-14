@@ -1,0 +1,387 @@
+[build-system]
+# scikit-build-core drives the existing cpp/libqarpx/CMakeLists.txt and provides
+# cmake + ninja. nanobind and SymEngine are pulled in by CMake via FetchContent;
+# Eigen is vendored.  <2: the 1.x metadata table below is the supported form.
+requires = ["scikit-build-core>=1.0,<2"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "openqarp"
+dynamic = ["version"]                       # single-sourced from qarp/__init__.py
+description = "Open Quantum Application Research Package"
+readme = { file = "README.rst", content-type = "text/x-rst" }
+requires-python = ">=3.11"
+# PEP 639 SPDX form, not `{ file = ... }`: the file form inlines all 202 lines
+# of the Apache text into the `License:` header.  A `License ::` classifier
+# alongside the expression is forbidden.  NOTICE is binding under s4(d) and
+# LICENSES_bundled.txt carries the third-party texts it points to, so both ship.
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "LICENSES_bundled.txt"]
+keywords = ["quantum computing", "quantum algorithms", "quantum simulation", "quantum chemistry", "circuit compilation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+    # Minimal core: block construction, primitives, engines (QarpEngine),
+    # the standard composite algorithms (VQE/QAOA/QPE/...),
+    # and the fermion→qubit mapping layer (qarp.operators._mappings).
+    # FermionOperator/QubitOperator and
+    # the fermion→qubit transforms are provided by the qarpx C++ backend —
+    # openfermion is only an optional extra (golden cross-validation tests,
+    # benchmarks, qarp.operators.compat converters).
+    "ipython",
+    "matplotlib",
+    "numpy",
+    "scipy",
+    "sympy",
+    "networkx>=3.4.2",
+]
+
+[project.optional-dependencies]
+# Sphinx build for docs/ (see build_docs.sh and the CI `docs` job). Pinned to
+# what `pages` resolved when this extra was introduced (2026-08-04), so the
+# extra reproduces today's build rather than silently upgrading it — bump
+# deliberately, and re-measure the sphinx warning count (see build_docs.sh)
+# when you do.
+docs = ["sphinx==9.1.0", "furo==2025.12.19", "sphinx-copybutton==0.5.2"]
+# MPS / tensor-network operators (qarp.operators.VUMPO).  opt_einsum builds the
+# cached contraction expressions of qarp.operators._vumpo_network; neither quimb
+# nor cotengra requires it, so it is declared here (MIT; pip-installed, not
+# bundled, hence no NOTICE entry).  A cotengra-native rewrite would shed it.
+mps = ["quimb>=1.12.1", "opt_einsum>=3.3"]
+# Hypergraph / simplicial-complex features in qarp.graphs.
+# `fastjsonschema` is a transitive runtime dep of hypernetx 2.4+.
+# hypernetx ≤2.4.0 breaks on pandas 3 (create_df loses the misc_properties
+# column) — cap pandas until upstream supports it.
+hypergraph = ["hypernetx>=2.4.0", "fastjsonschema>=2.21.0", "pandas<3"]
+# CVXPY-backed convex optimisation (qarp.algorithms.SpectrumEstimator).
+convex-optim = ["cvxpy"]
+# Rz -> Clifford+T synthesis (qarp.resources._synthesis) via Ross-Selinger
+# gridsynth.  pygridsynth's own metadata drags in cvxpy/matplotlib for its
+# mixed-synthesis extension; the Rz path we call is mpmath-only.
+cliffordt = ["pygridsynth>=2.0"]
+# openfermion interop (qarp.operators.compat) + golden reference for the
+# operator differential tests and benchmarks.  NOT needed at runtime.
+# Capped <1.8: openfermion 1.8.0 rewrote QubitOperator.isclose to numpy-style
+# rtol/atol with `<=` (so a 2e-8 diff reads as equal); our C++ QubitOperator
+# and the golden tests match 1.7.x's strict `abs(diff) < 1e-8`.
+openfermion = ["openfermion>=1.7.1,<1.8"]
+# CUDA-Q Python runtime (bundles cuQuantum), pinned to the CUDA-12 variant.
+# Named for what it installs, not for GPU execution: it is the build-time
+# prerequisite for a GPU-enabled qarpx, necessary but NOT sufficient — the C++
+# backend must also be built with QARP_WITH_CUDAQ=ON (a source build; published
+# wheels are OFF).  See docs/source/installation.rst.  Deliberately excluded
+# from `full` / `full-dev`.
+cudaq-runtime = ["cuda-quantum-cu12>=0.9"]
+# The web GUI (qarp-gui repository) is a separate, unpublished distribution —
+# deliberately not an extra here until it is on PyPI.
+# Test runner (openfermion powers the operator differential/golden tests;
+# without it those tests skip and the rest of the suite still runs).
+# hypothesis drives the `property`-marked tests; profiles live in
+# tests/conftest.py and its generators in tests/strategies.py.
+# pytest-cov/coverage are pinned exactly for the same reason as ruff: a
+# measurement change shifts the reported total, which Phase 2 turns into a
+# ratchet floor — an unpinned bump would move the floor under the gate.
+test = [
+    "pytest",
+    "hypothesis>=6.100",
+    "pytest-cov==7.1.0",
+    "coverage==7.15.4",
+    "diff-cover==10.5.0",
+    "openfermion>=1.7.1,<1.8",
+]
+# Developer tooling: ruff is both linter AND formatter (black replaced
+# 2026-07-23). Pinned exactly (here, .pre-commit-config.yaml, ci.yml —
+# bump all together): an unpinned linter/formatter breaks CI on release day.
+# mypy is pinned for the same reason and bumped in the same two places (it has
+# no pre-commit hook): a new release adds checks, so an unpinned bump turns a
+# green pipeline red on a day nobody touched the code.
+dev = ["ruff==0.15.22", "mypy==1.19.1", "pre-commit>=3.5"]
+# Executes examples/**/*.ipynb (`pytest --nbmake examples/`; job-notebooks).
+# nbmake is pinned like the other CI tooling — it decides what counts as a
+# notebook failure. `pymoo` is imported by mwe_parameter_optimization.ipynb
+# alone, as the external-optimizer demo, and by nothing in qarp/.
+# Deliberately NOT in [full-dev]: notebooks are a nightly leg, and the extra
+# must not enter the install the coverage floor is measured from.
+# pyscf: the chemistry notebooks derive their integrals through the inline
+# pyscf recipe (qarp itself never imports it — see the fermionic dissolution).
+# scikit-learn: vision_image_classification.ipynb alone, for the SVM
+# kernel classifier and PCA/scaling preprocessing (qarp itself never imports it).
+notebooks = ["nbmake==1.5.5", "pymoo>=0.6.2", "pyscf>=2.10", "scikit-learn>=1.3"]
+# The four emit/absorb interop SDKs (mwe_emitters_absorbers.ipynb and the
+# importorskip-guarded tests/test_emit + tests/test_absorb).  Nightly-only:
+# they break on upstream releases, not qarp changes, and adding them to
+# [full]/[full-dev] would re-baseline the coverage floor.  Floors match the
+# adapters' own runtime checks (qiskit_emitter.cpp, pennylane_emitter.cpp).
+# qiskit-qasm3-import: qiskit.qasm3.loads() requires it at CALL time (lazy) —
+# without it the §12 external-parse oracle fails instead of skipping.
+integrations = ["qiskit>=1.0", "qiskit-qasm3-import", "pytket", "pennylane>=0.36", "qulacs", "jax"]
+# Competitor benchmark harness (benchmarks/, benchmarks/tables/competitor_*).
+# Bench-only like [integrations] — never imported by qarp/, never a runtime dep
+# (§15); exercised by the nightly job-bench-smoke correctness gate.  The base
+# SDKs come from [integrations]; this adds the fast backends and fixture
+# sources only the harness uses.
+# openfermionpyscf: the qulacs baseline of benchmarks/code_volume (its integrals
+# and active space; qarp's side uses the inline pyscf recipe from [notebooks]).
+bench = [
+    "qiskit-aer",
+    "cirq-core",
+    "qsimcirq",
+    "mqt.bench>=2.2.3,<3",
+    "mqt.qcec>=3.10,<4",  # floor = version the certification matrix was verified on
+    "ffsim",
+    "openfermionpyscf",
+]
+# Everything optional, in one go (cuda excluded on purpose).
+full = [
+    "quimb>=1.12.1",
+    "opt_einsum>=3.3", # see [mps]
+    "hypernetx>=2.4.0",
+    "fastjsonschema>=2.21.0",
+    "pandas<3", # see [hypergraph]
+    "cvxpy",
+    "pygridsynth>=2.0",
+    "pytest",
+    "hypothesis>=6.100",
+    "pytest-cov==7.1.0",
+    "coverage==7.15.4",
+    "diff-cover==10.5.0",
+    "openfermion>=1.7.1,<1.8",
+]
+# Full-dev, including developer tooling.  pyscf is test-only: the FCI/RHF/
+# CASCI oracle references derive from it via tests/pyscf_recipes.py.
+full-dev = [
+    "pyscf>=2.10",
+    "quimb>=1.12.1",
+    "opt_einsum>=3.3", # see [mps]
+    "hypernetx>=2.4.0",
+    "fastjsonschema>=2.21.0",
+    "pandas<3", # see [hypergraph]
+    "cvxpy",
+    "pygridsynth>=2.0",
+    "pytest",
+    "hypothesis>=6.100",
+    "pytest-cov==7.1.0",
+    "coverage==7.15.4",
+    "diff-cover==10.5.0",
+    "openfermion>=1.7.1,<1.8",
+    "ruff==0.15.22",
+    "mypy==1.19.1",
+    "pre-commit>=3.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/OpenQARP/openqarp"
+Documentation = "https://openqarp.github.io/openqarp/"
+Repository = "https://github.com/OpenQARP/openqarp"
+Issues = "https://github.com/OpenQARP/openqarp/issues"
+Changelog = "https://github.com/OpenQARP/openqarp/blob/main/CHANGELOG.md"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ruff — linter AND formatter (`ruff format` is black-compatible at
+# line-length 100). Blocking in CI + pre-commit. Version pinned in [dev] /
+# [full-dev] and .pre-commit-config.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+# nbstripout governs notebooks; their stripped schema trips ruff's notebook parser.
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B006", # mutable default argument
+    "B008", # function call in default argument
+    "B904", # raise ... from inside except
+    "B905", # zip() without strict= — guards the silent-truncation/permutation bug class
+]
+ignore = [
+    "E501", # long lines that survive black are strings/comments it cannot split
+    "E741", # physics names: l is angular momentum
+    "E731", # objective-closure idiom: `obj = lambda p: ...` in the variational algorithms
+]
+# Deliberately NOT selected: RUF001/002/003 (Greek and ⟨⟩ in docstrings are
+# legitimate math), UP* (typing modernization — pure churn, possible one-off
+# later), SIM*/C4* (style simplifications, value too low for the churn).
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py imports are the re-export surface, and their ORDER is load-bearing
+# (it sequences package init to avoid circular imports) — no F401, no sorting.
+"**/__init__.py" = ["F401", "I001"]
+# Deliberate ordering: EXACT alias is defined mid-imports.
+"qarp/__init__.py" = ["F401", "E402"]
+# pytest.importorskip guards must precede the imports they protect.
+"tests/**" = ["E402"]
+
+[tool.ruff.lint.isort]
+# Pin module classification so sorting is environment-independent (qarpx is a
+# compiled module, not always importable at lint time).
+known-first-party = ["qarp", "qarpx"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# coverage.py.  Measurement only: the ratchet floor is enforced by the CI
+# `coverage` job, not here, and only ever rises.
+#
+# The total is environment-dependent: tests/ has ~49 `pytest.importorskip`
+# guards, and a missing optional extra silently removes whole modules
+# (`quimb` alone swings ~293 statements).  Measure with `[full-dev]` installed
+# or the number is not comparable.
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["qarp"]
+# Line-only coverage is close to meaningless here: the engine/mapping/block
+# layers are dense if-dispatch that one path marks fully covered.
+branch = true
+# Repo-relative paths in the data file and cobertura report.  diff-cover
+# matches filenames against git paths, and the coverage job
+# reads the artefacts on a different runner — with absolute paths, a qarp
+# that resolves to site-packages instead of the checkout would make diff-cover
+# find no overlap and pass vacuously ("No lines with coverage information").
+relative_files = true
+
+[tool.coverage.paths]
+# Fold a site-packages-resolved qarp back onto the checkout at combine/report.
+source = ["qarp", "*/site-packages/qarp"]
+
+[tool.coverage.report]
+# NO `fail_under` HERE, deliberately.  The ratchet floor lives in
+# `.github/workflows/ci.yml` `coverage` (`coverage report --fail-under=...`) because
+# it is a pipeline gate, not a property of the project: with it set here, an
+# ordinary `pytest tests/some_file.py --cov` exits 1 with "Required test
+# coverage of 83.0% not reached", since a subset legitimately covers ~6%.
+# That trains people to stop passing --cov locally, which is the opposite of
+# what this plan wants.
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+]
+
+[tool.scikit-build]
+# The CMake project root is cpp/libqarpx, NOT the repository root.
+cmake.source-dir = "cpp/libqarpx"
+cmake.version = ">=3.20"
+# Include the pure-Python package alongside the compiled `qarpx` module.
+wheel.packages = ["qarp"]
+# Install ONLY the nanobind module (COMPONENT python). The dev install-tree
+# artefacts (static lib in lib/, headers in include/) are gated out of the wheel
+# in CMake with `if(NOT SKBUILD)`.
+install.components = ["python"]
+# Persistent build dir (per wheel tag) so editable rebuilds are incremental.
+build-dir = "build/{wheel_tag}"
+# Source distribution: everything git does not ignore, so the C++ sources and
+# the vendored csim/Eigen ship and an sdist build works. (nanobind, and
+# SymEngine/Boost when enabled, are still fetched via FetchContent, so an sdist
+# *source* build needs network.)  No sdist.include: an include pattern is
+# force-include — it beats sdist.exclude AND .gitignore, so listing "cpp/**"
+# here would drag a local cpp/libqarpx/build/ tree into the sdist.
+sdist.exclude = ["cpp/libqarpx/build/**", "**/__pycache__/**", "**/*.so", "**/*.pyd"]
+
+[tool.scikit-build.cmake.define]
+QARP_BUILD_PYTHON = "ON"
+QARP_BUILD_TESTS = "OFF"          # don't fetch googletest for a wheel build
+# Pure-Eigen CSD (the CMake default, pinned here for visibility): no BLAS
+# link, so wheels bundle no OpenBLAS/libgfortran/libquadmath and stay free
+# of GPL-family runtimes.  Flip to "ON" only for a source build that wants
+# LAPACK's canonical (bit-reproducible) degenerate-σ CSD.
+QARP_USE_LAPACK = "OFF"
+QARP_WITH_CUDAQ = "OFF"           # CPU wheel; GPU is a separate source build
+# Symbolic operator coefficients (SymEngine v0.14 + Boost.Multiprecision —
+# MIT + BSL-1.0 only, no GMP/LGPL; CMake hard-fails if boostmp is not picked
+# up). Boost headers are a build-time-only requirement: system Boost when
+# found (provisioned in the cibuildwheel sections below), else CMake
+# downloads the pinned release headers into the build tree.
+# Measured module-size cost: +2.2 MB uncompressed.
+QARP_WITH_SYMENGINE = "ON"
+
+# Auto-rebuild-on-import is opt-in (`-C editable.rebuild=true`): it needs cmake +
+# ninja to outlive pip, so it is only safe under `--no-build-isolation`.
+[tool.scikit-build.editable]
+rebuild = false
+mode = "redirect"
+
+[[tool.dynamic-metadata]]
+field = "version"
+provider = "scikit_build_core.metadata.regex"
+input = "qarp/__init__.py"
+regex = '__version__\s*=\s*"(?P<value>[^"]+)"'
+
+# ──────────────────────────────────────────────────────────────────────────────
+# cibuildwheel — builds + tests the binary wheels in CI.
+# See .github/workflows/wheels.yml and the migration plan Phase 3/4.
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.cibuildwheel]
+build = ["cp311-*", "cp312-*", "cp313-*", "cp314-*"]   # CPython 3.11–3.14 (no PyPy / free-threaded)
+skip = ["*-musllinux*"]                      # glibc manylinux only for now
+build-frontend = "build"
+build-verbosity = 1
+# Exercise the CSD/QSD synthesis path against the freshly-repaired wheel in
+# an isolated env — not just `import`. cwd is a temp dir, so this imports the
+# installed wheel, not the source tree.
+test-command = "python {project}/scripts/ci/synthesis_smoke.py"
+
+[tool.cibuildwheel.linux]
+# "native": each Linux runner builds its own architecture (x86_64 on
+# ubuntu-latest, aarch64 on ubuntu-24.04-arm) — no QEMU emulation.
+archs = ["native"]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+# boost-devel: header-only build dependency of the SymEngine symbolic
+# backend (QARP_WITH_SYMENGINE); nothing from Boost is linked or bundled.
+# (No BLAS install: the pure-Eigen CSD build links no LAPACK.  A
+# QARP_USE_LAPACK=ON build would need the real distro openblas-devel from
+# CRB/PowerTools — NOT scipy-openblas, whose `scipy_` symbol prefix does not
+# satisfy the zuncsd_ call.)
+before-all = "dnf install -y boost-devel"
+
+# ninja defaults to cores+2 jobs; on the 2-vCPU/8 GB aarch64 runner that is four
+# concurrent SymEngine compiles, which OOM-kills cc1plus (3 is the known-good
+# ceiling for 8 GB, see CLAUDE.md).  Override, not global: x86_64 has 16 GB.
+# Private-repo sizing only — public repos get 4 vCPU / 16 GB; lift then.
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux_aarch64"
+environment = { CMAKE_BUILD_PARALLEL_LEVEL = "3" }
+
+[tool.cibuildwheel.macos]
+archs = ["native"]                           # macos-15 → arm64, macos-15-intel → x86_64
+# 13.3 is the floor: Apple's libc++ gates floating-point std::to_chars
+# (core/param.cpp, operators/detail_parse.h) behind macOS 13.3; an older
+# target fails to compile.  Enforced in cpp/libqarpx/CMakeLists.txt.
+environment = { MACOSX_DEPLOYMENT_TARGET = "13.3" }
+# Boost headers for the SymEngine symbolic backend (build-time only; the
+# wheel bundles nothing from Boost). Usually preinstalled on GH runners —
+# the install is a no-op then.
+before-all = "brew install boost ccache || true"
+# Launchers only under cibuildwheel (this table is not read by a local pip
+# install); the workflow supplies CCACHE_DIR and the cache.
+config-settings = { "cmake.define.CMAKE_C_COMPILER_LAUNCHER" = "ccache", "cmake.define.CMAKE_CXX_COMPILER_LAUNCHER" = "ccache" }
+# LAPACK via Apple Accelerate.framework — a system framework, nothing to install;
+# delocate leaves it unbundled.
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]
+# No system Boost on the runner: the CMake fallback downloads the pinned headers.
+# MSVC's OpenMP runtime (vcomp) is a separate DLL a wheel would have to bundle
+# via delvewheel; kernels build serial until that is set up, as on macOS
+# without libomp.
+# Ninja, not MSBuild: CMake honours compiler launchers only with Makefile/Ninja
+# generators.  scikit-build-core activates MSVC for a Ninja build itself.
+before-all = "choco install ccache ninja -y"
+environment = { CMAKE_GENERATOR = "Ninja" }
+config-settings = { "cmake.define.QARP_USE_OPENMP" = "OFF", "cmake.define.CMAKE_C_COMPILER_LAUNCHER" = "ccache", "cmake.define.CMAKE_CXX_COMPILER_LAUNCHER" = "ccache" }

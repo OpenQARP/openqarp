@@ -1,0 +1,3 @@
+from benchmarks.statevector import _families, _qx
+
+DESCRIPTION, bench, warmup = _families.FACTORIES["brickwork_threads"](_qx)

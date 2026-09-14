@@ -1,0 +1,294 @@
+# The per-change gate.  Order mirrors the legacy pipeline: lint first so a ruff
+# failure never costs a 17-minute compile; one wheel build feeds mypy, pytest
+# and docs; ctest builds its own tree (tests ON, which the wheel omits).  The
+# Pages deploy sits behind every test job, so docs never publish for a commit
+# whose tests did not pass; it also carries the coverage badge endpoint, so the
+# README badge shows the number this gate measured.  Tags run the full battery:
+# a release tag revalidates the exact tagged commit.
+name: ci
+
+on:
+  push:
+    branches: [develop, main, "release/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # the large-files check diffs against the base commit
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: ruff (check + format)
+        run: |
+          # Pin must match pyproject [dev] and .pre-commit-config.yaml.
+          python -m pip install ruff==0.15.22
+          ruff --version
+          ruff check .
+          ruff format --check .
+      - name: README mirror is byte-identical
+        run: |
+          diff -u README.rst docs/source/getting_started.rst || {
+            echo "docs/source/getting_started.rst has drifted from README.rst — edit README, then copy it over the mirror."
+            exit 1
+          }
+      - name: Narrative-docs static gate
+        run: python scripts/ci/check_docs_code.py --static docs/source
+      - name: Notebook outputs are stripped
+        run: |
+          failed=""
+          while IFS= read -r nb; do
+            python3 -c "import json,sys;d=json.load(open('$nb'));sys.exit(1 if any(c.get('outputs') or c.get('execution_count') for c in d.get('cells',[])) else 0)" || failed="$failed\n  $nb"
+          done < <(git ls-files '*.ipynb')
+          if [ -n "$failed" ]; then
+            echo "ERROR: The following notebooks have outputs. Clear them before pushing:"
+            echo -e "$failed"
+            echo "Run: jupyter nbconvert --clear-output --inplace <notebook>"
+            exit 1
+          fi
+      - name: No large or forbidden files in the change
+        env:
+          # PR: the merge base GitHub computed.  Push: the previous tip, all
+          # zeros on a new branch or tag — then there is nothing to diff.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          FORBIDDEN_EXTENSIONS="pkl npy npz data csv json log"
+          MAX_SIZE_KB=500
+          if [ -z "$BASE" ] || echo "$BASE" | grep -qE '^0+$'; then
+            echo "No base commit (new branch, tag or manual run) — nothing to diff, skipping."
+            exit 0
+          fi
+          git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch --depth=50 origin "$BASE" 2>/dev/null || true
+          git cat-file -e "${BASE}^{commit}" 2>/dev/null || { echo "ERROR: base commit $BASE is not present and could not be fetched."; exit 1; }
+          failed=""
+          for file in $(git diff --name-only --diff-filter=AM "$BASE" HEAD); do
+            [ ! -f "$file" ] && continue
+            # tests/assets/ holds provenance-scripted test data: the extension
+            # ban is waived there, the size cap is not.
+            case "$file" in
+              tests/assets/*) ;;
+              *)
+                ext="${file##*.}"
+                for forbidden in $FORBIDDEN_EXTENSIONS; do
+                  [ "$ext" = "$forbidden" ] && { failed="$failed\n  $file (forbidden type: .$ext)"; break; }
+                done
+                ;;
+            esac
+            size_kb=$(du -k "$file" | cut -f1)
+            [ "$size_kb" -gt "$MAX_SIZE_KB" ] && failed="$failed\n  $file (${size_kb}KB exceeds ${MAX_SIZE_KB}KB limit)"
+          done
+          if [ -n "$failed" ]; then
+            echo "ERROR: The following files violate repository policies:"
+            echo -e "$failed"
+            echo "Forbidden types: ${FORBIDDEN_EXTENSIONS}; max file size: ${MAX_SIZE_KB}KB"
+            exit 1
+          fi
+
+  wheel:
+    needs: [lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: ./.github/actions/build-wheel
+
+  mypy:
+    needs: [wheel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+      - run: python -m pip install "$(ls dist/*.whl)[full-dev]"
+      - run: |
+          mypy --version
+          mypy qarp/ tests/ --disable-error-code=import-untyped --disable-error-code=method-assign
+
+  pytest:
+    needs: [wheel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+      - run: python -m pip install "$(ls dist/*.whl)[full-dev]"
+      # No --cov-fail-under here: this job answers "did the tests pass"; the
+      # coverage job reads the artefacts and answers "did coverage regress".
+      - run: pytest tests/ --cov --cov-report=term --cov-report=xml:coverage.xml
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            .coverage
+          include-hidden-files: true   # .coverage is the raw data file the ratchet needs
+          retention-days: 7
+
+  coverage:
+    needs: [pytest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # RATCHET FLOOR — only ever rises (qarp_conventions.md §15).  Lowering it
+      # to make a run pass is the violation the gate exists to prevent.
+      COVERAGE_FLOOR: "94.0"
+      # Patch gate: lines THIS change touched; PR-only, since off a PR there
+      # is no base and "the lines this change touched" has no meaning.
+      PATCH_COVERAGE_FLOOR: "80"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # diff-cover needs the merge base with the target branch
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: coverage
+          path: .
+      - run: python -m pip install "diff-cover==10.5.0" "coverage==7.15.4"
+      - name: Artefacts arrived
+        # A missing coverage.xml makes diff-cover report "no lines with coverage
+        # information" and exit 0 — indistinguishable from a non-Python change.
+        run: |
+          test -s coverage.xml || { echo "coverage.xml missing/empty — pytest artefact did not arrive"; exit 1; }
+          test -s .coverage   || { echo ".coverage missing/empty — cannot enforce the ratchet floor"; exit 1; }
+      - name: Ratchet floor
+        run: coverage report --fail-under="$COVERAGE_FLOOR"
+      - name: Badge endpoint (shields.io JSON, published with the docs)
+        # Colour follows the floor, so badge and gate can never disagree.
+        run: |
+          total=$(coverage report --format=total)
+          if python -c "import sys; sys.exit(0 if float('$total') >= float('$COVERAGE_FLOOR') else 1)"; then color=brightgreen; else color=red; fi
+          mkdir -p badges
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' "$total" "$color" > badges/coverage.json
+          cat badges/coverage.json
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage-badge
+          path: badges/coverage.json
+          retention-days: 7
+      - name: Patch gate (PRs only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          diff-cover coverage.xml --compare-branch="origin/${{ github.base_ref }}" --fail-under="$PATCH_COVERAGE_FLOOR"
+
+  docs:
+    needs: [wheel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+      - run: python -m pip install "$(ls dist/*.whl)[docs]"
+      - run: |
+          chmod +x build_docs.sh
+          ./build_docs.sh
+      - name: Keep the site for the Pages deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        uses: actions/upload-artifact@v6
+        with:
+          name: docs-html
+          path: docs/_build/html
+          retention-days: 1
+
+  ctest:
+    needs: [lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ccache
+      - uses: actions/cache@v5
+        with:
+          path: .ccache
+          # Own key: tests ON shares few objects with the wheel build.
+          key: ccache-ctest-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-ctest-${{ runner.os }}-
+      - name: Build and run the C++ suite (shipping pure-Eigen CSD)
+        run: |
+          ccache --zero-stats
+          cmake -S cpp/libqarpx -B cpp/libqarpx/build-ci -DQARP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build cpp/libqarpx/build-ci --target qarpx_tests --parallel "$(nproc)"
+          ctest --test-dir cpp/libqarpx/build-ci --output-on-failure -j "$(nproc)"
+          ccache --show-stats
+
+  pages:
+    # Only develop publishes, and only once every test job is green.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    needs: [docs, mypy, pytest, coverage, ctest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: docs-html
+          path: site
+      - uses: actions/download-artifact@v7
+        with:
+          name: coverage-badge
+          path: site/badges
+      - run: touch site/.nojekyll
+      # Inlined upload-pages-artifact: the composite still wraps a Node 20
+      # upload-artifact.  Same tar flags, same artifact name deploy-pages expects.
+      - name: Archive the site
+        run: tar --dereference --hard-dereference --directory site -cf "$RUNNER_TEMP/artifact.tar" --exclude=.git --exclude=.github .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+      - id: deployment
+        uses: actions/deploy-pages@v5

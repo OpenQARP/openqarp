@@ -1,0 +1,482 @@
+/* Furo dressed as openqarp.github.io: same tokens, same type, one ground per
+   theme, cobalt for links, amber only where attention is demanded.
+   Tokens are copied from the landing page's styles.css; keep the two in sync. */
+
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Source+Sans+3:wght@400;500;600&family=Source+Code+Pro:wght@400;500&display=swap");
+
+/* light-dark() resolves through `color-scheme`, which Furo does not set on
+   <body>; the three rules below mirror Furo's own theme selectors. */
+body { color-scheme: light; }
+@media not print {
+  body[data-theme="dark"] { color-scheme: dark; }
+  @media (prefers-color-scheme: dark) {
+    body:not([data-theme="light"]) { color-scheme: dark; }
+  }
+}
+
+/* Furo declares its roles under body[data-theme=...] with attribute
+   specificity; the same selector is needed for these to win in dark. */
+body, body[data-theme] {
+  --surface:      light-dark(#F3F4F8, #201B34);
+  --raised:       light-dark(#FFFFFF, #2A2441);
+  --ink:          light-dark(#0B0E1C, #EDEBF8);
+  --ink-2:        light-dark(#3A4059, #C6C1DC);
+  --mist:         light-dark(#666C85, #9C96BE);
+  --line:         light-dark(rgba(11, 14, 28, 0.10), rgba(233, 231, 246, 0.15));
+  --line-strong:  light-dark(rgba(11, 14, 28, 0.25), rgba(233, 231, 246, 0.32));
+  --code-bg:      light-dark(rgba(11, 14, 28, 0.06), rgba(233, 231, 246, 0.12));
+  --shadow:       light-dark(rgba(11, 14, 28, 0.25), rgba(0, 0, 0, 0.5));
+
+  --contrast:      light-dark(#201B34, #16122A);
+  --contrast-ink:  #EDEBF8;
+  --contrast-line: light-dark(rgba(233, 231, 246, 0.15), rgba(233, 231, 246, 0.16));
+
+  --cobalt:      light-dark(#2B4DFF, #8FA2FF);
+  --cobalt-2:    light-dark(#1A34D6, #A9B6FF);
+  --amber:       light-dark(#F0A500, #F5B733);
+  --amber-soft:  light-dark(rgba(240, 165, 0, 0.14), rgba(245, 183, 51, 0.16));
+  --syn-num:     light-dark(#8a4b00, #E0A76A);
+  --syn-str:     light-dark(#1f6b3a, #7FC79B);
+  --syn-key:     var(--cobalt-2);
+
+  --sans: "Geist", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  /* Body copy is Source Sans 3, not Geist: humanist forms and a larger x-height
+     read better over long pages; Geist stays on headings and the wordmark. */
+  --text: "Source Sans 3", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  /* Source Code Pro, not the site's Geist Mono: narrower and plainer for long listings. */
+  --mono: "Source Code Pro", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ---- Furo roles ------------------------------------------------------ */
+  --font-stack: var(--text);
+  --font-stack--headings: var(--sans);
+  --font-stack--monospace: var(--mono);
+  --font-size--normal: 112.5%;
+
+  --color-brand-primary: var(--cobalt);
+  --color-brand-content: var(--cobalt);
+  --color-brand-visited: var(--cobalt-2);
+
+  --color-background-primary: var(--surface);
+  --color-background-secondary: var(--surface);
+  --color-background-hover: var(--code-bg);
+  --color-background-hover--transparent: transparent;
+  --color-background-border: var(--line);
+  --color-background-item: var(--line-strong);
+  --color-background-muted: var(--line);
+
+  --color-foreground-primary: var(--ink);
+  --color-foreground-secondary: var(--ink-2);
+  --color-foreground-muted: var(--mist);
+  --color-foreground-border: var(--line-strong);
+
+  --color-link: var(--cobalt);
+  --color-link--hover: var(--cobalt-2);
+  --color-link--visited: var(--cobalt);
+  --color-link--visited--hover: var(--cobalt-2);
+  --color-link-underline: transparent;
+  --color-link-underline--hover: var(--cobalt);
+  --color-link-underline--visited: transparent;
+  --color-link-underline--visited--hover: var(--cobalt-2);
+
+  --color-inline-code-background: var(--code-bg);
+  --color-highlighted-background: var(--amber-soft);
+  --color-highlight-on-target: var(--amber-soft);
+  --color-problematic: var(--amber);
+
+  --color-sidebar-background: var(--surface);
+  --color-sidebar-background-border: var(--line);
+  --color-sidebar-brand-text: var(--ink);
+  --color-sidebar-caption-text: var(--mist);
+  --color-sidebar-link-text: var(--ink-2);
+  --color-sidebar-link-text--top-level: var(--ink);
+  --color-sidebar-item-background--current: var(--code-bg);
+  --color-sidebar-item-background--hover: var(--code-bg);
+  --color-sidebar-item-expander-background: transparent;
+  --color-sidebar-item-expander-background--hover: var(--code-bg);
+  --color-sidebar-search-background: var(--raised);
+  --color-sidebar-search-background--focus: var(--raised);
+  --color-sidebar-search-border: var(--line);
+  --color-sidebar-search-foreground: var(--ink);
+  --color-sidebar-search-icon: var(--mist);
+  --color-sidebar-search-text: var(--mist);
+
+  --color-toc-background: var(--surface);
+  --color-toc-title-text: var(--mist);
+  --color-toc-item-text: var(--ink-2);
+  --color-toc-item-text--hover: var(--ink);
+  --color-toc-item-text--active: var(--cobalt);
+
+  --color-header-background: var(--surface);
+  --color-header-border: var(--line);
+  --color-header-text: var(--ink);
+
+  --color-announcement-background: var(--contrast);
+  --color-announcement-text: var(--contrast-ink);
+
+  --color-content-foreground: var(--ink);
+  --color-content-background: transparent;
+  --color-card-background: var(--raised);
+  --color-card-border: var(--line);
+  --color-card-marginals-background: var(--code-bg);
+
+  --color-table-border: var(--line);
+  --color-table-header-background: transparent;
+
+  --color-api-background: var(--code-bg);
+  --color-api-background-hover: var(--code-bg);
+  --color-api-overall: var(--ink-2);
+  --color-api-name: var(--ink);
+  --color-api-pre-name: var(--mist);
+  --color-api-paren: var(--mist);
+  --color-api-keyword: var(--mist);
+
+  --color-guilabel-background: var(--code-bg);
+  --color-guilabel-border: var(--line);
+  --color-guilabel-text: var(--ink);
+  --color-topic-title: var(--ink);
+  --color-topic-title-background: var(--code-bg);
+
+  /* Admonitions stay on the ground: only the attention family turns amber. */
+  --color-admonition-background: var(--raised);
+  --color-admonition-title: var(--ink-2);
+  --color-admonition-title-background: var(--code-bg);
+  --color-admonition-title--note: var(--ink-2);
+  --color-admonition-title-background--note: var(--code-bg);
+  --color-admonition-title--tip: var(--ink-2);
+  --color-admonition-title-background--tip: var(--code-bg);
+  --color-admonition-title--hint: var(--ink-2);
+  --color-admonition-title-background--hint: var(--code-bg);
+  --color-admonition-title--important: var(--ink-2);
+  --color-admonition-title-background--important: var(--code-bg);
+  --color-admonition-title--seealso: var(--ink-2);
+  --color-admonition-title-background--seealso: var(--code-bg);
+  --color-admonition-title--admonition-todo: var(--ink-2);
+  --color-admonition-title-background--admonition-todo: var(--code-bg);
+  --color-admonition-title--warning: var(--amber);
+  --color-admonition-title-background--warning: var(--amber-soft);
+  --color-admonition-title--caution: var(--amber);
+  --color-admonition-title-background--caution: var(--amber-soft);
+  --color-admonition-title--attention: var(--amber);
+  --color-admonition-title-background--attention: var(--amber-soft);
+  --color-admonition-title--danger: var(--amber);
+  --color-admonition-title-background--danger: var(--amber-soft);
+  --color-admonition-title--error: var(--amber);
+  --color-admonition-title-background--error: var(--amber-soft);
+}
+
+/* Furo emits the pygments code background inline on <body>, after this file;
+   `html body` outranks it. */
+html body, html body[data-theme] {
+  --color-code-background: var(--raised);
+  --color-code-foreground: var(--ink);
+}
+
+/* --------------------------------------------------------------------------
+   type
+   -------------------------------------------------------------------------- */
+
+body {
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 500;
+  line-height: 1.12;
+  text-wrap: balance;
+}
+h1 { font-size: 2.6em; letter-spacing: -0.032em; }
+h2 { font-size: 1.85em; letter-spacing: -0.028em; margin-top: 2.2rem; }
+h3 { font-size: 1.35em; letter-spacing: -0.02em; }
+h4 { font-size: 1.1em; letter-spacing: -0.01em; }
+
+article p, article li { text-wrap: pretty; }
+article strong { font-weight: 600; }
+
+a { text-underline-offset: 3px; }
+article a:not(.headerlink):not(.image-reference) { font-weight: 500; }
+
+code.literal {
+  padding: 0.05em 0.35em;
+  border-radius: 5px;
+  font-size: 0.84em;
+}
+
+/* --------------------------------------------------------------------------
+   sidebar and page chrome
+   -------------------------------------------------------------------------- */
+
+.sidebar-brand { padding-top: 1.35rem; padding-bottom: 0.4rem; }
+.sidebar-brand-text {
+  font-family: var(--sans);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.mobile-header .brand { font-family: var(--sans); font-weight: 600; letter-spacing: -0.01em; }
+
+.sidebar-site-links {
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  padding: 0 var(--sidebar-item-spacing-horizontal) 0.6rem;
+  font-size: var(--font-size--small--2);
+}
+.sidebar-site-links a {
+  color: var(--mist);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.sidebar-site-links a:hover { color: var(--cobalt); }
+
+.sidebar-search-container {
+  margin: var(--sidebar-search-space-above) var(--sidebar-item-spacing-horizontal) 0;
+  border: 1px solid var(--color-sidebar-search-border);
+  border-radius: 999px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.sidebar-search-container:focus-within { border-color: var(--cobalt); }
+.sidebar-search {
+  border: 0;
+  padding-left: calc(var(--sidebar-search-input-spacing-horizontal) + var(--sidebar-search-icon-size) + 0.1rem);
+}
+.sidebar-search-container::before { left: var(--sidebar-search-input-spacing-horizontal); }
+
+.sidebar-tree .caption {
+  font-size: var(--font-size--small--3);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sidebar-tree .reference { border-radius: 8px; }
+.sidebar-tree .current-page > .reference { font-weight: 500; }
+.sidebar-tree .toctree-l1 > .reference { font-weight: 500; }
+.sidebar-tree .toctree-l1.current-page > .reference,
+.sidebar-tree .toctree-l1 .current-page > .reference { color: var(--cobalt); }
+
+.toc-title {
+  font-size: var(--font-size--small--3);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.toc-tree .reference { transition: color 0.2s; }
+
+.theme-toggle svg, .content-icon-container .icon svg { opacity: 0.7; transition: opacity 0.2s; }
+.theme-toggle:hover svg { opacity: 1; }
+
+.back-to-top {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px -12px var(--shadow);
+  font-weight: 500;
+}
+
+/* related-page cards and footer, hairlines only */
+.related-pages a { border-radius: 12px; }
+.related-pages a .title { font-weight: 500; }
+.bottom-of-page {
+  border-top: 1px solid var(--line);
+  color: var(--mist);
+  font-size: var(--font-size--small--2);
+}
+.bottom-of-page a { color: var(--mist); text-decoration: underline; }
+.bottom-of-page a:hover { color: var(--cobalt); }
+
+/* --------------------------------------------------------------------------
+   code blocks: the landing page's code cell
+   -------------------------------------------------------------------------- */
+
+/* The id outranks Furo's per-theme pygments background rule. */
+#furo-main-content .highlight {
+  background: var(--color-code-background);
+  border-radius: 14px;
+  box-shadow: 0 1px 0 var(--line), 0 24px 60px -30px var(--shadow);
+}
+article .highlight pre {
+  padding: 1.1rem 1.4rem;
+  line-height: 1.6;
+  font-size: 0.85em;
+}
+article div[class*="highlight-"] { margin-block: 1.2rem; }
+.code-block-caption {
+  background: var(--code-bg);
+  border-radius: 14px 14px 0 0;
+  color: var(--mist);
+  font-size: var(--font-size--small--2);
+  font-weight: 500;
+}
+
+/* Pygments is themed per body[data-theme]; the id outranks those rules so one
+   set of token colours serves both themes through light-dark(). */
+#furo-main-content .highlight .k, #furo-main-content .highlight .kn,
+#furo-main-content .highlight .kd, #furo-main-content .highlight .kc,
+#furo-main-content .highlight .kp, #furo-main-content .highlight .kr,
+#furo-main-content .highlight .kt, #furo-main-content .highlight .ow,
+#furo-main-content .highlight .nd { color: var(--syn-key); font-weight: 500; }
+#furo-main-content .highlight .m, #furo-main-content .highlight .mi,
+#furo-main-content .highlight .mf, #furo-main-content .highlight .mh,
+#furo-main-content .highlight .mo, #furo-main-content .highlight .mb,
+#furo-main-content .highlight .il { color: var(--syn-num); }
+#furo-main-content .highlight .s, #furo-main-content .highlight .s1,
+#furo-main-content .highlight .s2, #furo-main-content .highlight .sa,
+#furo-main-content .highlight .sb, #furo-main-content .highlight .sc,
+#furo-main-content .highlight .sd, #furo-main-content .highlight .se,
+#furo-main-content .highlight .sh, #furo-main-content .highlight .si,
+#furo-main-content .highlight .sx, #furo-main-content .highlight .sr,
+#furo-main-content .highlight .ss, #furo-main-content .highlight .dl { color: var(--syn-str); }
+#furo-main-content .highlight .c, #furo-main-content .highlight .c1,
+#furo-main-content .highlight .cm, #furo-main-content .highlight .cp,
+#furo-main-content .highlight .cs, #furo-main-content .highlight .ch { color: var(--mist); font-style: italic; }
+#furo-main-content .highlight .n, #furo-main-content .highlight .nn,
+#furo-main-content .highlight .nc, #furo-main-content .highlight .nf,
+#furo-main-content .highlight .fm, #furo-main-content .highlight .nv,
+#furo-main-content .highlight .vm { color: var(--ink); }
+#furo-main-content .highlight .nc, #furo-main-content .highlight .nf { font-weight: 500; }
+#furo-main-content .highlight .nb, #furo-main-content .highlight .bp,
+#furo-main-content .highlight .o, #furo-main-content .highlight .p { color: var(--ink-2); }
+#furo-main-content .highlight .gp { color: var(--cobalt); }
+#furo-main-content .highlight .go { color: var(--mist); }
+#furo-main-content .highlight .err { background: none; color: var(--amber); }
+
+/* sphinx-copybutton: Furo already makes it icon-only; only the colours change */
+.highlight button.copybtn { color: var(--mist); }
+.highlight:hover button.copybtn { color: var(--mist); }
+.highlight button.copybtn:hover { color: var(--cobalt); }
+.highlight button.copybtn.success { color: var(--cobalt); }
+
+/* --------------------------------------------------------------------------
+   admonitions, tables, API signatures
+   -------------------------------------------------------------------------- */
+
+.admonition, .topic {
+  border-radius: 12px;
+  border-left-width: 2px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.admonition-title {
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  font-size: var(--font-size--small--2);
+}
+
+table.docutils {
+  border-radius: 0;
+  box-shadow: none;
+  font-size: var(--font-size--small);
+}
+table.docutils th, table.docutils td {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 1rem 0.6rem 0;
+  vertical-align: top;
+  white-space: normal;
+}
+table.docutils th {
+  background: transparent;
+  color: var(--ink);
+  font-weight: 500;
+  text-align: left;
+}
+table.docutils td code, table.docutils th code { word-break: break-word; }
+
+dl[class]:not(.simple) > dt {
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+dl.field-list > dt { font-weight: 500; }
+.sig-name.descname { font-weight: 500; }
+
+/* --------------------------------------------------------------------------
+   landing page
+   -------------------------------------------------------------------------- */
+
+.qarp-lede {
+  color: var(--ink-2);
+  font-size: 1.22em;
+  line-height: 1.5;
+  max-width: 44ch;
+  margin-block: 0.4rem 1.4rem;
+  text-wrap: pretty;
+}
+.qarp-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px;
+  margin-bottom: 2.6rem;
+}
+.qarp-actions div[class*="highlight-"], .qarp-actions p { margin: 0; }
+#furo-main-content .qarp-actions .highlight {
+  border-radius: 999px;
+  box-shadow: none;
+  background: var(--ink);
+}
+.qarp-actions .highlight pre {
+  padding: 0.85rem 1.6rem 0.85rem 1.4rem;
+  font-weight: 500;
+  color: var(--raised);
+}
+.qarp-actions .highlight pre::before { content: "$ "; color: var(--cobalt); }
+.qarp-actions .highlight button.copybtn { top: 50%; transform: translateY(-50%); background: transparent; color: var(--raised); }
+.qarp-actions a.reference {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 500; color: var(--cobalt); text-decoration: none;
+}
+.qarp-actions a.reference::after {
+  content: ""; width: 8px; height: 8px;
+  border-right: 1.6px solid currentColor; border-top: 1.6px solid currentColor;
+  transform: rotate(45deg); transition: transform 0.3s var(--ease);
+}
+.qarp-actions a.reference:hover::after { transform: rotate(45deg) translate(3px, -3px); }
+
+/* --------------------------------------------------------------------------
+   figures: inline SVG / HTML so they take the page's tokens in both themes
+   -------------------------------------------------------------------------- */
+
+.qarp-figure { margin: 1.6rem 0 2rem; }
+.qarp-circuit { display: block; width: min(100%, 640px); height: auto; margin-inline: auto; color: var(--ink); }
+.qarp-circuit .wires line { stroke: var(--line-strong); stroke-width: 1.5; }
+.qarp-circuit .qubits text { font: 500 12px var(--mono); fill: var(--mist); text-anchor: end; }
+.qarp-circuit .frame { fill: none; stroke: var(--mist); stroke-opacity: 0.7; stroke-width: 1.5; stroke-dasharray: 6 6; }
+.qarp-circuit .blk rect { fill: var(--raised); stroke: var(--line-strong); stroke-width: 1.5; }
+.qarp-circuit .blk text { font: 500 15px var(--sans); fill: var(--ink); text-anchor: middle; dominant-baseline: middle; letter-spacing: -0.01em; }
+.qarp-circuit .frame-label { font: 500 13px var(--mono); fill: var(--mist); text-anchor: middle; }
+
+.qarp-flow { display: flex; flex-direction: column; align-items: stretch; max-width: 640px; margin-inline: auto; }
+.qarp-flow-layer {
+  background: var(--raised);
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px var(--line);
+  padding: 1rem 1.3rem 1.1rem;
+}
+.qarp-flow-layer h4 {
+  margin: 0 0 0.8rem;
+  font: 500 var(--font-size--small--3) var(--sans);
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--mist);
+}
+.qarp-flow-layer code { font-size: 0.84em; }
+.qarp-flow-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.qarp-flow-chain em { font-style: normal; color: var(--ink-2); }
+.qarp-flow-chain i {
+  width: 7px; height: 7px; margin-inline: 2px;
+  border-right: 1.5px solid var(--mist); border-top: 1.5px solid var(--mist);
+  transform: rotate(45deg);
+}
+.qarp-flow-note { margin: 0.8rem 0 0; color: var(--ink-2); font-size: var(--font-size--small); }
+.qarp-flow-row { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); gap: 4px 1rem; align-items: start; }
+.qarp-flow-row + .qarp-flow-row { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
+.qarp-flow-row > code { justify-self: start; }
+.qarp-flow-row ul { margin: 0; padding-left: 1.1em; color: var(--ink-2); font-size: var(--font-size--small); }
+.qarp-flow-row li { margin: 0; }
+.qarp-flow-arrow { align-self: center; width: 1.5px; height: 28px; background: var(--mist); position: relative; }
+.qarp-flow-arrow::after {
+  content: ""; position: absolute; left: 50%; bottom: 1px;
+  width: 8px; height: 8px; border-right: 1.5px solid var(--mist); border-bottom: 1.5px solid var(--mist);
+  transform: translateX(-50%) rotate(45deg);
+}
+@media (max-width: 560px) { .qarp-flow-row { grid-template-columns: 1fr; } }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

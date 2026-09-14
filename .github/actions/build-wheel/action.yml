@@ -1,0 +1,35 @@
+name: Build the qarpx wheel
+description: >-
+  The pipeline's only qarpx compile.  Every Python job installs this wheel
+  instead of rebuilding.  ccache is keyed per commit with a prefix fallback, so
+  a C++-free change restores the newest cache and collapses to packaging.
+runs:
+  using: composite
+  steps:
+    - name: System build deps
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ccache
+    - name: Restore ccache
+      uses: actions/cache@v5
+      with:
+        path: .ccache
+        key: ccache-wheel-${{ runner.os }}-${{ github.sha }}
+        restore-keys: ccache-wheel-${{ runner.os }}-
+    - name: Build wheel
+      shell: bash
+      env:
+        CCACHE_DIR: ${{ github.workspace }}/.ccache
+        CCACHE_MAXSIZE: 1G
+      run: |
+        ccache --zero-stats
+        python -m pip wheel . --no-deps --wheel-dir dist \
+          --config-settings=cmake.define.CMAKE_C_COMPILER_LAUNCHER=ccache \
+          --config-settings=cmake.define.CMAKE_CXX_COMPILER_LAUNCHER=ccache
+        # 0% on a C++-free change means the cache is not surviving between runs.
+        ccache --show-stats
+    - name: Upload wheel
+      uses: actions/upload-artifact@v6
+      with:
+        name: wheel
+        path: dist/*.whl
+        retention-days: 1

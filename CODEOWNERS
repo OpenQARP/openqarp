@@ -1,0 +1,133 @@
+# Review routing.  GitHub applies the LAST matching rule, so this file runs
+# general -> specific.  A matching rule REPLACES the fallback rather than
+# adding to it, which is why the maintainer is named explicitly wherever they
+# still carry the file.
+#
+# Ownership follows pre-release history.
+
+* @mekise
+
+# --- compiled backend ------------------------------------------------------
+/cpp/libqarpx/src/operators/             @josh-fujitsu
+/cpp/libqarpx/include/qarpx/operators/   @josh-fujitsu
+/cpp/libqarpx/src/emit/                  @vicentesolovievfujitsu
+/cpp/libqarpx/src/absorb/                @vicentesolovievfujitsu
+/cpp/libqarpx/src/synthesis/pauli_exponential.cpp @josh-fujitsu
+/cpp/libqarpx/python/bindings_operators.cpp       @josh-fujitsu
+/cpp/libqarpx/src/block/controlled_block.cpp      @mekise @josh-fujitsu
+/cpp/libqarpx/tests/cpp/test_synthesis_pauli_exp.cpp                @josh-fujitsu
+/cpp/libqarpx/tests/cpp/test_synthesis_pauli_exp_clifford.cpp       @josh-fujitsu
+/cpp/libqarpx/tests/cpp/test_synthesis_pauli_exp_diagonal_block.cpp @josh-fujitsu
+/cpp/libqarpx/tests/cpp/test_blocks_mcm.cpp                         @josh-fujitsu
+/cpp/libqarpx/tests/cpp/test_trajectory.cpp                         @josh-fujitsu
+/cpp/libqarpx/tests/cpp/test_operators_qubit_operator.cpp           @josh-fujitsu
+/cpp/libqarpx/tests/cpp/test_closure_and_native.cpp                 @josh-fujitsu
+
+# --- operators -------------------------------------------------------------
+/qarp/operators/                         @mekise @josh-fujitsu
+/qarp/operators/_vumpo.py                @brian-fujitsu
+/qarp/operators/_vumpo_network.py        @brian-fujitsu
+/qarp/operators/_linear_combination_unitaries.py  @amrFRE
+/qarp/operators/_qdrift.py               @amrFRE
+/qarp/operators/models.py                @josh-fujitsu @amrFRE
+
+# --- subsystems ------------------------------------------------------------
+/qarp/optimizers/                        @brian-fujitsu
+/qarp/cutting/                           @vicentesolovievfujitsu
+/qarp/absorb/                            @vicentesolovievfujitsu
+/qarp/emit/                              @vicentesolovievfujitsu
+/qarp/devices/                           @vicentesolovievfujitsu
+/qarp/utils/                             @vicentesolovievfujitsu @amrFRE
+/qarp/engines/_engine.py                 @mekise @vicentesolovievfujitsu
+/qarp/engines/_gradients.py              @josh-fujitsu
+
+# --- algorithms ------------------------------------------------------------
+/qarp/algorithms/_primitives/shadows/    @brian-fujitsu
+/qarp/algorithms/_primitives/grouped_transition_hadamard_test.py  @amrFRE
+/qarp/algorithms/_primitives/pauli_averaging.py   @brian-fujitsu
+/qarp/algorithms/_composite/pce.py       @vicentesolovievfujitsu @amrFRE
+/qarp/algorithms/_composite/mmqcels.py   @amrFRE @josh-fujitsu
+/qarp/algorithms/_composite/shor.py      @amrFRE
+/qarp/algorithms/_composite/projected_vqe.py      @amrFRE
+/qarp/algorithms/_composite/qite.py      @fetherolfj
+/qarp/algorithms/_composite/qmegs.py     @mekise @josh-fujitsu
+/qarp/algorithms/_composite/qse.py       @mekise @josh-fujitsu
+/qarp/algorithms/_composite/qpe.py       @mekise @josh-fujitsu
+/qarp/algorithms/_composite/dos_qpe.py   @mekise @josh-fujitsu
+/qarp/algorithms/_composite/montecarlo.py         @PeppeQarp @amrFRE
+/qarp/algorithms/_composite/amplitude_amplification.py  @amrFRE
+/qarp/algorithms/_composite/amplitude_estimation.py     @amrFRE
+/qarp/algorithms/_composite/grover.py    @amrFRE
+/qarp/algorithms/_composite/vff.py       @AnniePaine
+/qarp/algorithms/_composite/qaoa.py      @vicentesolovievfujitsu
+/qarp/algorithms/_composite/vqa.py       @vicentesolovievfujitsu
+/qarp/algorithms/_composite/vqe.py       @amrFRE
+/qarp/algorithms/_composite/vqd.py       @amrFRE
+/qarp/algorithms/_composite/ssvqe.py     @amrFRE
+/qarp/algorithms/_composite/adapt_vqe.py @amrFRE
+/qarp/algorithms/_composite/adapt_vqd.py @amrFRE
+
+# --- blocks ----------------------------------------------------------------
+/qarp/blocks/_block.py                            @mekise @josh-fujitsu
+/qarp/blocks/_primitives/projector_blocks.py      @amrFRE
+/qarp/blocks/_primitives/select_block.py          @amrFRE
+/qarp/blocks/_primitives/interferometric_state_block.py  @amrFRE
+/qarp/blocks/_primitives/block_encoding_block.py  @amrFRE @vicentesolovievfujitsu
+/qarp/blocks/_primitives/qsvt_block.py            @amrFRE @vicentesolovievfujitsu
+/qarp/blocks/_primitives/trotter_block.py         @mekise @josh-fujitsu
+
+# --- tests -------------------------------------------
+/tests/test_operators/                   @josh-fujitsu @mekise
+/tests/test_optimizers/                  @brian-fujitsu
+/tests/test_integrations/                @josh-fujitsu
+/tests/test_cutting/                     @vicentesolovievfujitsu
+/tests/test_absorb/                      @vicentesolovievfujitsu
+/tests/test_emit/                        @vicentesolovievfujitsu
+/tests/test_devices/                     @vicentesolovievfujitsu
+/tests/test_operators/test_vumpo.py      @brian-fujitsu
+/tests/test_operators/test_mappings.py   @amrFRE
+/tests/test_engines/test_gradient_registry.py     @josh-fujitsu
+/tests/test_engines/test_gradient_shift_rules.py  @josh-fujitsu
+/tests/test_algorithms/test_composite/test_mmqcels.py  @amrFRE
+/tests/test_algorithms/test_composite/test_shor.py     @amrFRE
+/tests/test_algorithms/test_composite/test_qite.py     @fetherolfj
+/tests/test_algorithms/test_composite/test_amplitude_amplification.py  @amrFRE
+/tests/test_algorithms/test_composite/test_amplitude_estimation.py     @amrFRE
+/tests/test_algorithms/test_composite/test_grover.py   @amrFRE
+/tests/test_algorithms/test_composite/test_vff.py      @AnniePaine
+/tests/test_algorithms/test_composite/test_qaoa.py     @vicentesolovievfujitsu
+/tests/test_algorithms/test_composite/test_vqa.py      @vicentesolovievfujitsu
+/tests/test_algorithms/test_composite/test_vqe.py      @amrFRE
+/tests/test_algorithms/test_composite/test_vqd.py      @amrFRE
+/tests/test_algorithms/test_composite/test_vqd_analytic.py    @amrFRE
+/tests/test_algorithms/test_composite/test_ssvqe.py    @amrFRE
+/tests/test_algorithms/test_composite/test_ssvqe_analytic.py  @amrFRE
+/tests/test_algorithms/test_composite/test_adapt_vqe.py       @amrFRE
+/tests/test_algorithms/test_composite/test_adapt_vqd.py       @amrFRE
+/tests/test_algorithms/test_composite/test_adapt_unit.py      @amrFRE
+/tests/test_algorithms/test_composite/test_projected_vqe.py   @amrFRE
+/tests/test_algorithms/test_composite/test_pce.py      @vicentesolovievfujitsu @amrFRE
+/tests/test_algorithms/test_composite/test_qmegs.py    @mekise @josh-fujitsu
+/tests/test_algorithms/test_composite/test_qse.py      @mekise @josh-fujitsu
+/tests/test_algorithms/test_composite/test_montecarlo.py      @PeppeQarp @amrFRE
+/tests/test_algorithms/test_composite/test_montecarlo_unit.py @PeppeQarp @amrFRE
+/tests/test_algorithms/test_primitives/test_cutting_primitive.py  @vicentesolovievfujitsu
+/tests/test_blocks/test_primitives/test_projector_blocks.py       @amrFRE
+/tests/test_blocks/test_primitives/test_amplitude_amplification_block.py  @amrFRE
+
+# --- notebooks ---------------------------------
+/examples/optimizers/                    @brian-fujitsu @vicentesolovievfujitsu
+/examples/emit_absorb/                   @vicentesolovievfujitsu
+/examples/use_cases/chemistry_ethylene_torsion.ipynb      @fetherolfj
+/examples/use_cases/biology_dna_search.ipynb      @amrFRE
+/examples/use_cases/vision_image_classification.ipynb  @brian-fujitsu
+/examples/use_cases/finance_portfolio_diversification.ipynb     @vicentesolovievfujitsu
+/examples/algorithms/composite/mwe_montecarlo.ipynb             @PeppeQarp @amrFRE
+/examples/algorithms/composite/mwe_montecarlo_vumpo.ipynb        @brian-fujitsu
+/examples/algorithms/composite/mwe_qaoa_max_cut.ipynb            @vicentesolovievfujitsu
+/examples/algorithms/composite/mwe_pce_algo.ipynb                @vicentesolovievfujitsu
+/examples/algorithms/composite/mwe_cpce_algo.ipynb               @vicentesolovievfujitsu
+/examples/algorithms/composite/mwe_mmqcels.ipynb                 @amrFRE
+/examples/algorithms/composite/mwe_vff.ipynb                     @AnniePaine
+/examples/algorithms/composite/mwe_qmegs.ipynb                   @mekise @josh-fujitsu
+/examples/algorithms/primitives/mwe_classical_shadows.ipynb      @brian-fujitsu

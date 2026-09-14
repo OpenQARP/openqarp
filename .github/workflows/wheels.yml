@@ -1,0 +1,96 @@
+name: wheels
+
+# Twenty wheels per run is too heavy for every push: ci.yml compiles on Linux
+# for each change, so the wheel matrix runs on release tags, weekly, and on
+# demand.  One wheel per job: cibuildwheel would otherwise build the three
+# Python versions in sequence, tripling the wall time of every job.
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_wheels:
+    name: wheels · ${{ matrix.os }} · ${{ matrix.py }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest → manylinux_2_28 x86_64; ubuntu-24.04-arm → manylinux_2_28
+        # aarch64 (native runner, no emulation); macos-15 → arm64; macos-15-intel
+        # → x86_64; windows-latest → AMD64 (MSVC, serial kernels).
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-latest]
+        py: [cp311, cp312, cp313, cp314]
+    env:
+      CIBW_BUILD: ${{ matrix.py }}-*   # narrows pyproject's build list to this job's version
+      # macOS/Windows builds run on the host, so they see this dir; the Linux
+      # build runs inside the manylinux container and stays cold.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v5
+        if: runner.os != 'Linux'
+        with:
+          path: .ccache
+          # Core-library objects are identical across Python versions, so any
+          # job of the same OS restores the newest cache for that OS.
+          key: ccache-wheels-${{ matrix.os }}-${{ github.sha }}-${{ matrix.py }}
+          restore-keys: ccache-wheels-${{ matrix.os }}-
+      - name: Build & test wheels
+        uses: pypa/cibuildwheel@v4.1.0   # config lives in [tool.cibuildwheel]
+      - name: ccache hit rate
+        if: runner.os != 'Linux'
+        run: ccache --show-stats
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ matrix.py }}
+          path: ./wheelhouse/*.whl
+          # Twenty-odd wheels per run fill the org's 500 MB Actions storage in
+          # days at the 90-day default; publish consumes them inside the run.
+          retention-days: 7
+
+  build_sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build sdist
+        run: pipx run build --sdist
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  publish:
+    name: Publish to PyPI (trusted publisher)
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    # The trusted publisher on pypi.org names this repo, this file and the
+    # `pypi` environment; the first upload creates the project.  A v* tag
+    # publishes; the weekly and dispatch runs build only.  The `pypi`
+    # environment's required reviewer is the manual gate before every upload.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/openqarp
+    permissions:
+      id-token: write        # OIDC trusted publishing — no stored API token
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+      - name: Publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # For a dry run first, register a Trusted Publisher on TestPyPI and add:
+        #   with:
+        #     repository-url: https://test.pypi.org/legacy/

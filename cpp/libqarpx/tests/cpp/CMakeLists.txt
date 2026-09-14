@@ -1,0 +1,57 @@
+add_executable(qarpx_tests
+    test_core.cpp
+    test_architecture.cpp
+    test_noise_model.cpp
+    test_router.cpp
+    test_sabre.cpp
+    test_device.cpp
+    test_transpiler.cpp
+    test_decomposition_table.cpp
+    test_identities.cpp
+    test_qir_emitter.cpp
+    test_closure_and_native.cpp
+    test_gate_unitaries.cpp
+    test_controlled_block_unitaries.cpp
+    test_dagger_round_trip.cpp
+    test_fusion_consistency.cpp
+    test_simulation_fusion.cpp
+    test_qasm3_emitter.cpp
+    test_qasm2_emitter.cpp
+    test_trajectory.cpp
+    test_blocks_mcm.cpp
+    test_cbit_register_width.cpp
+    test_gate_counts.cpp
+    test_functional_mcm.cpp
+    test_initial_state.cpp
+    test_expectation_kernel.cpp
+    test_gradient_adjoint.cpp
+    test_synthesis_state_preparation.cpp
+    test_synthesis_diagonal.cpp
+    test_synthesis_unitary.cpp
+    test_canonical.cpp
+    test_circuit_dag.cpp
+    test_dag_commutation.cpp
+    test_dag_passes.cpp
+    test_transpiler_topology_cache.cpp
+    test_pass_relabel_equivariance.cpp
+    test_pass_reference_equivalence.cpp
+    test_pauli_encoding.cpp
+    test_synthesis_pauli_exp_clifford.cpp
+    test_synthesis_pauli_exp_diagonal_block.cpp
+    test_synthesis_pauli_exp.cpp
+    test_operators_packed_pauli.cpp
+    test_operators_term_map.cpp
+    test_operators_qubit_operator.cpp
+    test_operators_fermion_operator.cpp
+    test_operators_transforms.cpp
+    test_operators_sparse.cpp
+    test_operators_symbolic.cpp
+)
+
+target_link_libraries(qarpx_tests PRIVATE
+    qarpx
+    GTest::gtest_main
+)
+
+include(GoogleTest)
+gtest_discover_tests(qarpx_tests)

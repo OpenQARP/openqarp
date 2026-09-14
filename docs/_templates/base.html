@@ -1,0 +1,18 @@
+{#- The landing page (same origin) stores its theme under "qarp-theme"; honour
+    it when Furo has no choice of its own yet.  Runs before first paint. -#}
+{% extends "!base.html" %}
+{% block body %}
+    <script>
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem("theme");
+          if (!theme) {
+            var site = localStorage.getItem("qarp-theme");
+            if (site === "dark" || site === "light") theme = site;
+          }
+        } catch (e) { /* private mode */ }
+        document.body.dataset.theme = theme || "auto";
+      })();
+    </script>
+{% endblock %}

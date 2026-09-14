@@ -1,0 +1,68 @@
+# Reference: https://github.com/github/gitignore/blob/main/Python.gitignore
+
+# Personal files
+private/
+
+# Training data folder
+qarp_training_data/
+
+# macOS Finder metadata
+.DS_Store
+
+# Hypothesis data
+.hypothesis/
+
+# Byte-compiled/optimised files
+**/__pycache__
+*.py[cod]
+
+# Distribution and packaging
+.eggs/
+*.egg-info/
+build/
+dist/
+eggs/
+sdist/
+wheels/
+
+# Unit test and code coverage
+.cache
+.coverage
+.coverage.*
+*.cover
+.pytest_cache/
+.mypy_cache/
+cover/
+coverage.xml
+nosetests.xml
+
+# Sphinx documentation
+docs/_build/
+
+# Virtual environments
+.env
+.venv*
+conda-venv/*
+env/
+venv/
+.vscode/
+
+# repowise
+.repowise/
+.repowise*
+.mcp.json
+
+# Claude Code: skills are team-shared and tracked; everything else
+# (settings.local.json, caches, locks) stays local.
+.claude/*
+!.claude/skills
+
+# Superpowers
+docs/superpowers/
+superpowers/
+
+# cpp build
+cpp/libqarpx/build*/
+
+# competitor benchmark raw results (host-specific; only the generated docs are committed)
+benchmarks/results/
