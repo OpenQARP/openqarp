@@ -35,6 +35,14 @@ authors:
     affiliation: "Fujitsu Research of Europe"
 version: 0.1.0
 date-released: "2026-09-14"
+doi: "10.5281/zenodo.22755228"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.22755228"
+    description: "Concept DOI — always resolves to the latest release"
+  - type: doi
+    value: "10.5281/zenodo.22755229"
+    description: "Version DOI — this release (v0.1.0)"
 repository-code: "https://github.com/OpenQARP/openqarp"
 url: "https://openqarp.github.io/openqarp/"
 license: Apache-2.0
