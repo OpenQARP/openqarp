@@ -28,7 +28,7 @@ Open Quantum Application Research Package
    :target: https://github.com/OpenQARP/openqarp/blob/develop/LICENSE
    :alt: License: Apache 2.0
 
-.. |doi| image:: https://zenodo.org/badge/DOI/10.5281/zenodo.22755228.svg
+.. |doi| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22755228-blue
    :target: https://doi.org/10.5281/zenodo.22755228
    :alt: DOI
 
