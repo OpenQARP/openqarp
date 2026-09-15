@@ -196,21 +196,25 @@ disagree are not published.  The harness that regenerates them is
 Citing
 ======
 
-If OpenQARP is useful in your research, please cite it.  A paper describing
-the framework is in preparation; until it appears, cite the software itself
-(``CITATION.cff`` carries the same entry in machine-readable form):
+If OpenQARP is useful in your research, please cite the paper describing the
+framework (``CITATION.cff`` carries the same entry in machine-readable form):
 
 .. code-block:: bibtex
 
-   @misc{openqarp2026,
-     author = {Scali, Stefano and Soloviev, Vicente P. and M{\'a}rquez Romero, Antonio and
-               Coyle, Brian and Buonaiuto, Giuseppe and Paine, Annie and Fetherolf, Jonathan H. and
-               Diez Garc{\'i}a, Marcos and Krompiec, Michal and Kirsopp, Josh},
-     title  = {{OpenQARP: Open Quantum Application Research Package}},
-     year   = {2026},
-     doi    = {10.5281/zenodo.22755228},
-     note   = {\url{https://github.com/OpenQARP/openqarp}}
+   @misc{scali2026openqarpmodularframeworkquantum,
+     title         = {OpenQARP: a modular framework for quantum application research},
+     author        = {Stefano Scali and Vicente P. Soloviev and Antonio M{\'a}rquez Romero and
+                      Brian Coyle and Giuseppe Buonaiuto and Annie Paine and Jonathan H. Fetherolf and
+                      Marcos Diez Garc{\'i}a and Michal Krompiec and Josh Kirsopp},
+     year          = {2026},
+     eprint        = {2609.15697},
+     archivePrefix = {arXiv},
+     primaryClass  = {quant-ph},
+     url           = {https://arxiv.org/abs/2609.15697},
    }
+
+To cite a specific software release, use the version DOI on `Zenodo
+<https://doi.org/10.5281/zenodo.22755228>`_ alongside the paper.
 
 ----
 
