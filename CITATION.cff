@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use OpenQARP in your research, please cite it as below. A paper describing the framework is in preparation; a preferred-citation entry will be added when it appears."
+message: "If you use OpenQARP in your research, please cite the paper listed under preferred-citation. To reference a specific software release, cite the version DOI below alongside it."
 type: software
 title: "OpenQARP: Open Quantum Application Research Package"
 authors:
@@ -52,3 +52,45 @@ keywords:
   - quantum simulation
   - quantum chemistry
   - circuit compilation
+preferred-citation:
+  type: article
+  title: "OpenQARP: a modular framework for quantum application research"
+  authors:
+    - family-names: "Scali"
+      given-names: "Stefano"
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Soloviev"
+      given-names: "Vicente P."
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Márquez Romero"
+      given-names: "Antonio"
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Coyle"
+      given-names: "Brian"
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Buonaiuto"
+      given-names: "Giuseppe"
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Paine"
+      given-names: "Annie"
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Fetherolf"
+      given-names: "Jonathan H."
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Diez García"
+      given-names: "Marcos"
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Krompiec"
+      given-names: "Michal"
+      affiliation: "Fujitsu Research of Europe"
+    - family-names: "Kirsopp"
+      given-names: "Josh"
+      affiliation: "Fujitsu Research of Europe"
+  year: 2026
+  journal: "arXiv"
+  doi: "10.48550/arXiv.2609.15697"
+  url: "https://arxiv.org/abs/2609.15697"
+  identifiers:
+    - type: other
+      value: "arXiv:2609.15697"
+      description: "arXiv preprint (quant-ph)"
