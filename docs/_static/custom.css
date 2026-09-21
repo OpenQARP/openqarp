@@ -217,19 +217,38 @@ code.literal {
 }
 .mobile-header .brand { font-family: var(--sans); font-weight: 600; letter-spacing: -0.01em; }
 
-.sidebar-site-links {
-  display: flex; flex-wrap: wrap; gap: 4px 14px;
-  padding: 0 var(--sidebar-item-spacing-horizontal) 0.6rem;
-  font-size: var(--font-size--small--2);
+/* brand row: burger + wordmark; the menu opens in flow below it, since the
+   sidebar scrolls and would clip a floating dropdown */
+.sidebar-brand-row {
+  display: flex; align-items: center; gap: 2px;
+  padding: 1.35rem var(--sidebar-item-spacing-horizontal) 0.4rem;
 }
-.sidebar-site-links a {
-  color: var(--mist);
-  text-decoration: none;
-  font-weight: 500;
-  transition: color 0.2s;
+.sidebar-brand-row .sidebar-brand { padding: 0 0.4rem; }
+.menu-toggle {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+  background: none; border: 0; border-radius: 50%; color: var(--ink); opacity: 0.6; cursor: pointer;
+  transition: opacity 0.2s, background 0.2s;
 }
-.sidebar-site-links a:hover { color: var(--cobalt); }
+.menu-toggle:hover, .menu-toggle.open { opacity: 1; background: var(--code-bg); }
+.menu-toggle .ic-close, .menu-toggle.open .ic-burger { display: none; }
+.menu-toggle.open .ic-close { display: block; }
+.site-menu {
+  display: flex; flex-direction: column; padding: 6px;
+  margin: 0 var(--sidebar-item-spacing-horizontal) 1.1rem;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 6px 18px -12px var(--shadow);
+}
+.site-menu[hidden] { display: none; }
+.site-menu a {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px;
+  font-family: var(--sans); font-size: 0.95rem; color: var(--ink-2); text-decoration: none;
+}
+.site-menu a:hover, .site-menu a[aria-current="page"] { color: var(--ink); background: var(--code-bg); }
+.site-menu a[aria-current="page"] { font-weight: 500; }
 
+/* the sidebar is a flex column: the brand row, the menu and the search box keep
+   their height and the navigation below takes the scroll */
+.sidebar-brand-row, .site-menu, .sidebar-search-container { flex-shrink: 0; }
 .sidebar-search-container {
   margin: var(--sidebar-search-space-above) var(--sidebar-item-spacing-horizontal) 0;
   border: 1px solid var(--color-sidebar-search-border);
