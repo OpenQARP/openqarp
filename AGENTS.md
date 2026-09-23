@@ -12,9 +12,14 @@ touching those areas.
 - Standard/structural work starts as a plan in `docs/contributions/` (its
   README has the tier table and the loop; `_template.md` is the scaffold).
 - **One PR per contribution, two gates inside it.**  Open a *Draft* PR whose
-  first commit is the plan; the reviewer green-lights the design there, and
-  only then does implementation start — on the same branch, in the same PR.
-  Mark the PR ready when the implementation is done; that is the second gate.
+  first commit is the plan; the reviewer green-lights the design there with a
+  `Green-lit at <sha>` comment (never an Approve review), the author records
+  the sha and the plan file's blob id in the plan header, and only then does
+  implementation start — on the same branch, in the same PR.  Mark the PR
+  ready when the implementation is done; that is the second gate, and the
+  only place a GitHub Approve is given.  Checkboxes in the PR description are
+  the author's; the reviewer's checks go in the reviewer's own comment or
+  review, and `pr-checklist` fails a non-draft PR with an unticked box.
 - The PR declares deviations from the *green-lit* plan — silent drift is the
   violation.  Fold declared drift back into the plan file before merge.
 - Trivial fixes (typo, doc fix, bugfix + regression test) need no plan.
