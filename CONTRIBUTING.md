@@ -22,21 +22,38 @@ One PR per contribution, with two review gates inside it.
    the norm).  Branch per the conventions below, commit the plan to
    `docs/contributions/` as the branch's first commit, and open a **Draft**
    PR on it.
-2. **Green-light** — the reviewer approves the design in that Draft PR.
-   *That* is the design approval; implementation does not start before it.
+2. **Green-light** — the reviewer posts a PR *comment* headed
+   `Green-lit at <sha>` with the Gate 1 reviewer checks from the PR template
+   ticked.  *That comment* is the design approval; implementation does not
+   start before it.  It is a comment, not a GitHub *Approve* review —
+   Approves are given at Gate 2 only.  The author records the sha and the
+   plan file's blob id in the plan header, so the green-lit revision is
+   identified by content and the branch may be rebased freely.
 3. **Implement** — same branch, same PR.  The PR declares deviations from the
    green-lit plan (an empty section claims "implemented as green-lit", and
-   reviewers check that claim).
-4. **Review** — mark the PR ready; the reviewer may run an AI conformance
-   diff as input. Human approval stays human.
-5. **Land** — declared drift is folded back into the plan file before merge.
+   the reviewer checks that claim against the green-lit plan).
+4. **Review** — fold declared drift back into the plan file, flip its status
+   to ✅, then mark the PR ready; the reviewer posts the AI conformance
+   report as a PR comment, then gives the GitHub *Approve* with the Gate 2
+   reviewer checks ticked in its body.  Human approval stays human.
+5. **Land** — merge.  A push after the Approve dismisses it, so the branch
+   is complete before review is requested.
+
+The checkboxes in the PR description are the author's; the reviewer's checks
+are pasted into the reviewer's own comment or review, so neither ticks the
+other's.  The `pr-checklist` job fails a non-draft PR with an unticked
+box; a box that does not apply is ticked with its text struck through and a
+reason, never deleted.  A reviewer's "this needs a plan" on a trivial PR
+converts it to Draft and the plan is added in the next commit.
 
 ## General Guidelines
 
 * Never commit to `develop` or `main` directly — every change lands through a
   pull request.
-* Open an issue first, using the **Feature** or **Bug** template in the GitHub
-  issue form, so the what and why are on record.
+* Issues are for reporting without fixing, or for a yes or no on scope
+  before anyone writes a plan — use the **Feature** or **Bug** template.  A PR that
+  carries a plan or a regression test is its own record and needs no issue;
+  when one exists, the PR's `Closes #` line points back to it.
 * Always branch off the latest `develop`.
 * Every change ships tests in `tests/`, and every numerical assertion needs an
   **independent oracle** — an analytic value, a published number, an
@@ -47,8 +64,8 @@ One PR per contribution, with two review gates inside it.
   trivial fixes are exempt.
 * OpenQARP is structured to ease future integration: prefer extending the
   existing abstract classes over proposing new classes or modules.
-* CI must be green before review: ruff (lint + format), mypy, pytest, and the
-  C++ test suite.
+* CI must be green before review: ruff (lint + format), mypy, pytest, the
+  C++ test suite, and the PR-description checklist (`pr-checklist`).
 
 ## Git Branch Conventions
 

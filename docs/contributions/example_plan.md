@@ -11,6 +11,7 @@
 **Date:** 2026-09-14
 **Tier:** Standard
 **Branch:** `feature/w-state-block`
+**Green-lit:** <empty at Draft — filled with `<sha> (<YYYY-MM-DD>), plan blob <blob>` once the reviewer's green-light comment lands>
 **Scope:**
 - `qarp/blocks/_state_preparation/w_state_block.py` (new)
 - `qarp/blocks/_state_preparation/__init__.py`, `qarp/blocks/__init__.py` (export)

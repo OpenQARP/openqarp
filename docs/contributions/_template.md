@@ -10,6 +10,10 @@
 **Date:** <YYYY-MM-DD>
 **Tier:** <Standard | Structural>
 **Branch:** <type/name-of-branch>
+**Green-lit:** <empty until the reviewer's `Green-lit at <sha>` comment; then
+`<sha> (<YYYY-MM-DD>), plan blob <blob>` with the blob from
+`git rev-parse <sha>:docs/contributions/<topic>_plan.md`, in the commit that
+flips the index row to 🚧>
 **Scope:** <explicit list of files/dirs to be added or edited — the
 conformance review checks the PR touches nothing outside it without a
 declared deviation>

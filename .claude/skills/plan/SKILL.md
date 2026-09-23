@@ -39,10 +39,18 @@ green-lit plan is the contract the rest of that same PR gets diffed against
 6. Add the plan's row to the index table in `docs/contributions/README.md`
    (status 📋 Planned).
 7. Remind the author: branch, then open a **Draft** PR whose first commit is
-   the plan, using the default PR template (fill the *Plan* section, leave
-   the *Implementation* section for later). The reviewer's green-light in
-   that Draft PR is the design approval — do not start implementing before
-   it, and do not open a second PR.
+   the plan, using the default PR template (delete the *Trivial PR*
+   section, fill *Planned PR* and tick the Gate 1 boxes; the reviewer
+   blocks in the HTML comments are for the reviewer to paste, not for the
+   author to tick).  The reviewer's green-light in that Draft PR — a comment
+   `Green-lit at <sha>`, not an Approve review — is the design approval.
+   Do not start implementing before it, and do not open a second PR.  Once
+   it is posted, fill the plan's `**Green-lit:**` header with the sha, the date
+   and the blob id from `git rev-parse <sha>:docs/contributions/<topic>_plan.md`,
+   and flip the index row to 🚧, in one commit.  The blob identifies the
+   green-lit plan by content, so rebasing the branch later is fine.
+   A PR that started trivial and was asked for a plan follows the same
+   steps from a later commit — the plan need not be the first commit.
 
 Ask the user for any decision the discussion has not settled rather than
 choosing silently — unresolved decisions belong in the plan as explicit
