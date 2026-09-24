@@ -1,7 +1,15 @@
 #include "qarpx/parallel/thread_pool.h"
 
+#include <algorithm>
 #include <cstdlib>
+#include <fstream>
+#include <set>
 #include <string>
+#include <utility>
+
+#ifdef __linux__
+#include <sched.h>
+#endif
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -11,13 +19,60 @@ namespace qarpx {
 
 namespace {
 
-std::size_t read_thread_count() {
-    if (const char* env = std::getenv("QARP_NUM_THREADS")) {
+std::size_t positive_env(const char* name) {
+    if (const char* env = std::getenv(name)) {
         const long n = std::strtol(env, nullptr, 10);
         if (n > 0) return static_cast<std::size_t>(n);
     }
-    const std::size_t hw = std::thread::hardware_concurrency();
-    return hw == 0 ? 4 : hw;
+    return 0;
+}
+
+// CPUs this process may run on, and the physical cores among them (distinct
+// (package, core) pairs in the sysfs topology; 0 when unreadable).  Linux
+// reads the affinity mask, which hardware_concurrency() ignores.
+struct UsableCpus {
+    std::size_t logical = 0;
+    std::size_t physical = 0;
+};
+
+UsableCpus usable_cpus() {
+    UsableCpus out;
+#ifdef __linux__
+    cpu_set_t mask;
+    CPU_ZERO(&mask);
+    if (sched_getaffinity(0, sizeof(mask), &mask) == 0) {
+        out.logical = static_cast<std::size_t>(CPU_COUNT(&mask));
+        std::set<std::pair<long, long>> cores;
+        for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+            if (!CPU_ISSET(cpu, &mask)) continue;
+            const std::string base =
+                "/sys/devices/system/cpu/cpu" + std::to_string(cpu) + "/topology/";
+            std::ifstream core(base + "core_id"), package(base + "physical_package_id");
+            long core_id = -1, package_id = -1;
+            if (!(core >> core_id) || !(package >> package_id)) {
+                cores.clear();
+                break;
+            }
+            cores.emplace(package_id, core_id);
+        }
+        out.physical = cores.size();
+        return out;
+    }
+#endif
+    out.logical = std::thread::hardware_concurrency();
+    return out;
+}
+
+// QARP_NUM_THREADS, else OMP_NUM_THREADS, else the usable physical cores
+// capped one below the usable logical CPUs: a spinning OpenMP worker on every
+// hardware thread starves the main thread.
+std::size_t read_thread_count() {
+    if (const std::size_t n = positive_env("QARP_NUM_THREADS")) return n;
+    if (const std::size_t n = positive_env("OMP_NUM_THREADS")) return n;
+    const UsableCpus cpus = usable_cpus();
+    if (cpus.logical == 0) return 4;
+    const std::size_t all_but_one = cpus.logical > 1 ? cpus.logical - 1 : 1;
+    return cpus.physical > 0 ? std::min(cpus.physical, all_but_one) : all_but_one;
 }
 
 }  // namespace
@@ -29,7 +84,9 @@ std::size_t configured_thread_count() {
 
 void init_threading() {
     static const bool done = [] {
-        if (std::getenv("QARP_NUM_THREADS") && !std::getenv("QULACS_NUM_THREADS")) {
+        // The kernels' own cap defaults to every logical CPU; forward the
+        // configured count so the default above reaches them too.
+        if (!std::getenv("QULACS_NUM_THREADS")) {
             const std::string n = std::to_string(configured_thread_count());
 #ifdef _WIN32
             _putenv_s("QULACS_NUM_THREADS", n.c_str());

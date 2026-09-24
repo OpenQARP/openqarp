@@ -128,8 +128,12 @@ It is read once, at ``import qarpx``:
 
     QARP_NUM_THREADS=4 python my_script.py
 
-Unset, every layer uses the hardware thread count.  The kernel layer keeps
-its own finer overrides (``QULACS_NUM_THREADS``,
+Unset, ``OMP_NUM_THREADS`` is used.  With neither set, every layer uses the
+physical cores the process may run on (its CPU affinity, so ``taskset`` and
+scheduler CPU binding are honoured), capped one below its logical CPUs: a
+spinning OpenMP worker on each hardware thread starves the process.  Where
+the topology is unreadable (outside Linux) the count is the logical CPUs
+minus one.  The kernel layer keeps its own finer overrides (``QULACS_NUM_THREADS``,
 ``QULACS_PARALLEL_NQUBIT_THRESHOLD``, see :doc:`installation`); a
 ``QULACS_NUM_THREADS`` you set yourself wins over the forwarded value.
 Results are seeded per shot, independent of how the shots are partitioned,

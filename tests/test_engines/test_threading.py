@@ -162,6 +162,112 @@ def test_parallel_threshold_is_exported_before_the_first_kernel_call():
     assert run({"QULACS_PARALLEL_NQUBIT_THRESHOLD": "13"}) == ["13", "13"]
 
 
+_KERNEL_THREADS_SCRIPT = textwrap.dedent(
+    """
+    import ctypes
+    import os
+    cpus = %r
+    if cpus is not None:
+        os.sched_setaffinity(0, cpus)
+    import qarpx as qx
+    libc = ctypes.CDLL(None)
+    libc.getenv.restype = ctypes.c_char_p
+    qx.QarpSimulator()  # init_threading
+    print((libc.getenv(b"QULACS_NUM_THREADS") or b"").decode())
+    """
+)
+
+
+def _kernel_thread_count(env_extra, cpus=None):
+    """``QULACS_NUM_THREADS`` as ``init_threading`` exported it in a fresh
+    process, pinned to ``cpus`` before ``import qarpx`` when given."""
+    import os
+
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("QARP_NUM_THREADS", "OMP_NUM_THREADS", "QULACS_NUM_THREADS")
+    }
+    env.update(env_extra, SKBUILD_EDITABLE_VERBOSE="0")
+    out = subprocess.run(
+        [sys.executable, "-c", _KERNEL_THREADS_SCRIPT % (cpus,)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return out.stdout.strip()
+
+
+def _usable_cpus():
+    import os
+
+    if hasattr(os, "sched_getaffinity"):
+        return sorted(os.sched_getaffinity(0))
+    return list(range(os.cpu_count() or 1))
+
+
+def _physical_cores_from_sysfs(cpus):
+    import pathlib
+
+    cores = set()
+    for cpu in cpus:
+        topology = pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
+        try:
+            cores.add(
+                (
+                    int((topology / "physical_package_id").read_text()),
+                    int((topology / "core_id").read_text()),
+                )
+            )
+        except OSError:
+            return None
+    return len(cores) or None
+
+
+def test_default_thread_count_never_takes_every_logical_cpu():
+    """Unset, the default is the physical core count and stays below the
+    logical CPU count on a multi-core host, and it reaches the kernels
+    through ``QULACS_NUM_THREADS`` whether or not ``QARP_NUM_THREADS`` is
+    set."""
+    exported = _kernel_thread_count({})
+    assert exported, "init_threading must forward the default to the kernels"
+    n = int(exported)
+    cpus = _usable_cpus()
+    logical = len(cpus)
+    assert 1 <= n <= logical
+    if logical > 1:
+        assert n < logical
+    physical = _physical_cores_from_sysfs(cpus)
+    if physical is not None and physical < logical:
+        assert n == physical
+
+
+def test_default_thread_count_follows_the_cpu_affinity():
+    """Pinned to a subset of CPUs (``taskset``, scheduler binding), the
+    default counts only that subset: below its size, and its physical cores
+    when those are fewer."""
+    import os
+
+    if not hasattr(os, "sched_setaffinity"):
+        pytest.skip("CPU affinity is Linux-only")
+    subset = _usable_cpus()[:4]
+    if len(subset) < 2:
+        pytest.skip("needs at least two usable CPUs")
+    n = int(_kernel_thread_count({}, cpus=set(subset)))
+    assert 1 <= n < len(subset)
+    physical = _physical_cores_from_sysfs(subset)
+    if physical is not None and physical < len(subset):
+        assert n == physical
+
+
+def test_omp_num_threads_is_honoured_when_qarp_num_threads_is_unset():
+    """``OMP_NUM_THREADS`` sizes the layers when ``QARP_NUM_THREADS`` is
+    unset, and ``QARP_NUM_THREADS`` wins when both are set."""
+    assert _kernel_thread_count({"OMP_NUM_THREADS": "2"}) == "2"
+    assert _kernel_thread_count({"OMP_NUM_THREADS": "2", "QARP_NUM_THREADS": "3"}) == "3"
+
+
 def test_invalid_thread_count_falls_back_to_default():
     """A non-positive or non-numeric ``QARP_NUM_THREADS`` is ignored, not an
     error: the run still produces the analytic outcome set."""
