@@ -135,9 +135,12 @@ spinning OpenMP worker on each hardware thread starves the process.  A
 container CPU limit (``docker run --cpus``, a Kubernetes ``limits.cpu``, any
 cgroup v1 or v2 CPU quota) counts as the logical CPUs when it is fewer,
 rounded up to whole CPUs.  Where the topology is unreadable (outside Linux)
-the count is the logical CPUs minus one.  The kernel layer keeps its own
-finer overrides (``QULACS_NUM_THREADS``, ``QULACS_PARALLEL_NQUBIT_THRESHOLD``,
-see :doc:`installation`); a
+the count is the logical CPUs minus one.  The physical cores are those the
+kernel reports: under WSL and some virtual machines the virtual topology
+pairs CPUs that are separate cores on the hardware and so undercounts them;
+there, set ``QARP_NUM_THREADS`` to the real core count.  The kernel layer
+keeps its own finer overrides (``QULACS_NUM_THREADS``,
+``QULACS_PARALLEL_NQUBIT_THRESHOLD``, see :doc:`installation`); a
 ``QULACS_NUM_THREADS`` you set yourself wins over the forwarded value.
 Results are seeded per shot, independent of how the shots are partitioned,
 so a seeded run is bit-identical at every thread count.
