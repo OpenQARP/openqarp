@@ -122,14 +122,11 @@ TEST(UnitarySynthesis, OneQubit_HaarRandom) {
     }
 }
 
-// ── ZYZ edge branches (γ ≈ 0 and γ ≈ π) ───────────────────────────────────
+// ── ZYZ with a vanishing pair (γ ≈ 0 and γ ≈ π) ───────────────────────────
 //
-// `apply_zyz` splits into three branches on γ = 2·atan2(|u10|, |u00|).  The
-// generic branch is exercised by the Haar cases above; a diagonal target hits
-// γ ≈ 0 and an anti-diagonal one hits γ ≈ π.  Both edge branches once emitted
-// a wrong global phase, which only structured operators reach — a Haar target
-// lands on the generic branch with probability 1, so these cases pin the two
-// branches directly.
+// `apply_zyz` reads the global phase from the larger of the diagonal and the
+// off-diagonal pair.  A Haar target has comparable pairs, so diagonal,
+// anti-diagonal and near-anti-diagonal targets pin each side directly.
 
 TEST(UnitarySynthesis, OneQubit_DiagonalGenericPhases) {
     // γ ≈ 0 branch.  Phases chosen so no two agree and neither is 0.
@@ -177,7 +174,57 @@ TEST(UnitarySynthesis, OneQubit_GlobalPhaseIsReproduced) {
     }
 }
 
+TEST(UnitarySynthesis, OneQubit_TinyCosineKeepsTheGlobalPhase) {
+    // |u00| = |u11| ≈ 1e-9 with rounding-sized noise on top, as a computed
+    // unitary carries: their arguments are then known only to ~1e-7, which the
+    // global phase must not inherit.
+    const double alpha = 0.7, beta = 1.3, gamma = M_PI - 2e-9, delta = -0.4;
+    const cd c = std::cos(gamma / 2), s = std::sin(gamma / 2);
+    Mat U(2, 2);
+    U << std::exp(cd{0.0, alpha - (beta + delta) / 2}) * c,
+        -std::exp(cd{0.0, alpha - (beta - delta) / 2}) * s,
+         std::exp(cd{0.0, alpha + (beta - delta) / 2}) * s,
+         std::exp(cd{0.0, alpha + (beta + delta) / 2}) * c;
+    U(0, 0) += 3e-16 * std::exp(cd{0.0, 2.0});
+    U(1, 1) += 3e-16 * std::exp(cd{0.0, -1.0});
+    SimpleBlock b(1, "u");
+    b.unitary_synthesis(U);
+    EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-13));
+}
+
+TEST(UnitarySynthesis, OneQubit_TinyGlobalPhaseIsReproduced) {
+    // A global phase far below 1e-9 is still physical under control.
+    const Mat U = std::exp(cd{0.0, 5e-11}) * Mat::Identity(2, 2);
+    SimpleBlock b(1, "u");
+    b.unitary_synthesis(U);
+    EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-13));
+}
+
 // ── 2-qubit recursion ─────────────────────────────────────────────────────
+
+TEST(UnitarySynthesis, TwoQubit_DiagonalTinyGlobalPhaseIsReproduced) {
+    const Mat U = std::exp(cd{0.0, 5e-11}) * Mat::Identity(4, 4);
+    SimpleBlock b(2, "u");
+    b.unitary_synthesis(U);
+    EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-13));
+}
+
+TEST(UnitarySynthesis, TwoQubit_NearlyDiagonalKeepsItsOffDiagonal) {
+    // Off-diagonal entries of 5e-10 are not rounding: dropping them as a
+    // diagonal would cost accuracy of that size.
+    const double eps = 5e-10;
+    Mat rx(2, 2);
+    rx << std::cos(eps), cd{0.0, -std::sin(eps)}, cd{0.0, -std::sin(eps)}, std::cos(eps);
+    Mat phases = Mat::Zero(4, 4);
+    for (Eigen::Index k = 0; k < 4; ++k) phases(k, k) = std::exp(cd{0.0, 0.3 + 0.7 * k});
+    Mat U = Mat::Zero(4, 4);
+    U.topLeftCorner(2, 2) = rx;
+    U.bottomRightCorner(2, 2) = rx;
+    U = (U * phases).eval();
+    SimpleBlock b(2, "u");
+    b.unitary_synthesis(U);
+    EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-13));
+}
 
 TEST(UnitarySynthesis, TwoQubit_CNOT) {
     SimpleBlock b(2, "u");
@@ -310,10 +357,7 @@ TEST(UnitarySynthesis, Degenerate_AntiDiagonalBlocks_XtensorExpZZ) {
 TEST(UnitarySynthesis, Degenerate_Heisenberg_4Site_StructuralSpread) {
     // 4-site Heisenberg `exp(-i (X⊗X+Y⊗Y+Z⊗Z) bonds · t)` at small/medium t.
     // The Sz-conservation symmetry produces clusters of σ values in the CSD
-    // recursion that are spread by ~1e-5 — too tight to be "actually equal"
-    // for a tolerance-based degenerate-σ detector but tight enough that the
-    // previous Eigen-SVD-plus-orthonormal-completion path miscomposed.  The
-    // LAPACK CSD primitive handles this structural near-degeneracy cleanly.
+    // recursion spread by ~1e-5, plus a σ ~2e-10 from a σ = 1 block.
     SimpleBlock b(4, "u");
     const double t = 0.35;
     // Build H = sum over bonds (i, i+1) and Paulis (X, Y, Z) of P_i ⊗ P_{i+1}.
@@ -346,16 +390,7 @@ TEST(UnitarySynthesis, Degenerate_Heisenberg_4Site_StructuralSpread) {
     Eigen::MatrixXcd minusiHt = cd{0.0, -t} * H;
     Mat U = minusiHt.exp();
     b.unitary_synthesis(U);
-#ifdef QARP_USE_LAPACK
-    const double tol = 1e-10;
-#else
-    // The pure-Eigen CSD fallback resolves this Sz-symmetric structural
-    // near-degeneracy (a σ that sits ~2e-10 from a σ=1 block) to ~1.5e-10 —
-    // correct to 10 significant figures, but a touch above the floor LAPACK's
-    // `zuncsd` reaches (~1e-13).
-    const double tol = 1e-9;
-#endif
-    EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, tol));
+    EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-12));
 }
 
 TEST(UnitarySynthesis, Degenerate_FourQubit_HaarRandom) {
@@ -366,8 +401,46 @@ TEST(UnitarySynthesis, Degenerate_FourQubit_HaarRandom) {
         SimpleBlock b(4, "u");
         Mat U = haar_random(16, rng);
         b.unitary_synthesis(U);
-        EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-8))
+        EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-12))
             << "trial " << trial;
+    }
+}
+
+// ── DFT blocks ────────────────────────────────────────────────────────────
+//
+// A DFT drives the sines of its cosine-sine splits far below one and gives
+// the multiplexer demultiplexing near-coincident eigenvalues; column phases
+// move the tiny entries onto the one-qubit leaves.
+
+namespace {
+Mat dft(Eigen::Index N) {
+    Mat F(N, N);
+    for (Eigen::Index i = 0; i < N; ++i)
+        for (Eigen::Index j = 0; j < N; ++j)
+            F(i, j) = std::exp(cd{0.0, 2.0 * M_PI * double(i * j) / double(N)}) /
+                      std::sqrt(double(N));
+    return F;
+}
+}  // anonymous namespace
+
+TEST(UnitarySynthesis, Dft_UpToSevenQubits) {
+    for (uint32_t n = 3; n <= 7; ++n) {
+        SimpleBlock b(n, "u");
+        const Mat U = dft(Eigen::Index(1) << n);
+        b.unitary_synthesis(U);
+        EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-12)) << "n " << n;
+    }
+}
+
+TEST(UnitarySynthesis, Dft_WithRandomColumnPhases) {
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> phase(0.0, 2.0 * M_PI);
+    for (int trial = 0; trial < 10; ++trial) {
+        Mat U = dft(32);
+        for (Eigen::Index j = 0; j < 32; ++j) U.col(j) *= std::exp(cd{0.0, phase(rng)});
+        SimpleBlock b(5, "u");
+        b.unitary_synthesis(U);
+        EXPECT_TRUE(expect_unitary_close(built_unitary(b), U, 1e-12)) << "trial " << trial;
     }
 }
 

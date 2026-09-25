@@ -131,6 +131,14 @@ TEST(DiagonalUnitary, GlobalPhaseOnly) {
 
 // ── Input validation ─────────────────────────────────────────────────────
 
+TEST(DiagonalUnitary, TinyGlobalPhaseIsReproduced) {
+    // Below the unit-modulus tolerance, yet physical under control.
+    const cd p = std::exp(cd{0.0, 5e-10});
+    SimpleBlock b(2, "d");
+    b.diagonal_unitary({p, p, p, p});
+    EXPECT_TRUE(expect_diagonal_close(built_unitary(b), {p, p, p, p}, 1e-13));
+}
+
 TEST(DiagonalUnitary, RejectsNonPowerOfTwoSize) {
     SimpleBlock b(2, "diag");
     EXPECT_THROW(

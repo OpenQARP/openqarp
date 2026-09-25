@@ -1097,9 +1097,8 @@ The following three-qubit example phases the first three basis states:
        + [np.exp(-1j * phase)] * (2**n_qubits - dim)
    )
 
-   # The synthesized circuit can differ only by an overall global phase.
-   assert np.allclose(unitary, np.diag(np.diag(unitary)))
-   assert np.allclose(np.diag(unitary) / unitary[0, 0], expected / expected[0])
+   # The synthesis is exact, global phase included.
+   assert np.allclose(unitary, np.diag(expected))
 
 .. figure:: images/projectedcontrolphaseblock_example.svg
    :width: 80%
@@ -1952,10 +1951,9 @@ the same Hamiltonian at multiple time points:
        time=5.0
    ).build()
 
-   # Check error. Unitary synthesis (via qarpx's Quantum Shannon Decomposition)
-   # does not preserve global phase, so a direct matrix difference would be
-   # dominated by an arbitrary phase rather than the actual Trotter error.
-   # Use the (phase-invariant) process infidelity instead.
+   # Check error. Both circuits carry the exact global phase, so a direct
+   # matrix difference measures the Trotter error too; the process infidelity
+   # below is the phase-insensitive measure.
    import numpy as np
    import qarpx as qx
    sim = qx.QarpSimulator()
@@ -1970,10 +1968,11 @@ the same Hamiltonian at multiple time points:
 **Global Phase:**
 
 ``SynthesizedTimeEvolutionBlock`` synthesizes the circuit via qarpx's Quantum Shannon Decomposition, which
-targets the exact unitary only up to a global phase (global phase has no physical effect on measurement
-statistics, so the synthesis routine does not track it). When comparing a synthesized circuit's unitary
-against another one directly, use a global-phase-invariant metric such as process fidelity
-(:math:`|\mathrm{Tr}(U_1^\dagger U_2)| / d`), as in the example above, rather than a raw matrix norm.
+reproduces :math:`e^{-iHt}` exactly, global phase included. The global phase has no effect on measurement
+statistics of the bare block, but it becomes a relative phase once the block is controlled (for example
+inside QPE), so the synthesis keeps it. A synthesized circuit's unitary can therefore be compared with
+another one directly; process fidelity (:math:`|\mathrm{Tr}(U_1^\dagger U_2)| / d`) is the choice when the
+other circuit is only defined up to a global phase.
 
 **Performance Considerations:**
 
@@ -2001,8 +2000,7 @@ However, care should be taken when using this block as it will lead to exponenti
 since it makes no assumptions about the structure of the unitary.
 
 It takes as its main argument ``unitary_matrix`` - the unitary matrix to synthesize (the synthesized circuit
-matches it up to a global phase; see :ref:`the note above <synth-time-evo-phase>` on comparing synthesized
-unitaries).
+matches it exactly, global phase included; see :ref:`the note above <synth-time-evo-phase>`).
 An example implementation is as follows:
  
 .. code-block:: python
