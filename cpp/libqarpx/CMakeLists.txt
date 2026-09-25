@@ -107,6 +107,7 @@ add_library(qarpx
     src/synthesis/diagonal.cpp
     src/synthesis/unitary.cpp
     src/synthesis/pauli_exponential.cpp
+    src/parallel/cpu_budget.cpp
     src/parallel/thread_pool.cpp
     src/parallel/mpi_utils.cpp
     src/simulator/dense_kernel.cpp

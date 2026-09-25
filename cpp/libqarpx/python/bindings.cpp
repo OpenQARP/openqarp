@@ -1,4 +1,5 @@
 #include <nanobind/nanobind.h>
+#include "qarpx/parallel/cpu_budget.h"
 #include "qarpx/parallel/thread_pool.h"
 #include <nanobind/operators.h>
 #include <nanobind/ndarray.h>
@@ -136,11 +137,22 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 8
+#define QARPX_ABI_VERSION 9
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
     m.doc() = "OpenQARP C++ Circuit IR — Python bindings";
+
+    m.def("_cpu_budget", [] {
+        const qarpx::detail::CpuBudget b = qarpx::detail::read_cpu_budget();
+        nb::dict d;
+        d["logical"] = b.logical;
+        d["physical"] = b.physical;
+        d["limit"] = b.limit;
+        d["default_thread_count"] = qarpx::detail::default_thread_count(b);
+        return d;
+    }, "Internal: this process's CPU budget as read now (0 = unknown, or no "
+       "limit) and the default thread count it gives.");
 
     // ── Exception taxonomy at the Python boundary ──
     // capability_error → qarp.errors.CapabilityError (ValueError fallback if

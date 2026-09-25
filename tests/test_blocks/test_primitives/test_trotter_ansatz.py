@@ -595,11 +595,11 @@ def test_mismatched_symbols_and_exponents_raise():
 
 
 @pytest.mark.parametrize(
-    "dead_exponent",
-    [QubitOperator("Z0") * 0.0, QubitOperator("Z0") * 1j],
+    "dead_coefficient",
+    [0.0, 1j],
     ids=["zero-coefficient", "imaginary-under-real-ansatz"],
 )
-def test_a_generator_emitting_no_rotation_is_dropped_from_symbols(dead_exponent):
+def test_a_generator_emitting_no_rotation_is_dropped_from_symbols(dead_coefficient):
     """A symbol that gates nothing must not be published.
 
     Its generator contributes no rotation — every coefficient vanishes, or is
@@ -609,6 +609,7 @@ def test_a_generator_emitting_no_rotation_is_dropped_from_symbols(dead_exponent)
     whole: ``set_time()`` rebuilds the ansatz from it.
     """
     a, z = Symbol("a"), Symbol("z")
+    dead_exponent = QubitOperator("Z0") * dead_coefficient
     block = TrotterAnsatzBlock(
         1, qubit_exponents=[QubitOperator("Z0"), dead_exponent], symbols=[a, z]
     )

@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <string>
 
+#include "qarpx/parallel/cpu_budget.h"
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -11,13 +13,18 @@ namespace qarpx {
 
 namespace {
 
-std::size_t read_thread_count() {
-    if (const char* env = std::getenv("QARP_NUM_THREADS")) {
+std::size_t positive_env(const char* name) {
+    if (const char* env = std::getenv(name)) {
         const long n = std::strtol(env, nullptr, 10);
         if (n > 0) return static_cast<std::size_t>(n);
     }
-    const std::size_t hw = std::thread::hardware_concurrency();
-    return hw == 0 ? 4 : hw;
+    return 0;
+}
+
+std::size_t read_thread_count() {
+    if (const std::size_t n = positive_env("QARP_NUM_THREADS")) return n;
+    if (const std::size_t n = positive_env("OMP_NUM_THREADS")) return n;
+    return detail::default_thread_count(detail::read_cpu_budget());
 }
 
 }  // namespace
@@ -29,7 +36,9 @@ std::size_t configured_thread_count() {
 
 void init_threading() {
     static const bool done = [] {
-        if (std::getenv("QARP_NUM_THREADS") && !std::getenv("QULACS_NUM_THREADS")) {
+        // The kernels' own cap defaults to every logical CPU; forward the
+        // configured count so the default above reaches them too.
+        if (!std::getenv("QULACS_NUM_THREADS")) {
             const std::string n = std::to_string(configured_thread_count());
 #ifdef _WIN32
             _putenv_s("QULACS_NUM_THREADS", n.c_str());

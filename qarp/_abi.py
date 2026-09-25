@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 # Bump together with QARPX_ABI_VERSION in cpp/libqarpx/python/bindings.cpp —
 # same commit — whenever a binding signature, enum, or class shape changes.
-EXPECTED_QARPX_ABI = 8
+EXPECTED_QARPX_ABI = 9
 
 _REBUILD = (
     "Rebuild it from the repository root, inside your virtualenv:\n"

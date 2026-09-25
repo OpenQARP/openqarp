@@ -20,7 +20,7 @@ namespace qarpx {
 class ThreadPool {
 public:
     /// Create a thread pool with n_threads workers.
-    /// n_threads = 0 means std::thread::hardware_concurrency().
+    /// n_threads = 0 means configured_thread_count().
     explicit ThreadPool(std::size_t n_threads = 0);
 
     ~ThreadPool();
@@ -60,7 +60,8 @@ private:
 };
 
 /// Worker count for every qarpx parallel layer: ``QARP_NUM_THREADS`` if set
-/// to a positive integer, else hardware_concurrency().  Read once.
+/// to a positive integer, else ``OMP_NUM_THREADS``, else
+/// ``detail::default_thread_count`` of the process's CPU budget.  Read once.
 std::size_t configured_thread_count();
 
 /// Qubit count from which a csim kernel (and qarpx's dense-block kernel)
@@ -72,9 +73,9 @@ std::size_t configured_thread_count();
 /// on 8 threads) and is faster at 20 qubits too, while 18 loses at 16.
 inline constexpr unsigned kParallelNQubitThreshold = 16;
 
-/// One-time process setup, idempotent: forwards ``QARP_NUM_THREADS`` to the
-/// csim kernels (their own ``QULACS_NUM_THREADS`` knob, unless the user set
-/// it), exports ``kParallelNQubitThreshold`` the same way, and disables
+/// One-time process setup, idempotent: forwards ``configured_thread_count()``
+/// to the csim kernels (their own ``QULACS_NUM_THREADS`` knob, unless the
+/// user set it), exports ``kParallelNQubitThreshold`` the same way, and disables
 /// nested OpenMP parallelism so csim's per-gate regions serialise inside a
 /// shot worker.  Must run before the first kernel call; the Python module
 /// init and every QarpSimulator do.

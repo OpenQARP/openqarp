@@ -15,6 +15,10 @@ concurrency:
   group: wheels-${{ github.ref }}
   cancel-in-progress: true
 
+# publish replaces this with its own block (id-token only).
+permissions:
+  contents: read
+
 jobs:
   build_wheels:
     name: wheels · ${{ matrix.os }} · ${{ matrix.py }}

@@ -55,6 +55,7 @@ jobs:
       TQDM_DISABLE: "1"          # a progress bar in a kernel is one output line per tick
       OMP_NUM_THREADS: "2"       # pools sized from the host's core count oversubscribe a shared runner
       OPENBLAS_NUM_THREADS: "2"
+      SCIKIT_LEARN_DATA: ${{ github.workspace }}/.sklearn-data
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -64,6 +65,12 @@ jobs:
         with:
           name: wheel
           path: dist
+      # fetch_openml datasets are immutable per version, so a fixed key; an
+      # OpenML outage then only fails a run that also misses the cache.
+      - uses: actions/cache@v5
+        with:
+          path: .sklearn-data
+          key: sklearn-data-fashion-mnist-v1
       # [full] not [full-dev]: [notebooks] stays out of the install the coverage
       # floor is measured from; [integrations] carries the emit/absorb SDKs.
       - run: python -m pip install "$(ls dist/*.whl)[full,notebooks,integrations]"
@@ -121,3 +128,52 @@ jobs:
           cmake --build cpp/libqarpx/build-ci-lapack --target qarpx_tests --parallel "$(nproc)"
           ctest --test-dir cpp/libqarpx/build-ci-lapack --output-on-failure -j "$(nproc)"
           ccache --show-stats
+
+  container-cpu-limit:
+    # Only a real container carries a cgroup CPU quota.  A 2-CPU limit leaves
+    # one thread on any topology; 2.5 rounds up to 3 CPUs, so two threads on a
+    # runner with at least two physical cores (rounding down would leave one).
+    needs: [wheel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+      - name: Image with the wheel installed
+        # The artifact is an unrepaired linux wheel: it needs the runner's own
+        # Ubuntu (glibc, libstdc++, libgomp) and a CPython matching its tag,
+        # which the distro's python3 need not be.
+        run: |
+          . /etc/os-release
+          cat > Dockerfile <<EOF
+          FROM ubuntu:${VERSION_ID}
+          COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+          RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 ca-certificates \
+              && rm -rf /var/lib/apt/lists/*
+          COPY dist /dist
+          RUN uv venv --python ${PYTHON_VERSION} /venv \
+              && uv pip install --python /venv/bin/python /dist/*.whl
+          RUN /venv/bin/python -c "import qarpx"
+          EOF
+          docker build -q -t qarp-cpu-limit .
+      - name: Default thread count under a CPU quota
+        run: |
+          probe='import ctypes, qarpx as qx
+          qx.QarpSimulator()
+          libc = ctypes.CDLL(None)
+          libc.getenv.restype = ctypes.c_char_p
+          print(libc.getenv(b"QULACS_NUM_THREADS").decode())'
+          threads() { docker run --rm "$@" qarp-cpu-limit /venv/bin/python -c "$probe"; }
+          check() {
+            want=$1; shift
+            got=$(threads "$@")
+            echo "docker run $* -> $got threads (want $want)"
+            [ "$got" = "$want" ]
+          }
+          echo "runner: $(nproc) CPUs, no limit -> $(threads) threads"
+          check 1 --cpus=2
+          check 1 --cpus=2 --cgroupns=host
+          check 1 --cpus=1.5
+          if [ "$(nproc)" -ge 4 ]; then check 2 --cpus=2.5; fi

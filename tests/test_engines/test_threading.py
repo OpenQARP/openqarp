@@ -162,6 +162,129 @@ def test_parallel_threshold_is_exported_before_the_first_kernel_call():
     assert run({"QULACS_PARALLEL_NQUBIT_THRESHOLD": "13"}) == ["13", "13"]
 
 
+_KERNEL_THREADS_SCRIPT = textwrap.dedent(
+    """
+    import ctypes
+    import json
+    import os
+    cpus = %r
+    if cpus is not None:
+        os.sched_setaffinity(0, cpus)
+    import qarpx as qx
+    libc = ctypes.CDLL(None)
+    libc.getenv.restype = ctypes.c_char_p
+    qx.QarpSimulator()  # init_threading
+    exported = (libc.getenv(b"QULACS_NUM_THREADS") or b"").decode()
+    print(json.dumps({"exported": exported, "budget": qx._cpu_budget()}))
+    """
+)
+
+
+def _thread_probe(env_extra, cpus=None):
+    """``QULACS_NUM_THREADS`` as ``init_threading`` exported it, and the CPU
+    budget, in a fresh process pinned to ``cpus`` before ``import qarpx``
+    when given."""
+    import json
+    import os
+
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("QARP_NUM_THREADS", "OMP_NUM_THREADS", "QULACS_NUM_THREADS")
+    }
+    env.update(env_extra, SKBUILD_EDITABLE_VERBOSE="0")
+    out = subprocess.run(
+        [sys.executable, "-c", _KERNEL_THREADS_SCRIPT % (cpus,)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+def _kernel_thread_count(env_extra):
+    return _thread_probe(env_extra)["exported"]
+
+
+def _usable_cpus():
+    import os
+
+    if hasattr(os, "sched_getaffinity"):
+        return sorted(os.sched_getaffinity(0))
+    return list(range(os.cpu_count() or 1))
+
+
+def _physical_cores_from_sysfs(cpus):
+    import pathlib
+
+    cores = set()
+    for cpu in cpus:
+        topology = pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
+        try:
+            cores.add(
+                (
+                    int((topology / "physical_package_id").read_text()),
+                    int((topology / "core_id").read_text()),
+                )
+            )
+        except OSError:
+            return None
+    return len(cores) or None
+
+
+def _assert_default_follows_the_budget(probe, cpus):
+    """The budget matches this process's affinity and sysfs topology read
+    independently here, the exported count is the rule applied to it, and it
+    stays below the logical CPUs and within the physical cores.  The limit is
+    not re-read here: a cgroup CPU limit on the test host only lowers the
+    count, and the rule and the cgroup reader are pinned in
+    ``test_cpu_budget.cpp``."""
+    import os
+
+    budget = probe["budget"]
+    physical = _physical_cores_from_sysfs(cpus)
+    assert budget["logical"] == len(cpus)
+    if hasattr(os, "sched_getaffinity"):
+        assert budget["physical"] == (physical or 0)
+    assert probe["exported"], "init_threading must forward the default to the kernels"
+    n = int(probe["exported"])
+    assert n == budget["default_thread_count"]
+    assert 1 <= n <= len(cpus)
+    if len(cpus) > 1:
+        assert n < len(cpus)
+    if physical is not None:
+        assert n <= physical
+
+
+def test_default_thread_count_never_takes_every_logical_cpu():
+    """Unset, the default is derived from the process's CPU budget, stays
+    below the logical CPU count on a multi-core host, and reaches the kernels
+    through ``QULACS_NUM_THREADS`` whether or not ``QARP_NUM_THREADS`` is
+    set."""
+    _assert_default_follows_the_budget(_thread_probe({}), _usable_cpus())
+
+
+def test_default_thread_count_follows_the_cpu_affinity():
+    """Pinned to a subset of CPUs (``taskset``, scheduler binding), the
+    budget and the default count only that subset."""
+    import os
+
+    if not hasattr(os, "sched_setaffinity"):
+        pytest.skip("CPU affinity is Linux-only")
+    subset = _usable_cpus()[:4]
+    if len(subset) < 2:
+        pytest.skip("needs at least two usable CPUs")
+    _assert_default_follows_the_budget(_thread_probe({}, cpus=set(subset)), subset)
+
+
+def test_omp_num_threads_is_honoured_when_qarp_num_threads_is_unset():
+    """``OMP_NUM_THREADS`` sizes the layers when ``QARP_NUM_THREADS`` is
+    unset, and ``QARP_NUM_THREADS`` wins when both are set."""
+    assert _kernel_thread_count({"OMP_NUM_THREADS": "2"}) == "2"
+    assert _kernel_thread_count({"OMP_NUM_THREADS": "2", "QARP_NUM_THREADS": "3"}) == "3"
+
+
 def test_invalid_thread_count_falls_back_to_default():
     """A non-positive or non-numeric ``QARP_NUM_THREADS`` is ignored, not an
     error: the run still produces the analytic outcome set."""
