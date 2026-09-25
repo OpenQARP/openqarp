@@ -131,4 +131,6 @@ Not a row: [`_template.md`](_template.md), the plan scaffold.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
+| [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | 📋 | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
+| [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | 📋 | Same PR as `sampler_distribution_plan.md`; no convention edit |
 | [`example_plan.md`](example_plan.md) | Worked example of a plan | OpenQARP maintainers | 🗄️ | Illustrates the format only: a filled-in `_template.md` for a small standard-tier feature.  Not implemented; delete this row when the first real plan lands |
