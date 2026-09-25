@@ -4,10 +4,10 @@
 applied to results after the fact — it never touches circuits or engines.
 Two application surfaces:
 
-* :meth:`PostSelection.apply` — condition a ``{bits-tuple: probability}``
-  distribution (the :class:`~qarp.algorithms.Sampler` output
-  currency, sampled or ``qarp.EXACT`` alike) and report the kept
-  probability mass as the success rate.
+* :meth:`PostSelection.apply` — condition a sampling distribution (a
+  :class:`~qarp.SamplingDistribution`, the :class:`~qarp.algorithms.Sampler`
+  output, sampled or ``qarp.EXACT`` alike, or a ``{bits-tuple: probability}``
+  dict) and report the kept probability mass as the success rate.
 * :meth:`PostSelection.apply_statevector` — project a statevector onto the
   condition, returning the renormalised conditional state and the success
   probability ``‖P|ψ⟩‖²``.
@@ -34,6 +34,7 @@ from typing import Callable, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from ._sampling_distribution import SamplingDistribution, pack_bits
 from ._types import SamplingDictionary
 
 
@@ -41,7 +42,7 @@ from ._types import SamplingDictionary
 class PostSelected:
     """Conditioned distribution plus the probability mass that survived."""
 
-    distribution: SamplingDictionary
+    distribution: SamplingDistribution
     success_rate: float
 
 
@@ -132,32 +133,44 @@ class PostSelection:
     # ── Application: distributions ─────────────────────────────────────
 
     def apply(self, distribution: SamplingDictionary) -> PostSelected:
-        """Condition a ``{bits-tuple: probability}`` distribution.
+        """Condition a distribution keyed by LSB-first bit tuples.
 
-        Keys must be LSB-first tuples covering every selected qubit.
-        Fixed-bit specs drop the (now-constant) selected positions from the
-        output keys; sector specs keep full-width keys.  Zero surviving
-        mass yields ``PostSelected({}, 0.0)`` — no raise, so parameter
-        sweeps survive nodes with vanishing support.
+        Keys must share one width covering every selected qubit.  Fixed-bit
+        specs drop the (now-constant) selected positions from the output
+        keys; sector specs keep full-width keys.  Zero surviving mass yields
+        an empty distribution and a success rate of 0 — no raise, so
+        parameter sweeps survive nodes with vanishing support.
         """
-        sel = set(self.qubits)
+        dist = SamplingDistribution._from_mapping(distribution)
+        n_bits = dist.n_bits_measured
         qmax = self.qubits[-1]
-        kept: dict = {}
-        success = 0.0
-        for key, prob in distribution.items():
-            if qmax >= len(key):
-                raise ValueError(
-                    f"PostSelection on qubit {qmax}, but outcome keys cover only {len(key)} qubits"
-                )
-            if not self._keep(tuple(key[q] for q in self.qubits)):
-                continue
-            success += prob
-            reduced = tuple(b for q, b in enumerate(key) if q not in sel) if self.is_fixed else key
-            kept[reduced] = kept.get(reduced, 0.0) + prob
-        if success > 0.0:
-            kept = {k: v / success for k, v in kept.items()}
+        if len(dist) and qmax >= n_bits:
+            raise ValueError(
+                f"PostSelection on qubit {qmax}, but outcome keys cover only {n_bits} qubits"
+            )
+        outcomes, probs = dist.outcomes, dist.probabilities
+        # The condition sees only the selected bits, so it is evaluated once
+        # per distinct selected pattern.
+        patterns, inverse = np.unique(pack_bits(outcomes, self.qubits), return_inverse=True)
+        k = len(self.qubits)
+        keep_pattern = np.fromiter(
+            (self._keep(tuple((p >> i) & 1 for i in range(k))) for p in patterns.tolist()),
+            dtype=bool,
+            count=len(patterns),
+        )
+        keep = keep_pattern[inverse]
+        success = float(probs[keep].sum())
+        if self.is_fixed:
+            # Dropping bits that are constant across the kept outcomes keeps
+            # the packed keys strictly ascending.
+            rest = [q for q in range(n_bits) if q not in set(self.qubits)]
+            keys, width = pack_bits(outcomes[keep], rest), len(rest)
         else:
-            kept = {}
+            keys, width = outcomes[keep], n_bits
+        if success > 0.0:
+            kept = SamplingDistribution._wrap(keys.copy(), probs[keep] / success, width)
+        else:
+            kept = SamplingDistribution._wrap(keys[:0].copy(), np.zeros(0), width)
         return PostSelected(distribution=kept, success_rate=success)
 
     def success_rate(self, distribution: SamplingDictionary) -> float:

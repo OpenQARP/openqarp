@@ -389,7 +389,7 @@ def _ungroup_commuting_results_vectorized(results, layouts, n_paulis):
     Vectorized equivalent of :func:`_ungroup_commuting_results`.
 
     ``layouts`` comes from :func:`_precompute_group_layouts`; each sampler
-    result dict is folded into per-term expectation values through a single
+    distribution is folded into per-term expectation values through a single
     outcomes x masks parity product instead of nested Python loops.
     """
     dtype = np.result_type(float, *(coeffs.dtype for _, coeffs, _ in layouts))
@@ -580,14 +580,14 @@ class PCE(CompositeAlgorithm):
 
         def f(x):
             symbol_map = dict(zip(self.ket.symbols, x, strict=True))
-            result = np.array(self.engine.run(symbol_map)).real
+            results = self.engine.run(symbol_map)
             if isinstance(self.primitive, Sampler):
-                # Here there are basis:result results
-                # Split now
-                _, result_list = _ungroup_commuting_results_vectorized(
-                    result, self._group_layouts, len(self.plain_paulis)
+                # One distribution per commuting group, split back into terms.
+                _, result = _ungroup_commuting_results_vectorized(
+                    results, self._group_layouts, len(self.plain_paulis)
                 )
-                result = result_list
+            else:
+                result = np.array(results).real
 
             result_loss, regulation_term, solution = self.quantum_f(
                 result=result,

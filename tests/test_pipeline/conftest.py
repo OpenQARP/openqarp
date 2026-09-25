@@ -25,7 +25,7 @@ def exact_ev(ket, operator) -> complex:
     eng = QarpEngine(n_shots=qarp.EXACT)
     eng.build([sv])
     result = eng.run()[0]
-    assert not isinstance(result, dict)  # StateVector returns a scalar
+    assert not isinstance(result, qarp.SamplingDistribution)  # StateVector returns a scalar
     return complex(result)
 
 

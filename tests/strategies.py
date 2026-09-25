@@ -11,6 +11,7 @@ guard) and the pipeline property suite (`tests/test_pipeline/`).
 """
 
 import random
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
 import networkx as nx
@@ -571,9 +572,9 @@ def run_pipeline(cfg: PipelineConfig):
 
 def results_allclose(a, b, atol: float = 1e-8) -> bool:
     """Engine results equal within ``atol``: scalars compared as complex,
-    sampling dictionaries on the union of keys (absent key = probability 0)."""
-    if isinstance(a, dict) or isinstance(b, dict):
-        if not (isinstance(a, dict) and isinstance(b, dict)):
+    sampling distributions on the union of keys (absent key = probability 0)."""
+    if isinstance(a, Mapping) or isinstance(b, Mapping):
+        if not (isinstance(a, Mapping) and isinstance(b, Mapping)):
             return False
         keys = set(a) | set(b)
         return all(abs(a.get(k, 0.0) - b.get(k, 0.0)) <= atol for k in keys)

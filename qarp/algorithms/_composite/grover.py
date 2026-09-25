@@ -1,6 +1,6 @@
 """Grover search with a caller-declared marked-state count."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Optional, Self, cast
 
@@ -111,7 +111,7 @@ class Grover(CompositeAlgorithm):
             raise ValueError("Circuit not built. Call build() before run().")
 
         result = self.engine.run()[0]
-        if not isinstance(result, dict):
+        if not isinstance(result, Mapping):
             raise TypeError("Grover requires a sampling primitive")
         self.distribution = cast(SamplingDictionary, result)
 

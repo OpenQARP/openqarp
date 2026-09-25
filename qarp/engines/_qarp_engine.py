@@ -6,7 +6,7 @@ import numpy as np
 
 import qarpx as qx
 
-from .._types import Consumes, ExactResult, SamplingDictionary, Shots
+from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
@@ -406,7 +406,7 @@ class QarpEngine(Engine):
         l2p_per_prim,
         param_sets,
         shots_override,
-    ) -> list[list[Union[float, complex, SamplingDictionary]]]:
+    ) -> list[list[PrimitiveResult]]:
         """Shot resolution per primitive: ``shots_override`` (sweep-wide,
         ``qarp.EXACT`` allowed) > ``prim.n_shots`` > engine default.  Sampled
         primitives sweep in C++ (``sim.batch_run``); EXACT and
@@ -450,9 +450,9 @@ class QarpEngine(Engine):
                 circ_batch.append(sr_list)
             prim_batch.append(circ_batch)
 
-        results_by_set: list[list[Union[float, complex, SamplingDictionary]]] = []
+        results_by_set: list[list[PrimitiveResult]] = []
         for set_idx, ps in enumerate(param_sets):
-            set_results: list[Union[float, complex, SamplingDictionary]] = []
+            set_results: list[PrimitiveResult] = []
             for prim_idx, prim in enumerate(primitives):
                 prim_results = prim_batch[prim_idx]
                 circuits = circuits_per_prim[prim_idx]

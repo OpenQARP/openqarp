@@ -18,7 +18,8 @@ import numpy as np
 
 import qarpx as qx
 
-from .._types import Consumes, ExactResult, SamplingDictionary, Shots
+from .._sampling_distribution import SamplingDistribution, distribution_from_result, pack_bits
+from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._runnable import Runnable
 
@@ -106,13 +107,11 @@ def _reindex_exact(er: ExactResult, l2p) -> ExactResult:
     physical bit ``l2p[l]``; ``n_qubits`` is unchanged; colliding keys
     accumulate.  Arrays in, arrays out — no dict is built on either side.
     """
-    phys, probs = er.keys, er.probs
-    log = np.zeros_like(phys)
-    for l, p in enumerate(l2p):
-        log |= ((phys >> p) & 1) << l
-    keys, inv = np.unique(log, return_inverse=True)
+    keys, inv = np.unique(pack_bits(er.keys, l2p), return_inverse=True)
     return ExactResult(
-        n_qubits=er.n_qubits, keys=keys, probs=np.bincount(inv, weights=probs, minlength=len(keys))
+        n_qubits=er.n_qubits,
+        keys=keys,
+        probs=np.bincount(inv, weights=er.probs, minlength=len(keys)),
     )
 
 
@@ -179,8 +178,8 @@ class StructuredQPEPlan:
         self._n_ancilla = n_ancilla
         self._primitive = primitive
 
-    def sample(self) -> SamplingDictionary:
-        """Sample the ancilla register: ``{LSB-first bits tuple: probability}``."""
+    def sample(self) -> SamplingDistribution:
+        """Sample the ancilla register."""
         engine = self._engine
         nm = getattr(engine, "noise_model", None)
         if nm is not None and nm.enabled:
@@ -206,11 +205,7 @@ class StructuredQPEPlan:
             engine._resolve_shots(self._primitive),
             engine._seed,
         )
-        distribution: SamplingDictionary = {}
-        for outcome, count in sr.counts.items():
-            bits = tuple((outcome >> q) & 1 for q in range(self._n_ancilla))
-            distribution[bits] = distribution.get(bits, 0.0) + count / sr.n_shots
-        return distribution
+        return distribution_from_result(sr, range(self._n_ancilla))
 
 
 class Engine(ABC):
@@ -247,7 +242,7 @@ class Engine(ABC):
         param_sets: Sequence[Mapping],
         n_shots: Optional[Union[int, Shots]] = None,
         rebuild: bool = True,
-    ) -> list[list[Union[float, complex, SamplingDictionary]]]:
+    ) -> list[list[PrimitiveResult]]:
         """Sweep one set of primitives over multiple parameter dicts.
 
         The inner simulation loop stays entirely in C++ (no Python round-trip
@@ -280,7 +275,7 @@ class Engine(ABC):
         l2p_per_prim: Sequence,
         param_sets: Sequence[Mapping[str, float]],
         shots_override,
-    ) -> list[list[Union[float, complex, SamplingDictionary]]]:
+    ) -> list[list[PrimitiveResult]]:
         """Evaluate already-built primitives at many parameter points.
 
         ``circuits_per_prim[j]`` replaces ``primitives[j].compiled_circuits``
@@ -542,7 +537,7 @@ class Engine(ABC):
     def run(
         self,
         params: Mapping = {},
-    ) -> list[Union[float, complex, SamplingDictionary]]:
+    ) -> list[PrimitiveResult]:
         """Simulate all built primitives and return their scalar results.
 
         Template method: re-validates every primitive per call (noise toggles
@@ -552,7 +547,7 @@ class Engine(ABC):
         """
         params = _coerce_params(params)
         self._pre_run()
-        results: list[Union[float, complex, SamplingDictionary]] = []
+        results: list[PrimitiveResult] = []
         ordinal = 0
         for prim, l2p_list in zip(self._primitives, self._l2p_per_primitive, strict=True):
             self._validate_primitive(prim)

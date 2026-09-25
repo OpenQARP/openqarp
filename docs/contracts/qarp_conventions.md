@@ -580,7 +580,10 @@ How circuits run.
   Idle channels are rejected at injection.
 - **One result contract.** `QarpSimulator` and `CudaqSimulator` both return the
   same `SamplingResult` (`run` / `batch_run` / `statevector`); sampler keys are LSB bitstrings
-  (§1); mid-circuit measurement adds `n_cbits` and `cbit_history` (`[n_shots][n_cbits]`,
+  (§1).  `Sampler` (and `PostSelection.apply`) return a `qarp.SamplingDistribution`: a
+  read-only mapping from LSB-first bit tuples over the measured qubits to probabilities,
+  iterating in ascending order of the packed integer `Σ_i b_i·2^i`, with the aligned read-only
+  arrays `outcomes` (those integers) and `probabilities` for bulk access; mid-circuit measurement adds `n_cbits` and `cbit_history` (`[n_shots][n_cbits]`,
   end-of-shot register). An engine that does not consume `device.noise_model` must **raise**
   `CapabilityError` at construction rather than drop it silently (F3); no engine in the tree
   does so today — `QarpEngine` consumes it, `CudaqEngine` takes no `device=`.

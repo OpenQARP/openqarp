@@ -89,13 +89,14 @@ in ``qarp/_types.py``.
 SamplingDictionary
 ------------------
 
-A type alias for dictionary structures representing sampling results:
+A read-only type alias for sampling results.  Both a :class:`~qarp.SamplingDistribution`
+(what :class:`~qarp.algorithms.Sampler` returns) and a plain dict satisfy it:
 
 .. code-block:: python
 
    from qarp import SamplingDictionary
 
-   # SamplingDictionary is defined as: dict[tuple[int, ...], float]
+   # SamplingDictionary is defined as: Mapping[tuple[int, ...], float]
 
    # Example usage
    results: SamplingDictionary = {
@@ -105,8 +106,8 @@ A type alias for dictionary structures representing sampling results:
        (1, 1, 1): 0.25,
    }
 
-The keys are tuples of integers representing measurement outcomes, and values are floats 
-representing probabilities or counts.
+The keys are LSB-first bit tuples representing measurement outcomes, and values are
+probabilities.  Annotate results you only read with it; build a new dict to change one.
 
 ----
 

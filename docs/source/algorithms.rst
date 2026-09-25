@@ -84,10 +84,24 @@ The following code demonstrates how to use the :code:`Sampler` to collect measur
 
     result = my_engine.run()
     print("Measurement distribution:", result[0])
-    # Expected output: approximately {(0, 0): 0.5, (1, 1): 0.5}
+    # Expected output: approximately SamplingDistribution({(0, 0): 0.5, (1, 1): 0.5})
 
-The :code:`Sampler` returns a dictionary mapping measurement outcomes (as tuples) to their observed probabilities,
-normalised by the number of shots.
+The :code:`Sampler` returns a :class:`~qarp.SamplingDistribution`: a read-only mapping from measurement outcomes
+(LSB-first bit tuples over :code:`measured_qubits`) to their probabilities, normalised by the number of shots.  It
+reads like a dictionary and iterates in ascending order of the integer :math:`\sum_i b_i 2^i` its bits encode.
+:code:`to_dict()` returns a plain, mutable :code:`dict`.
+
+The same data is available as two aligned read-only arrays, which is the fast path for wide distributions: under
+:code:`n_shots=qarp.EXACT` a dense 22-qubit state has millions of outcomes, and building a tuple for each costs far
+more than computing them.
+
+.. code-block:: python
+
+    dist = result[0]
+    dist.outcomes           # array([0, 3]): the integers of (0, 0) and (1, 1)
+    dist.probabilities      # about array([0.5, 0.5]), up to shot noise
+    dist.n_bits_measured    # 2
+    dist.probability_of(3)  # the probability of (1, 1): lookup by packed integer, 0.0 if absent
 
 StateVector
 ^^^^^^^^^^^^

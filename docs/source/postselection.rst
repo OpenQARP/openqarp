@@ -8,7 +8,9 @@ the condition.
 
 Conventions (qarpx LSB throughout, see :doc:`endianness`): distribution keys are LSB-first
 tuples with qubit ``q`` at position ``q``; for statevectors, bit ``q`` of the amplitude index
-is qubit ``q``.
+is qubit ``q``.  :meth:`~qarp.PostSelection.apply` takes a :class:`~qarp.SamplingDistribution`
+or a plain ``{bits-tuple: probability}`` dict whose keys share one width, and its result's
+``distribution`` is a :class:`~qarp.SamplingDistribution`.
 
 Two kinds of condition
 -----------------------

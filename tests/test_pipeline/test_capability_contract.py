@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from hypothesis import example, given
 
+from qarp import SamplingDistribution
 from qarp.algorithms import StateVector
 from qarp.blocks import SimpleBlock
 from qarp.engines import QarpEngine
@@ -32,7 +33,7 @@ def _assert_actionable(err: CapabilityError) -> None:
 
 def _assert_sane_result(cfg: PipelineConfig, magnitude_bound, result) -> None:
     if cfg.primitive == "Sampler":
-        assert isinstance(result, dict), f"Sampler returned {type(result).__name__}"
+        assert isinstance(result, SamplingDistribution), f"Sampler returned {type(result).__name__}"
         total = 0.0
         for key, weight in result.items():
             assert isinstance(key, tuple) and all(bit in (0, 1) for bit in key), (

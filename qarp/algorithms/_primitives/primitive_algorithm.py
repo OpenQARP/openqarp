@@ -11,7 +11,7 @@ for them).
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
 
-from ..._types import Consumes, SamplingDictionary, Shots
+from ..._types import Consumes, PrimitiveResult, Shots
 from .target import Target
 
 
@@ -172,7 +172,7 @@ class PrimitiveAlgorithm(ABC):
         """
 
     @abstractmethod
-    def run(self, results: list) -> Union[float, complex, SamplingDictionary]:
+    def run(self, results: list) -> PrimitiveResult:
         """Post-process the engine's sampling output into a result.
 
         Contract: a pure function of ``results`` — no simulator or engine
@@ -185,8 +185,8 @@ class PrimitiveAlgorithm(ABC):
 
         Returns:
             A scalar (`float` / `complex`) for expectation/overlap-style
-            primitives, or a :data:`SamplingDictionary`
-            (``{bitstring-tuple: probability}``) for :class:`Sampler`.
+            primitives, or a :class:`~qarp.SamplingDistribution` for
+            :class:`Sampler`.
         """
 
     def run_from_amplitudes(self, compiled_circuits: list, simulator=None) -> Union[float, complex]:

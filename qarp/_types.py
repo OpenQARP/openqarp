@@ -1,13 +1,21 @@
 """Type definitions or aliases for OpenQARP."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 
-# Type alias for dictionary of sampling results
-SamplingDictionary = dict[tuple[int, ...], float]
+if TYPE_CHECKING:
+    from ._sampling_distribution import SamplingDistribution
+
+# Read-only view of a sampling result: LSB-first bit tuples to probabilities.
+# A SamplingDistribution and a plain dict both satisfy it.
+SamplingDictionary = Mapping[tuple[int, ...], float]
+# What a primitive's run() returns.
+PrimitiveResult = Union[float, complex, "SamplingDistribution"]
 
 
 class Shots(Enum):
