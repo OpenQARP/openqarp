@@ -34,11 +34,11 @@ Open Quantum Application Research Package
 
 ----
 
-OpenQARP is a Python package for quantum computing research.  You describe a
-problem — a molecule, a spin model, an optimisation instance — build a circuit
-for it, and run that circuit on a fast simulator or compile it for real
-hardware.  It is aimed at researchers: the physics is in the foreground, and
-the C++ engine underneath is something you should never have to think about.
+OpenQARP is a Python package for quantum computing research.  You start from
+a problem, such as a molecule, a spin model or an optimisation instance.  You
+build a circuit for it, then run the circuit on a fast simulator or compile it
+for real hardware.  The simulator and compiler are written in C++, and you use
+them entirely from Python.
 
 ----
 

@@ -2,43 +2,55 @@
 Open Quantum Application Research Package
 =========================================
 
-|ci| |coverage| |pypi| |docs| |python| |license| |doi|
+|pypi| |python| |wheels| |license|
 
-.. |ci| image:: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml/badge.svg
-   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
-   :alt: CI
+|ci| |coverage| |docs|
 
-.. |coverage| image:: https://img.shields.io/endpoint?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2Fbadges%2Fcoverage.json
-   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
-   :alt: Coverage
+|arxiv| |doi|
 
-.. |pypi| image:: https://img.shields.io/pypi/v/openqarp
+.. |pypi| image:: https://img.shields.io/pypi/v/openqarp?label=pypi&labelColor=201B34&color=2B4DFF
    :target: https://pypi.org/project/openqarp/
-   :alt: PyPI
+   :alt: PyPI version
 
-.. |docs| image:: https://img.shields.io/badge/Docs-GitHub%20Pages-blue
-   :target: https://openqarp.github.io/openqarp/
-   :alt: Documentation
-
-.. |python| image:: https://img.shields.io/badge/python-3.11+-blue.svg
+.. |python| image:: https://img.shields.io/pypi/pyversions/openqarp?labelColor=201B34&color=2B4DFF
    :target: https://pypi.org/project/openqarp/
-   :alt: Python 3.11+
+   :alt: Supported Python versions
 
-.. |license| image:: https://img.shields.io/badge/License-Apache_2.0-blue.svg
+.. |wheels| image:: https://img.shields.io/badge/wheels-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-2B4DFF?labelColor=201B34
+   :target: https://pypi.org/project/openqarp/#files
+   :alt: Wheels for Linux, macOS and Windows
+
+.. |license| image:: https://img.shields.io/github/license/OpenQARP/openqarp?labelColor=201B34&color=2B4DFF
    :target: https://github.com/OpenQARP/openqarp/blob/develop/LICENSE
    :alt: License: Apache 2.0
 
-.. |doi| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22755228-blue
+.. |ci| image:: https://img.shields.io/github/actions/workflow/status/OpenQARP/openqarp/ci.yml?branch=develop&label=CI&labelColor=201B34
+   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
+   :alt: CI
+
+.. |coverage| image:: https://img.shields.io/endpoint?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2Fbadges%2Fcoverage.json&labelColor=201B34
+   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
+   :alt: Coverage
+
+.. |docs| image:: https://img.shields.io/website?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2F&label=docs&up_message=online&up_color=2B4DFF&labelColor=201B34
+   :target: https://openqarp.github.io/openqarp/
+   :alt: Documentation
+
+.. |arxiv| image:: https://img.shields.io/badge/arXiv-2609.15697-2B4DFF?labelColor=201B34
+   :target: https://arxiv.org/abs/2609.15697
+   :alt: arXiv:2609.15697
+
+.. |doi| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22755228-2B4DFF?labelColor=201B34
    :target: https://doi.org/10.5281/zenodo.22755228
    :alt: DOI
 
 ----
 
-OpenQARP is a Python package for quantum computing research.  You describe a
-problem — a molecule, a spin model, an optimisation instance — build a circuit
-for it, and run that circuit on a fast simulator or compile it for real
-hardware.  It is aimed at researchers: the physics is in the foreground, and
-the C++ engine underneath is something you should never have to think about.
+OpenQARP is a Python package for quantum computing research.  You start from
+a problem, such as a molecule, a spin model or an optimisation instance.  You
+build a circuit for it, then run the circuit on a fast simulator or compile it
+for real hardware.  The simulator and compiler are written in C++, and you use
+them entirely from Python.
 
 ----
 
