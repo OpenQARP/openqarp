@@ -17,7 +17,14 @@ import numpy as np
 import pytest
 
 import qarpx as qx
-from qarp.blocks import ControlledBlock, HaarRandomBlock, PauliBlock, ReflectionBlock
+from qarp.blocks import (
+    ControlledBlock,
+    HaarRandomBlock,
+    PauliBlock,
+    ReflectionBlock,
+    SimpleBlock,
+    SynthesizedUnitaryBlock,
+)
 
 
 def _unitary(block):
@@ -48,6 +55,38 @@ def _assert_controlled_exact(block, n_ctrls):
     assert np.abs(got - expected).max() < 1e-9, (
         f"controlled unitary mismatch; residual relative phase {residual}"
     )
+
+
+# ── Synthesis: global phases far below 1e-9 ──────────────────────────────
+
+
+def _assert_controlled_matches_target(block, target):
+    """C(block) equals the analytic C(target), so a dropped phase shows up."""
+    ctrl = ControlledBlock(block, num_controls=1, ctrl_state=[True])
+    ctrl.build()
+    got = np.array(qx.QarpSimulator().unitary_matrix(ctrl.flatten(), ctrl.n_qubits))
+    expected = _controlled_reference(target, 1, block.n_qubits)
+    assert np.abs(got - expected).max() < 1e-13
+
+
+@pytest.mark.parametrize("phase", [5e-11, 5e-10])
+@pytest.mark.parametrize("n_qubits", [1, 2])
+def test_synthesized_tiny_global_phase_exact_under_control(phase, n_qubits):
+    """``unitary_synthesis`` keeps a tiny global phase on its ZYZ and diagonal paths."""
+    target = np.exp(1j * phase) * np.eye(2**n_qubits)
+    block = SynthesizedUnitaryBlock(target)
+    block.build()
+    _assert_controlled_matches_target(block, target)
+
+
+@pytest.mark.parametrize("phase", [5e-11, 5e-10])
+def test_diagonal_unitary_tiny_global_phase_exact_under_control(phase):
+    """``diagonal_unitary`` keeps a global phase below its modulus tolerance."""
+    target = np.exp(1j * phase) * np.eye(4)
+    block = SimpleBlock(2)
+    block.diagonal_unitary(list(np.diag(target)))
+    block.build()
+    _assert_controlled_matches_target(block, target)
 
 
 # ── ReflectionBlock: gphase(π) ───────────────────────────────────────────

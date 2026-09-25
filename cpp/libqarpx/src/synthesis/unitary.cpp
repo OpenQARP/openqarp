@@ -55,8 +55,14 @@ using Vec = Eigen::VectorXcd;
 
 constexpr double kUnitaryTol     = 1e-9;
 constexpr double kSingularEps    = 1e-10;
-constexpr double kDiagonalTol    = 1e-9;
-constexpr double kDegenerateTol  = 1e-9;
+// Global phases below this are rounding of zero.  A skipped phase is lost,
+// and under control it becomes a relative phase.
+constexpr double kPhaseEps       = 1e-15;
+// The diagonal fast path drops off-diagonal entries up to this size.
+constexpr double kDiagonalTol    = 1e-12;
+// Rounding splits a repeated eigenvalue of a unitary by ~N·ε; merging wider
+// gaps rotates across distinct eigenvectors and costs accuracy of that size.
+constexpr double kDegenerateTol  = 1e-12;
 
 // ── Basis canonicalization for ComplexSchur in `demux_multiplexer` ─────────
 //
@@ -161,7 +167,7 @@ void apply_diagonal_phases(Block& block,
                            uint32_t base,
                            uint32_t n) {
     if (n == 0) {
-        if (std::abs(phases[0]) > kSingularEps) block.gphase(Param(phases[0]));
+        if (std::abs(phases[0]) > kPhaseEps) block.gphase(Param(phases[0]));
         return;
     }
 
@@ -199,45 +205,40 @@ bool try_diagonal_fast_path(Block& block, const Mat& U, uint32_t base, uint32_t 
 // with our convention Rz(θ) = diag(e^{-iθ/2}, e^{iθ/2}) and
 // Ry(θ) = [[cos(θ/2), -sin(θ/2)], [sin(θ/2), cos(θ/2)]].
 //
-// Closed form: if c := |u00| and s := |u10|, then γ = 2 atan2(s, c).
-//   * Generic case (c, s both > 0):
-//       α = (arg u00 + arg u11) / 2
-//       β = arg u10 − arg u00
-//       δ = arg u11 − arg u10
-//   * Edge γ = 0 (s = 0): only β + δ matters; pick δ = 0, β = arg u11 − arg u00,
-//       α = (arg u00 + arg u11) / 2.
-//   * Edge γ = π (c = 0): only β − δ matters; pick δ = 0,
-//       β = arg u10 − arg u01 + π,  α = (arg u01 + arg u10) / 2 − π/2.
+// Closed form: if c := |u00| and s := |u10|, then γ = 2 atan2(s, c), and with
+// a = arg u00, d = arg u11, b = arg u10, o = arg(−u01):
+//   * c ≥ s:  α = (a + d) / 2,  β = b − a,  δ = d − b
+//   * c < s:  α = (b + o) / 2,  β − δ = b − o,  β + δ = 2(α − a)
+// The argument of an entry of size ε is known only to ~ε_mach/ε, so α always
+// comes from the larger pair; the smaller pair's phases only scale entries of
+// its own size.
 //
 // α is the absolute global phase, not a free parameter: a caller wrapping this
-// block in a control reads it as a relative phase, so both edge branches must
-// reproduce it exactly rather than up to e^{iα}.
+// block in a control reads it as a relative phase, so it must be reproduced
+// exactly rather than up to e^{iα}.
 void apply_zyz(Block& block, uint32_t target, const Mat& U) {
     const cd u00 = U(0, 0), u01 = U(0, 1), u10 = U(1, 0), u11 = U(1, 1);
     const double c = std::abs(u00), s = std::abs(u10);
     const double gamma = 2.0 * std::atan2(s, c);
 
     double alpha, beta, delta;
-    if (c > kSingularEps && s > kSingularEps) {
+    if (c >= s) {
         alpha = 0.5 * (std::arg(u00) + std::arg(u11));
         beta  = std::arg(u10) - std::arg(u00);
         delta = std::arg(u11) - std::arg(u10);
-    } else if (s <= kSingularEps) {
-        // γ ≈ 0 — U ≈ diag(u00, u11) up to phases.
-        alpha = 0.5 * (std::arg(u00) + std::arg(u11));
-        beta  = std::arg(u11) - std::arg(u00);
-        delta = 0.0;
     } else {
-        // γ ≈ π — U is anti-diagonal up to phases.
-        alpha = 0.5 * (std::arg(u01) + std::arg(u10)) - 0.5 * M_PI;
-        beta  = std::arg(u10) - std::arg(u01) + M_PI;
-        delta = 0.0;
+        const double o = std::arg(-u01);
+        alpha = 0.5 * (std::arg(u10) + o);
+        const double sum  = 2.0 * (alpha - std::arg(u00));  // β + δ
+        const double diff = std::arg(u10) - o;              // β − δ
+        beta  = 0.5 * (sum + diff);
+        delta = 0.5 * (sum - diff);
     }
 
     block.rz(target, Param(delta));
     block.ry(target, Param(gamma));
     block.rz(target, Param(beta));
-    if (std::abs(alpha) > kSingularEps) block.gphase(Param(alpha));
+    if (std::abs(alpha) > kPhaseEps) block.gphase(Param(alpha));
 }
 
 // ── Multiplexer demultiplexer ──────────────────────────────────────────────
@@ -314,17 +315,15 @@ DemuxResult demux_multiplexer(const Mat& A, const Mat& B) {
 // uniformly-controlled `Ry(2θ_k)` on the high qubit.
 //
 // Two implementations, selected at build time:
-//   * QARP_USE_LAPACK=OFF (default) — pure Eigen (SVD + per-cluster
-//     refinement + sine-channel back-substitution; see the `#else` branch).
+//   * QARP_USE_LAPACK=OFF (default) — pure Eigen (SVD with a per-column choice
+//     of the well-conditioned sine or cosine channel; see the `#else` branch).
 //     No BLAS/LAPACK link, so wheels bundle no OpenBLAS/libgfortran/
-//     libquadmath.  Numerically correct incl. structurally near-degenerate σ
-//     (Heisenberg-like Hamiltonians), but its degenerate-σ basis is resolved
-//     by an SVD rather than a canonical rule, so decompositions are
-//     equivalent-but-not-bit-identical across toolchains.
+//     libquadmath.  Its degenerate-σ basis is resolved by an SVD rather than a
+//     canonical rule, so decompositions are equivalent-but-not-bit-identical
+//     across toolchains.
 //   * QARP_USE_LAPACK=ON — delegates to LAPACK's `zuncsd`, which returns a
 //     deterministic decomposition on a degenerate σ spectrum (no SVD basis
-//     indeterminacy) and reaches ~1e-13 on near-degenerate spectra where the
-//     Eigen path reaches ~1e-10.  `zuncsd` convention: `V1T`/`V2T` outputs
+//     indeterminacy).  `zuncsd` convention: `V1T`/`V2T` outputs
 //     hold `V1^H`/`V2^H`, so we adjoint them to recover R1 = V1, R2 = V2;
 //     sign convention `signs = 'D'` matches our `[[C,-S],[S,C]]` block layout.
 struct CSDResult {
@@ -415,30 +414,25 @@ Mat orthonormal_complement(const Mat& set_cols, Eigen::Index N) {
 }
 
 // Pure-Eigen cosine-sine decomposition — the default (`QARP_USE_LAPACK=OFF`)
-// implementation; keeps the build free of any BLAS/LAPACK link.
+// implementation; keeps the build free of any BLAS/LAPACK link.  Every factor
+// column is taken from whichever of the sine or cosine channel is well
+// conditioned (Van Loan, 1985), so no step divides by less than 1/√2:
 //
-//   1. SVD  U00 = L1 · C · R1^H   (the singular values are the cosines).
-//   2. Re-diagonalize U10 within each near-degenerate cosine cluster.  The SVD
-//      leaves the L1/R1 basis free within a repeated-σ subspace, and a cosine
-//      that sits a hair from such a cluster (e.g. 1 − 2·10⁻¹⁰ next to a σ = 1
-//      block — the Sz-symmetric Heisenberg case) gets an ill-resolved singular
-//      vector.  Rotating L1, R1 within the cluster by the right singular vectors
-//      of U10·R1|cluster makes U10 column-diagonal there too; because the sine²
-//      and cosine² structures sum to I, the same rotation also cleanly resolves
-//      the cosines, so the per-column channel below is well-conditioned.
-//   3. s_k = sin θ_k from the ACTUAL column norm ‖(U10·R1)·col(k)‖ and c_k from
-//      the refined diagonal of L1^H·U00·R1 (√(1−σ²) loses ~√ε of accuracy near
-//      σ = 1).  With the same L1, R1,
-//        L2·col(k) =  (U10 · R1)·col(k) / s_k,
-//        R2·col(k) = −(U01^H · L1)·col(k) / s_k        for s_k > 0.
-//   4. The s_k ≈ 0 columns (θ_k ≈ 0) are undetermined by U10/U01 — there U is
-//      block-diagonal and U11 carries the information.  Fill those columns from
-//      the orthogonal complements P_L, P_R via the unitary polar factor of
-//      M = P_L^H · U11 · P_R, so U11 = L2 · C · R2^H holds on that subspace too.
+//   1. SVD  U00 = L1 · C · R1^H  (cosines descending).  Columns with
+//      c_k ≤ 1/√2 are sine-dominant (set J), the rest cosine-dominant (set K).
+//   2. J:  L2·col(k) = (U10 · R1)·col(k) / s_k,  s_k = ‖(U10 · R1)·col(k)‖.
+//   3. K:  the sines are small, so dividing by them would amplify rounding.
+//      Instead take the SVD of the sine block in the orthogonal complement P of
+//      L2|J:  P^H · U10 · R1|K = Ur · S_K · Vr^H, set L2|K = P · Ur,
+//      R1|K ← R1|K · Vr, and recompute L1|K = U00 · R1|K / c_k from the
+//      cosine channel (c_k = column norm ≥ 1/√2).
+//   4. R2 from the better channel per column:
+//        K:  R2·col(k) =  (U11^H · L2)·col(k) / c_k,
+//        J:  R2·col(k) = −(U01^H · L1)·col(k) / s_k.
 //
-// Robust for the structured/degenerate spectra arising in the QSD recursion,
-// but (unlike LAPACK's `zuncsd`) not bit-reproducible across toolchains —
-// build with QARP_USE_LAPACK=ON where canonical decompositions matter.
+// Not bit-reproducible across toolchains where C or S is degenerate (the SVD
+// basis is free there) — build with QARP_USE_LAPACK=ON where canonical
+// decompositions matter.
 CSDResult cosine_sine_decomposition(const Mat& U) {
     const Eigen::Index twoN = U.rows();
     if (U.cols() != twoN || (twoN & 1)) {
@@ -451,74 +445,47 @@ CSDResult cosine_sine_decomposition(const Mat& U) {
     const Mat U10 = U.bottomLeftCorner(N, N);
     const Mat U11 = U.bottomRightCorner(N, N);
 
-    // U00 = L1 · Σ · R1^H, singular values (the cosines) descending in [0, 1].
     Eigen::JacobiSVD<Mat> svd(U00, Eigen::ComputeFullU | Eigen::ComputeFullV);
     Mat L1 = svd.matrixU();
     Mat R1 = svd.matrixV();
-    const Eigen::VectorXd sv = svd.singularValues();
+    Eigen::VectorXd c = svd.singularValues();
 
-    // Re-diagonalize U10 within each near-degenerate cosine cluster (see §2).
-    // Recomputing the cosines from the refined basis (below) keeps U00 exact for
-    // any cluster width, so the tolerance only needs to be wide enough to catch
-    // a near-degeneracy that the SVD failed to resolve.
-    constexpr double kCosClusterTol = 1e-6;
-    for (Eigen::Index a = 0; a < N;) {
-        Eigen::Index b = a + 1;
-        while (b < N && std::abs(sv(b) - sv(a)) < kCosClusterTol) ++b;
-        const Eigen::Index m = b - a;
-        if (m > 1) {
-            const Mat B = U10 * R1.middleCols(a, m);
-            Eigen::JacobiSVD<Mat> svB(B, Eigen::ComputeFullU | Eigen::ComputeFullV);
-            const Mat Wc = svB.matrixV();
-            R1.middleCols(a, m) = (R1.middleCols(a, m) * Wc).eval();
-            L1.middleCols(a, m) = (L1.middleCols(a, m) * Wc).eval();
-        }
-        a = b;
-    }
+    // Singular values come descending, so the cosine-dominant set K leads.
+    const double split = std::sqrt(0.5);
+    Eigen::Index nk = 0;
+    while (nk < N && c(nk) > split) ++nk;
+    const Eigen::Index nj = N - nk;
 
-    const Mat G  = U10 * R1;               // col k = s_k · L2·col(k)
-    const Mat UR = U00 * R1;               // refined cosines: c_k = (L1^H·U00·R1)_kk
-    const Mat H  = -(U01.adjoint() * L1);  // col k = s_k · R2·col(k)
-
-    std::vector<double> theta(static_cast<size_t>(N));
-    Eigen::VectorXd s(N);
-    std::vector<Eigen::Index> big;    // s_k > 0  (sine channel well-conditioned)
-    std::vector<Eigen::Index> small;  // s_k ≈ 0  (θ_k ≈ 0, fill from U11)
-    big.reserve(static_cast<size_t>(N));
-    for (Eigen::Index k = 0; k < N; ++k) {
-        const double sk = G.col(k).norm();
-        const double ck = std::clamp(std::real(L1.col(k).dot(UR.col(k))), 0.0, 1.0);
-        s(k) = sk;
-        theta[static_cast<size_t>(k)] = std::atan2(sk, ck);
-        if (sk > kSingularEps) big.push_back(k); else small.push_back(k);
-    }
-
+    const Mat W = U10 * R1;
     Mat L2 = Mat::Zero(N, N);
-    Mat R2 = Mat::Zero(N, N);
-    for (Eigen::Index k : big) {
-        L2.col(k) = G.col(k) / G.col(k).norm();
-        R2.col(k) = H.col(k) / H.col(k).norm();
+    Eigen::VectorXd s(N);
+    for (Eigen::Index k = nk; k < N; ++k) {
+        s(k) = W.col(k).norm();
+        L2.col(k) = W.col(k) / s(k);
     }
 
-    if (!small.empty()) {
-        const Eigen::Index r = static_cast<Eigen::Index>(big.size());
-        Mat L2big(N, r), R2big(N, r);
-        for (Eigen::Index i = 0; i < r; ++i) {
-            L2big.col(i) = L2.col(big[static_cast<size_t>(i)]);
-            R2big.col(i) = R2.col(big[static_cast<size_t>(i)]);
+    if (nk > 0) {
+        const Mat P = orthonormal_complement(L2.rightCols(nj), N);  // N × nk
+        Eigen::JacobiSVD<Mat> svdK(P.adjoint() * W.leftCols(nk),
+                                   Eigen::ComputeFullU | Eigen::ComputeFullV);
+        L2.leftCols(nk) = P * svdK.matrixU();
+        R1.leftCols(nk) = (R1.leftCols(nk) * svdK.matrixV()).eval();
+        s.head(nk) = svdK.singularValues();
+        const Mat Y = U00 * R1.leftCols(nk);
+        for (Eigen::Index k = 0; k < nk; ++k) {
+            c(k) = Y.col(k).norm();
+            L1.col(k) = Y.col(k) / c(k);
         }
-        const Mat PL = orthonormal_complement(L2big, N);  // N × |small|
-        const Mat PR = orthonormal_complement(R2big, N);
-        // M = P_L^H · U11 · P_R is ≈ unitary; its polar factor (A·B^H from the
-        // SVD M = A·Σ·B^H) gives L2 = P_L·A, R2 = P_R·B with U11 = L2·C·R2^H.
-        const Mat M = PL.adjoint() * U11 * PR;
-        Eigen::JacobiSVD<Mat> svdM(M, Eigen::ComputeFullU | Eigen::ComputeFullV);
-        const Mat L2sub = PL * svdM.matrixU();
-        const Mat R2sub = PR * svdM.matrixV();
-        for (size_t i = 0; i < small.size(); ++i) {
-            L2.col(small[i]) = L2sub.col(static_cast<Eigen::Index>(i));
-            R2.col(small[i]) = R2sub.col(static_cast<Eigen::Index>(i));
-        }
+    }
+
+    const Mat Hc = U11.adjoint() * L2;      // col k = c_k · R2·col(k)
+    const Mat Hs = -(U01.adjoint() * L1);   // col k = s_k · R2·col(k)
+    Mat R2(N, N);
+    std::vector<double> theta(static_cast<size_t>(N));
+    for (Eigen::Index k = 0; k < N; ++k) {
+        R2.col(k) = k < nk ? Eigen::VectorXcd(Hc.col(k) / c(k))
+                           : Eigen::VectorXcd(Hs.col(k) / s(k));
+        theta[static_cast<size_t>(k)] = std::atan2(s(k), c(k));
     }
 
     return CSDResult{std::move(L1), std::move(L2),
