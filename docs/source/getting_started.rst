@@ -32,15 +32,15 @@ Open Quantum Application Research Package
    :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
    :alt: Coverage
 
-.. |docs| image:: https://img.shields.io/website?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2F&label=docs&up_message=online&up_color=2B4DFF&labelColor=201B34
+.. |docs| image:: https://img.shields.io/website?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2F&label=docs&up_message=online&up_color=brightgreen&down_color=red&labelColor=201B34
    :target: https://openqarp.github.io/openqarp/
    :alt: Documentation
 
-.. |arxiv| image:: https://img.shields.io/badge/arXiv-2609.15697-2B4DFF?labelColor=201B34
+.. |arxiv| image:: https://img.shields.io/badge/arXiv-2609.15697-B31B1B?labelColor=201B34
    :target: https://arxiv.org/abs/2609.15697
    :alt: arXiv:2609.15697
 
-.. |doi| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22755228-2B4DFF?labelColor=201B34
+.. |doi| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22755228-B31B1B?labelColor=201B34
    :target: https://doi.org/10.5281/zenodo.22755228
    :alt: DOI
 
