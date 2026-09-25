@@ -7,7 +7,6 @@
 #include <mutex>
 #include <queue>
 #include <stdexcept>
-#include <string>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -61,21 +60,9 @@ private:
 };
 
 /// Worker count for every qarpx parallel layer: ``QARP_NUM_THREADS`` if set
-/// to a positive integer, else ``OMP_NUM_THREADS``, else the physical cores
-/// in the process's CPU affinity, capped one below its logical CPUs (at most
-/// its cgroup CPU limit): a spinning OpenMP worker on each hardware thread
-/// starves the main thread.  Read once.
+/// to a positive integer, else ``OMP_NUM_THREADS``, else
+/// ``detail::default_thread_count`` of the process's CPU budget.  Read once.
 std::size_t configured_thread_count();
-
-namespace detail {
-
-/// The process's cgroup CPU bandwidth limit in whole CPUs (quota / period
-/// rounded up, the tightest over its cgroup and ancestors, v1 and v2); 0 when
-/// unlimited or unreadable.  ``root`` prefixes every ``/proc`` and ``/sys``
-/// path read.
-std::size_t cgroup_cpu_limit(const std::string& root = "");
-
-}  // namespace detail
 
 /// Qubit count from which a csim kernel (and qarpx's dense-block kernel)
 /// forks an OpenMP team, exported as ``QULACS_PARALLEL_NQUBIT_THRESHOLD``

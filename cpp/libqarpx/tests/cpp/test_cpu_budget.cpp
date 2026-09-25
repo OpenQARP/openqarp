@@ -1,23 +1,27 @@
 #include <gtest/gtest.h>
-#include "qarpx/parallel/thread_pool.h"
+#include "qarpx/parallel/cpu_budget.h"
 
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 using qarpx::detail::cgroup_cpu_limit;
+using qarpx::detail::CpuBudget;
+using qarpx::detail::default_thread_count;
+using qarpx::detail::physical_cores;
 
 namespace {
 
-// A throwaway directory standing in for "/": the reader prefixes it to every
+// A throwaway directory standing in for "/": the readers prefix it to every
 // /proc and /sys path.
 class FakeRoot {
 public:
     FakeRoot() {
         const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
         dir_ = fs::temp_directory_path() /
-               (std::string("qarpx_cgroup_") + info->test_suite_name() + "_" + info->name());
+               (std::string("qarpx_cpu_budget_") + info->test_suite_name() + "_" + info->name());
         fs::remove_all(dir_);
         fs::create_directories(dir_);
     }
@@ -29,6 +33,12 @@ public:
         std::ofstream(file) << content;
     }
 
+    void cpu(int id, int package, int core) const {
+        const std::string base = "/sys/devices/system/cpu/cpu" + std::to_string(id) + "/topology/";
+        write(base + "physical_package_id", std::to_string(package) + "\n");
+        write(base + "core_id", std::to_string(core) + "\n");
+    }
+
     [[nodiscard]] std::string str() const { return dir_.string(); }
 
 private:
@@ -37,7 +47,68 @@ private:
 
 }  // namespace
 
-#ifdef __linux__
+// ── default_thread_count ────────────────────────────────────────────────────
+
+struct CountCase {
+    const char* name;
+    CpuBudget budget;
+    std::size_t want;
+};
+
+class DefaultThreadCount : public ::testing::TestWithParam<CountCase> {};
+
+TEST_P(DefaultThreadCount, MatchesHandWorkedCount) {
+    EXPECT_EQ(default_thread_count(GetParam().budget), GetParam().want);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Budgets, DefaultThreadCount,
+    ::testing::Values(
+        CountCase{"NothingKnown", {0, 0, 0}, 4},
+        CountCase{"SingleCpu", {1, 1, 0}, 1},
+        CountCase{"OneSmtCore", {2, 1, 0}, 1},
+        CountCase{"SmtHost", {12, 6, 0}, 6},
+        CountCase{"HybridTwoSmtPCoresEightECores", {12, 10, 0}, 10},
+        CountCase{"NoSmtLeavesOneFree", {8, 8, 0}, 7},
+        CountCase{"TopologyUnknownLeavesOneFree", {8, 0, 0}, 7},
+        CountCase{"LimitTwoOnBigHost", {64, 32, 2}, 1},
+        CountCase{"LimitOne", {16, 8, 1}, 1},
+        CountCase{"LimitThreeCapsBelowPhysical", {4, 4, 3}, 2},
+        CountCase{"LimitThreePhysicalTwo", {4, 2, 3}, 2},
+        CountCase{"LimitAboveLogicalIsInert", {4, 2, 8}, 2},
+        CountCase{"LimitWithoutLogicalCount", {0, 0, 3}, 2}),
+    [](const ::testing::TestParamInfo<CountCase>& info) { return std::string(info.param.name); });
+
+// ── physical_cores ──────────────────────────────────────────────────────────
+
+TEST(PhysicalCores, SmtSiblingsShareACore) {
+    FakeRoot root;
+    root.cpu(0, 0, 0);
+    root.cpu(1, 0, 0);
+    root.cpu(2, 0, 1);
+    root.cpu(3, 0, 1);
+    EXPECT_EQ(physical_cores({0, 1, 2, 3}, root.str()), 2u);
+    EXPECT_EQ(physical_cores({0, 1}, root.str()), 1u);
+    EXPECT_EQ(physical_cores({0, 2}, root.str()), 2u);
+}
+
+TEST(PhysicalCores, PackagesDistinguishEqualCoreIds) {
+    FakeRoot root;
+    root.cpu(0, 0, 0);
+    root.cpu(1, 0, 1);
+    root.cpu(2, 1, 0);
+    root.cpu(3, 1, 1);
+    EXPECT_EQ(physical_cores({0, 1, 2, 3}, root.str()), 4u);
+}
+
+TEST(PhysicalCores, AnyUnreadableCpuIsUnknown) {
+    FakeRoot root;
+    root.cpu(0, 0, 0);
+    EXPECT_EQ(physical_cores({0, 1}, root.str()), 0u);
+    EXPECT_EQ(physical_cores({}, root.str()), 0u);
+}
+
+// ── cgroup_cpu_limit ────────────────────────────────────────────────────────
 
 TEST(CgroupCpuLimit, V2ContainerQuotaRoundsUp) {
     FakeRoot root;
@@ -115,8 +186,6 @@ TEST(CgroupCpuLimit, MountOfAnotherSubtreeIsSkipped) {
     root.write("/sys/fs/cgroup/cpu.max", "100000 100000\n");
     EXPECT_EQ(cgroup_cpu_limit(root.str()), 0u);
 }
-
-#endif
 
 TEST(CgroupCpuLimit, NothingReadableIsZero) {
     FakeRoot root;
