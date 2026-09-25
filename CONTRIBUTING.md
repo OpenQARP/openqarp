@@ -49,7 +49,8 @@ converts it to Draft and the plan is added in the next commit.
 ## General Guidelines
 
 * Never commit to `develop` or `main` directly — every change lands through a
-  pull request.
+  pull request into `develop`.  `main` is the latest release: it only
+  fast-forwards to a tagged commit, as described in [`RELEASING.md`](RELEASING.md).
 * Issues are for reporting without fixing, or for a yes or no on scope
   before anyone writes a plan — use the **Feature** or **Bug** template.  A PR that
   carries a plan or a regression test is its own record and needs no issue;
