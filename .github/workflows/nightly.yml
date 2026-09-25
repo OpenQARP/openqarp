@@ -135,9 +135,21 @@ jobs:
           name: wheel
           path: dist
       - name: Image with the wheel installed
+        # The artifact is an unrepaired linux wheel: it needs the runner's own
+        # Ubuntu (glibc, libstdc++, libgomp) and a CPython matching its tag,
+        # which the distro's python3 need not be.
         run: |
-          printf 'FROM python:%s-slim\nCOPY dist /dist\nRUN pip install --no-cache-dir /dist/*.whl\n' \
-            "$PYTHON_VERSION" > Dockerfile
+          . /etc/os-release
+          cat > Dockerfile <<EOF
+          FROM ubuntu:${VERSION_ID}
+          COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+          RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 ca-certificates \
+              && rm -rf /var/lib/apt/lists/*
+          COPY dist /dist
+          RUN uv venv --python ${PYTHON_VERSION} /venv \
+              && uv pip install --python /venv/bin/python /dist/*.whl
+          RUN /venv/bin/python -c "import qarpx"
+          EOF
           docker build -q -t qarp-cpu-limit .
       - name: Default thread count under a CPU quota
         run: |
@@ -146,7 +158,7 @@ jobs:
           libc = ctypes.CDLL(None)
           libc.getenv.restype = ctypes.c_char_p
           print(libc.getenv(b"QULACS_NUM_THREADS").decode())'
-          threads() { docker run --rm "$@" qarp-cpu-limit python -c "$probe"; }
+          threads() { docker run --rm "$@" qarp-cpu-limit /venv/bin/python -c "$probe"; }
           check() {
             want=$1; shift
             got=$(threads "$@")
