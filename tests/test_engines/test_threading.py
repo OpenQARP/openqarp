@@ -165,6 +165,7 @@ def test_parallel_threshold_is_exported_before_the_first_kernel_call():
 _KERNEL_THREADS_SCRIPT = textwrap.dedent(
     """
     import ctypes
+    import json
     import os
     cpus = %r
     if cpus is not None:
@@ -173,14 +174,17 @@ _KERNEL_THREADS_SCRIPT = textwrap.dedent(
     libc = ctypes.CDLL(None)
     libc.getenv.restype = ctypes.c_char_p
     qx.QarpSimulator()  # init_threading
-    print((libc.getenv(b"QULACS_NUM_THREADS") or b"").decode())
+    exported = (libc.getenv(b"QULACS_NUM_THREADS") or b"").decode()
+    print(json.dumps({"exported": exported, "budget": qx._cpu_budget()}))
     """
 )
 
 
-def _kernel_thread_count(env_extra, cpus=None):
-    """``QULACS_NUM_THREADS`` as ``init_threading`` exported it in a fresh
-    process, pinned to ``cpus`` before ``import qarpx`` when given."""
+def _thread_probe(env_extra, cpus=None):
+    """``QULACS_NUM_THREADS`` as ``init_threading`` exported it, and the CPU
+    budget, in a fresh process pinned to ``cpus`` before ``import qarpx``
+    when given."""
+    import json
     import os
 
     env = {
@@ -196,7 +200,11 @@ def _kernel_thread_count(env_extra, cpus=None):
         text=True,
         env=env,
     )
-    return out.stdout.strip()
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+def _kernel_thread_count(env_extra):
+    return _thread_probe(env_extra)["exported"]
 
 
 def _usable_cpus():
@@ -225,28 +233,41 @@ def _physical_cores_from_sysfs(cpus):
     return len(cores) or None
 
 
+def _assert_default_follows_the_budget(probe, cpus):
+    """The budget matches this process's affinity and sysfs topology read
+    independently here, the exported count is the rule applied to it, and it
+    stays below the logical CPUs and within the physical cores.  The limit is
+    not re-read here: a cgroup CPU limit on the test host only lowers the
+    count, and the rule and the cgroup reader are pinned in
+    ``test_cpu_budget.cpp``."""
+    import os
+
+    budget = probe["budget"]
+    physical = _physical_cores_from_sysfs(cpus)
+    assert budget["logical"] == len(cpus)
+    if hasattr(os, "sched_getaffinity"):
+        assert budget["physical"] == (physical or 0)
+    assert probe["exported"], "init_threading must forward the default to the kernels"
+    n = int(probe["exported"])
+    assert n == budget["default_thread_count"]
+    assert 1 <= n <= len(cpus)
+    if len(cpus) > 1:
+        assert n < len(cpus)
+    if physical is not None:
+        assert n <= physical
+
+
 def test_default_thread_count_never_takes_every_logical_cpu():
-    """Unset, the default is the physical core count and stays below the
-    logical CPU count on a multi-core host, and it reaches the kernels
+    """Unset, the default is derived from the process's CPU budget, stays
+    below the logical CPU count on a multi-core host, and reaches the kernels
     through ``QULACS_NUM_THREADS`` whether or not ``QARP_NUM_THREADS`` is
     set."""
-    exported = _kernel_thread_count({})
-    assert exported, "init_threading must forward the default to the kernels"
-    n = int(exported)
-    cpus = _usable_cpus()
-    logical = len(cpus)
-    assert 1 <= n <= logical
-    if logical > 1:
-        assert n < logical
-    physical = _physical_cores_from_sysfs(cpus)
-    if physical is not None and physical < logical:
-        assert n == physical
+    _assert_default_follows_the_budget(_thread_probe({}), _usable_cpus())
 
 
 def test_default_thread_count_follows_the_cpu_affinity():
     """Pinned to a subset of CPUs (``taskset``, scheduler binding), the
-    default counts only that subset: below its size, and its physical cores
-    when those are fewer."""
+    budget and the default count only that subset."""
     import os
 
     if not hasattr(os, "sched_setaffinity"):
@@ -254,11 +275,7 @@ def test_default_thread_count_follows_the_cpu_affinity():
     subset = _usable_cpus()[:4]
     if len(subset) < 2:
         pytest.skip("needs at least two usable CPUs")
-    n = int(_kernel_thread_count({}, cpus=set(subset)))
-    assert 1 <= n < len(subset)
-    physical = _physical_cores_from_sysfs(subset)
-    if physical is not None and physical < len(subset):
-        assert n == physical
+    _assert_default_follows_the_budget(_thread_probe({}, cpus=set(subset)), subset)
 
 
 def test_omp_num_threads_is_honoured_when_qarp_num_threads_is_unset():
