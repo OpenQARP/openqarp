@@ -121,3 +121,40 @@ jobs:
           cmake --build cpp/libqarpx/build-ci-lapack --target qarpx_tests --parallel "$(nproc)"
           ctest --test-dir cpp/libqarpx/build-ci-lapack --output-on-failure -j "$(nproc)"
           ccache --show-stats
+
+  container-cpu-limit:
+    # Only a real container carries a cgroup CPU quota.  A 2-CPU limit leaves
+    # one thread on any topology; 2.5 rounds up to 3 CPUs, so two threads on a
+    # runner with at least two physical cores (rounding down would leave one).
+    needs: [wheel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+      - name: Image with the wheel installed
+        run: |
+          printf 'FROM python:%s-slim\nCOPY dist /dist\nRUN pip install --no-cache-dir /dist/*.whl\n' \
+            "$PYTHON_VERSION" > Dockerfile
+          docker build -q -t qarp-cpu-limit .
+      - name: Default thread count under a CPU quota
+        run: |
+          probe='import ctypes, qarpx as qx
+          qx.QarpSimulator()
+          libc = ctypes.CDLL(None)
+          libc.getenv.restype = ctypes.c_char_p
+          print(libc.getenv(b"QULACS_NUM_THREADS").decode())'
+          threads() { docker run --rm "$@" qarp-cpu-limit python -c "$probe"; }
+          check() {
+            want=$1; shift
+            got=$(threads "$@")
+            echo "docker run $* -> $got threads (want $want)"
+            [ "$got" = "$want" ]
+          }
+          echo "runner: $(nproc) CPUs, no limit -> $(threads) threads"
+          check 1 --cpus=2
+          check 1 --cpus=2 --cgroupns=host
+          check 1 --cpus=1.5
+          if [ "$(nproc)" -ge 4 ]; then check 2 --cpus=2.5; fi
