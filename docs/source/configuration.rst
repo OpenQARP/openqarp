@@ -177,7 +177,7 @@ gate.
 
     sim = qx.QarpSimulator()
     sim.fusion_max_qubits          # 3: the built-in default
-    sim.fusion_max_qubits = 1      # single-qubit fusion only (the 0.1.0 behaviour)
+    sim.fusion_max_qubits = 1      # single-qubit fusion only
     sim.fusion_max_qubits = 0      # raw per-gate dispatch, for diagnostics
     sim.fusion_min_qubits          # 12: narrower registers keep the single-qubit pass
 
@@ -192,8 +192,8 @@ parse or exceed ``QarpSimulator.MAX_FUSION_QUBITS`` are ignored:
 Wider is not better: a :math:`k`-qubit block costs :math:`2^k` multiplies
 per amplitude, so the default is the width measured fastest on this
 kernel — at 20 qubits, single thread, brickwork 207 → 40 ms, QFT 462 → 190
-ms, a Trotter step 230 → 94 ms (macOS arm64, 2026-09-13; see the
-statevector benchmark table) — and the pass only widens a block past two
+ms, a Trotter step 230 → 94 ms (macOS arm64; see the statevector
+benchmark table) — and the pass only widens a block past two
 qubits through a shared qubit.  Below ``fusion_min_qubits`` the fold costs
 more than the passes it saves, so small registers keep the single-qubit
 pass.
