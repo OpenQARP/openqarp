@@ -54,7 +54,7 @@ them entirely from Python.
 
 .. image:: https://raw.githubusercontent.com/OpenQARP/openqarp/develop/docs/source/images/block_primitive_engine.svg
    :target: https://openqarp.github.io/openqarp/source/qarp_philosophy.html
-   :alt: Blocks describe circuits, primitives describe what to extract, engines describe how they run.
+   :alt: Blocks describe circuits, primitives and composites describe what to extract, engines describe how they run.
 
 ----
 
