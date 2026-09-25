@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 160" width="780" height="160" role="img" aria-labelledby="t d">
+  <title id="t">Block, primitive, engine</title>
+  <desc id="d">Blocks describe circuits, primitives describe what to extract, engines describe how they run.</desc>
+  <!-- Colour pairs mirror docs/_static/custom.css. Shown through an img tag, the SVG
+       follows the viewer's OS colour scheme, not the host page's theme. -->
+  <style>
+    .card { fill: #FFFFFF; stroke: #0B0E1C; stroke-opacity: 0.25; stroke-width: 1.5; }
+    .rule { stroke: #0B0E1C; stroke-opacity: 0.10; stroke-width: 1; }
+    .head { fill: #666C85; }
+    .name { fill: #0B0E1C; }
+    .say  { fill: #3A4059; }
+    .code { fill: #3A4059; }
+    .arrow { fill: none; stroke: #666C85; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) {
+      .card { fill: #2A2441; stroke: #E9E7F6; stroke-opacity: 0.32; }
+      .rule { stroke: #E9E7F6; stroke-opacity: 0.15; }
+      .head { fill: #9C96BE; }
+      .name { fill: #EDEBF8; }
+      .say { fill: #C6C1DC; }
+      .code { fill: #C6C1DC; }
+      .arrow { stroke: #9C96BE; }
+    }
+  </style>
+
+  <rect class="card" x="6" y="8" width="240" height="144" rx="14"/>
+  <text class="head" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" letter-spacing="0.9" x="24" y="36">CIRCUIT</text>
+  <text class="name" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="600" x="24" y="66">Block</text>
+  <text class="say" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" x="24" y="90">describes the circuit</text>
+  <line class="rule" x1="24" y1="108" x2="228" y2="108"/>
+  <text class="code" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" x="24" y="132">SimpleBlock · HEABlock</text>
+
+  <rect class="card" x="270" y="8" width="240" height="144" rx="14"/>
+  <text class="head" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" letter-spacing="0.9" x="288" y="36">ALGORITHM</text>
+  <text class="name" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="600" x="288" y="66">Primitive</text>
+  <text class="say" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" x="288" y="90">describes what to extract</text>
+  <line class="rule" x1="288" y1="108" x2="492" y2="108"/>
+  <text class="code" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" x="288" y="132">Sampler · StateVector · VQE</text>
+
+  <rect class="card" x="534" y="8" width="240" height="144" rx="14"/>
+  <text class="head" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" letter-spacing="0.9" x="552" y="36">EXECUTION</text>
+  <text class="name" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="600" x="552" y="66">Engine</text>
+  <text class="say" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" x="552" y="90">describes how it runs</text>
+  <line class="rule" x1="552" y1="108" x2="756" y2="108"/>
+  <text class="code" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="12" x="552" y="132">QarpEngine · Device</text>
+
+  <path class="arrow" d="M250,80 H265 M260,75 L265,80 L260,85"/>
+  <path class="arrow" d="M514,80 H529 M524,75 L529,80 L524,85"/>
+</svg>

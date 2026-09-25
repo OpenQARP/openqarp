@@ -52,6 +52,10 @@ build a circuit for it, then run the circuit on a fast simulator or compile it
 for real hardware.  The simulator and compiler are written in C++, and you use
 them entirely from Python.
 
+.. image:: https://raw.githubusercontent.com/OpenQARP/openqarp/develop/docs/source/images/block_primitive_engine.svg
+   :target: https://openqarp.github.io/openqarp/source/qarp_philosophy.html
+   :alt: Blocks describe circuits, primitives describe what to extract, engines describe how they run.
+
 ----
 
 Install
@@ -136,10 +140,10 @@ instead — exactly, or sampled with shots, from the same circuit.
    print(results[0], results[1])
    # (1.4999999999999998+0j) 1.5        ← both agree with ⟨H⟩ = 1.5 by hand
 
-That is the whole mental model: **block** (what the circuit does) →
-**primitive** (what you want out of it) → **engine** (run it).  Everything
-else — VQE, QPE, circuit cutting, noisy simulation — is those three pieces with
-more interesting parts plugged in.
+These are the three layers of OpenQARP.  A **block** describes the circuit, a
+**primitive** describes what to extract from it, and an **engine** describes how
+it runs.  VQE, QPE, circuit cutting and noisy simulation use the same three
+layers with different parts plugged in.
 
 **Next:** the six ``tutorial_00`` … ``tutorial_05`` notebooks in
 `examples/ <https://github.com/OpenQARP/openqarp/tree/main/examples>`_

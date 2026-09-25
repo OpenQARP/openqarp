@@ -2,33 +2,45 @@
 Open Quantum Application Research Package
 =========================================
 
-|ci| |coverage| |pypi| |docs| |python| |license| |doi|
+|pypi| |python| |wheels| |license|
 
-.. |ci| image:: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml/badge.svg
-   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
-   :alt: CI
+|ci| |coverage| |docs|
 
-.. |coverage| image:: https://img.shields.io/endpoint?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2Fbadges%2Fcoverage.json
-   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
-   :alt: Coverage
+|arxiv| |doi|
 
-.. |pypi| image:: https://img.shields.io/pypi/v/openqarp
+.. |pypi| image:: https://img.shields.io/pypi/v/openqarp?label=pypi&labelColor=201B34&color=2B4DFF
    :target: https://pypi.org/project/openqarp/
-   :alt: PyPI
+   :alt: PyPI version
 
-.. |docs| image:: https://img.shields.io/badge/Docs-GitHub%20Pages-blue
-   :target: https://openqarp.github.io/openqarp/
-   :alt: Documentation
-
-.. |python| image:: https://img.shields.io/badge/python-3.11+-blue.svg
+.. |python| image:: https://img.shields.io/pypi/pyversions/openqarp?labelColor=201B34&color=2B4DFF
    :target: https://pypi.org/project/openqarp/
-   :alt: Python 3.11+
+   :alt: Supported Python versions
 
-.. |license| image:: https://img.shields.io/badge/License-Apache_2.0-blue.svg
+.. |wheels| image:: https://img.shields.io/badge/wheels-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-2B4DFF?labelColor=201B34
+   :target: https://pypi.org/project/openqarp/#files
+   :alt: Wheels for Linux, macOS and Windows
+
+.. |license| image:: https://img.shields.io/github/license/OpenQARP/openqarp?labelColor=201B34&color=2B4DFF
    :target: https://github.com/OpenQARP/openqarp/blob/develop/LICENSE
    :alt: License: Apache 2.0
 
-.. |doi| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22755228-blue
+.. |ci| image:: https://img.shields.io/github/actions/workflow/status/OpenQARP/openqarp/ci.yml?branch=develop&label=CI&labelColor=201B34
+   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
+   :alt: CI
+
+.. |coverage| image:: https://img.shields.io/endpoint?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2Fbadges%2Fcoverage.json&labelColor=201B34
+   :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
+   :alt: Coverage
+
+.. |docs| image:: https://img.shields.io/website?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2F&label=docs&up_message=online&up_color=2B4DFF&labelColor=201B34
+   :target: https://openqarp.github.io/openqarp/
+   :alt: Documentation
+
+.. |arxiv| image:: https://img.shields.io/badge/arXiv-2609.15697-2B4DFF?labelColor=201B34
+   :target: https://arxiv.org/abs/2609.15697
+   :alt: arXiv:2609.15697
+
+.. |doi| image:: https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22755228-2B4DFF?labelColor=201B34
    :target: https://doi.org/10.5281/zenodo.22755228
    :alt: DOI
 
@@ -39,6 +51,10 @@ a problem, such as a molecule, a spin model or an optimisation instance.  You
 build a circuit for it, then run the circuit on a fast simulator or compile it
 for real hardware.  The simulator and compiler are written in C++, and you use
 them entirely from Python.
+
+.. image:: https://raw.githubusercontent.com/OpenQARP/openqarp/develop/docs/source/images/block_primitive_engine.svg
+   :target: https://openqarp.github.io/openqarp/source/qarp_philosophy.html
+   :alt: Blocks describe circuits, primitives describe what to extract, engines describe how they run.
 
 ----
 
@@ -124,10 +140,10 @@ instead — exactly, or sampled with shots, from the same circuit.
    print(results[0], results[1])
    # (1.4999999999999998+0j) 1.5        ← both agree with ⟨H⟩ = 1.5 by hand
 
-That is the whole mental model: **block** (what the circuit does) →
-**primitive** (what you want out of it) → **engine** (run it).  Everything
-else — VQE, QPE, circuit cutting, noisy simulation — is those three pieces with
-more interesting parts plugged in.
+These are the three layers of OpenQARP.  A **block** describes the circuit, a
+**primitive** describes what to extract from it, and an **engine** describes how
+it runs.  VQE, QPE, circuit cutting and noisy simulation use the same three
+layers with different parts plugged in.
 
 **Next:** the six ``tutorial_00`` … ``tutorial_05`` notebooks in
 `examples/ <https://github.com/OpenQARP/openqarp/tree/main/examples>`_
