@@ -1,12 +1,12 @@
 # Run OpenBLAS's parallel work on qarpx's OpenMP team
 
-**Status:** Draft
+**Status:** In progress
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-26
 **Tier:** Structural
 **Branch:** improvement/sampler-exact-speed
-**Green-lit:**
+**Green-lit:** 7a90d38 (2026-09-26), plan blob bf26f62cc09220a9333afaab68d33479a20e3ba5
 **Scope:**
 - `cpp/libqarpx/include/qarpx/parallel/blas_threads.h`, `cpp/libqarpx/src/parallel/blas_threads.cpp` (new) — the callback
 - `cpp/libqarpx/CMakeLists.txt` (source list), `cpp/libqarpx/tests/cpp/CMakeLists.txt` (test list)
@@ -16,6 +16,7 @@
 - `cpp/libqarpx/tests/cpp/test_blas_threads.cpp` (new), `tests/test_blas_threads.py` (new)
 - `docs/source/configuration.rst` — the Threads section
 - `docs/contributions/openblas_thread_sharing_plan.md`, `docs/contributions/README.md` (index row)
+- Added in implementation (see the deviations log): `qarp/_abi.py`
 
 Lands in the same PR as [`sampler_distribution_plan.md`](sampler_distribution_plan.md)
 and [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md),
@@ -82,9 +83,20 @@ callback therefore:
   adjustment off for that region, checks the delivered team size before any
   job starts (one `single` plus barrier), and runs job `omp_get_thread_num()`
   on each member;
-- falls back to `numjobs` `std::thread`s when the team is short (called
-  inside an active parallel region, a thread limit, a failed spawn).  No job
-  starts before the whole team exists, so the fallback never re-runs work.
+- falls back to `numjobs` `std::thread`s when the team is short (a nested
+  region with nesting off, a thread limit).  No job starts before the whole
+  team exists, so the fallback never re-runs work.  A `std::thread` that
+  cannot be created terminates the process through the `noexcept` callback,
+  since the jobs already started would wait for it forever.
+
+**Invariant: one call at a time.**  OpenBLAS gives job `i` the static
+scratch buffer `blas_thread_buffer[i]` (`exec_threads` in
+`blas_server.c`), shared by every caller.  Its own pool serialises callers
+through its queue; the callback bypasses that queue, so it holds a
+process-wide mutex for the whole call.  OpenBLAS never re-enters `exec_blas`
+from a job (its own pool would deadlock too), so the mutex cannot
+self-deadlock; a sweep of numpy and scipy linear algebra through a probing
+build saw no nested entry in 12,947 calls.
 
 Only OpenMP 2.0 calls are used, so MSVC's runtime builds it.  A relaxed
 atomic counts invocations, for tests.
@@ -129,6 +141,7 @@ std::uint64_t blas_callback_invocations();
 # bindings (private)
 qarpx._openblas_threads_callback_address() -> int
 qarpx._blas_callback_invocations() -> int
+qarpx._configured_thread_count() -> int
 
 # qarp/_blas_threads.py (private)
 def install() -> list[str]: ...    # paths of the libraries the callback went into
@@ -143,6 +156,10 @@ No public Python API.  Users see only `QARP_BLAS_THREADS`.
 |---|---|---|
 | Every job runs exactly once, jobs that wait on all others complete, for `numjobs` 1–16 | per-job counters; a spin barrier across all jobs (the level-3 pattern) | `test_blas_threads.cpp` |
 | Same, called from inside an active parallel region and with `omp_set_num_threads(2)` | fallback completes; counters | `test_blas_threads.cpp` |
+| Concurrent calls never run the same job index together | per-index busy flags standing in for OpenBLAS's scratch buffers | `test_blas_threads.cpp` |
+| numpy BLAS from four Python threads at once | `Q Qᵀ = I` for every result | `test_blas_threads.py` |
+| A broad numpy/scipy linear-algebra sweep | the same routines on OpenBLAS's own pool (reference implementation) | `test_blas_threads.py` |
+| scipy imported after qarp; BLAS above qarpx's thread budget; the fork reset in-process | `P L U = A`, `Q Qᵀ = I`, counter unchanged after the reset | `test_blas_threads.py` |
 | numpy BLAS through the callback: `Q @ Q.T` for an orthogonal `Q`, `norm(ones(n))`, `solve(A, A @ x)`, complex `zgemm` | `I`, `√n`, `x`, the product computed from real parts; `1e-12` | `test_blas_threads.py` |
 | The callback is actually used | invocation counter rises across a 2000×2000 matmul | `test_blas_threads.py` |
 | Results match OpenBLAS's own pool bit for bit | same operations after `uninstall()` (additional: same job partition) | `test_blas_threads.py` |
@@ -160,30 +177,43 @@ against OpenBLAS's pool.
 
 ### Phase 1 — the callback
 
-- [ ] `blas_threads.{h,cpp}`: concurrent execution, team-size check, `std::thread` fallback, counter
-- [ ] C++ tests; bindings for the address and the counter
+- [x] `blas_threads.{h,cpp}`: concurrent execution, team-size check, `std::thread` fallback, counter *(2026-09-26)*
+- [x] C++ tests; bindings for the address and the counter *(2026-09-26)*
 
 ### Phase 2 — install
 
-- [ ] `qarp/_blas_threads.py`: discovery, pool size, install at import, `QARP_BLAS_THREADS`, fork reset
-- [ ] Python tests
+- [x] `qarp/_blas_threads.py`: discovery, pool size, install at import, `QARP_BLAS_THREADS`, fork reset *(2026-09-26)*
+- [x] Python tests *(2026-09-26)*
 
 ### Phase 3 — docs and numbers
 
-- [ ] Threads section of `configuration.rst`
-- [ ] Timing tables in the PR
+- [x] Threads section of `configuration.rst` *(2026-09-26)*
+- [x] Timing tables in the PR *(2026-09-26)*
 
-## Open items for the green-light
+## Decisions (green-light, 2026-09-26)
 
-- The opt-out's name and values: `QARP_BLAS_THREADS=native`.
-- BLAS following `QARP_NUM_THREADS` (one less than the logical CPUs by
-  default) instead of OpenBLAS's own count.
-- Discovery limited to the scipy-openblas copies in the numpy and scipy
-  wheels.  A conda OpenBLAS would need `threadpoolctl` as a dependency.
-- The tier: structural, for a process-wide change to how numpy runs.
+Green-lit offline with the open items resolved as proposed:
+- The opt-out is `QARP_BLAS_THREADS=native`.
+- BLAS follows `QARP_NUM_THREADS` unless the user set `OPENBLAS_NUM_THREADS`.
+- Discovery covers the scipy-openblas copies in the numpy and scipy wheels;
+  no `threadpoolctl` dependency.
+- Tier: structural.
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+Declared in the PR and folded in above.
+
+- **`_configured_thread_count` binding**, so the Python side sizes OpenBLAS
+  to qarpx's budget; the sketch listed only the address and the counter.
+- **ABI bump to 10** in `bindings.cpp` and `qarp/_abi.py` for the new
+  bindings; `qarp/_abi.py` was not in the scope list.
+- **Calls are serialised.**  An architecture review found that concurrent
+  BLAS calls from several threads corrupted each other's results (NaN): the
+  callback bypasses OpenBLAS's queue, and jobs of different calls shared
+  `blas_thread_buffer[i]`.  A process-wide mutex now runs one call at a time,
+  with the tests above.  Four Python threads doing QR plus a product took
+  5.7 s with the callback and 39.7 s on OpenBLAS's own pools.
+- **One guard instead of two.**  The callback relies on the team-size check
+  alone: a nested region with nesting off yields a team of one, and with
+  nesting on a full nested team is valid.  A failed `std::thread` spawn
+  terminates the process instead of falling back.

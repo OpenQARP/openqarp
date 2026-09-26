@@ -160,6 +160,23 @@ threshold (16 qubits, see *Gate fusion*) two threads overlap almost fully;
 above it each call already occupies every core, so threading buys little
 there.
 
+numpy and scipy wheels each bundle their own OpenBLAS, with its own thread
+pool.  After a multi-threaded BLAS call (a complex ``np.linalg.norm``, a
+matrix product, a solve) its workers keep spinning for 100–200 ms, and a
+simulator call started in that window competes with them for the cores: a
+16-qubit ``statevector`` right after a norm took 108 ms instead of 5 ms.
+``import qarp`` therefore hands those OpenBLAS copies a threading callback,
+so their parallel jobs run on qarpx's OpenMP team and the process keeps one
+pool.  BLAS stays multi-threaded, sized by ``QARP_NUM_THREADS`` unless
+``OPENBLAS_NUM_THREADS`` is set; BLAS calls from several Python threads run
+one at a time, as they do on OpenBLAS's own pool.  A child created with ``fork`` goes back to
+OpenBLAS's own pool.  Other BLAS libraries (MKL, Accelerate, a conda
+OpenBLAS) are left alone.  To keep OpenBLAS's own threading:
+
+.. code-block:: bash
+
+    QARP_BLAS_THREADS=native python my_script.py
+
 Gate fusion
 ===========
 

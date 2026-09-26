@@ -30,6 +30,10 @@ from ._abi import check_qarpx_abi as _check_qarpx_abi
 
 _check_qarpx_abi(_qarpx)
 
+from . import _blas_threads
+
+_blas_threads.install()
+
 from ._config import config
 from ._types import Consumes, ExactResult, SamplingDictionary, Shots
 from ._sampling_distribution import SamplingDistribution

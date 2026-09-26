@@ -1,4 +1,5 @@
 #include <nanobind/nanobind.h>
+#include "qarpx/parallel/blas_threads.h"
 #include "qarpx/parallel/cpu_budget.h"
 #include "qarpx/parallel/thread_pool.h"
 #include <nanobind/operators.h>
@@ -137,7 +138,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 9
+#define QARPX_ABI_VERSION 10
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -153,6 +154,15 @@ NB_MODULE(qarpx, m) {
         return d;
     }, "Internal: this process's CPU budget as read now (0 = unknown, or no "
        "limit) and the default thread count it gives.");
+
+    m.def("_openblas_threads_callback_address", [] {
+        return reinterpret_cast<std::uintptr_t>(&qarpx::qarpx_openblas_threads);
+    }, "Internal: address of the OpenBLAS threading callback that runs BLAS "
+       "jobs on qarpx's OpenMP team.");
+    m.def("_blas_callback_invocations", &qarpx::blas_callback_invocations,
+          "Internal: calls of the OpenBLAS threading callback so far.");
+    m.def("_configured_thread_count", &qarpx::configured_thread_count,
+          "Internal: the worker count every qarpx parallel layer uses.");
 
     // ── Exception taxonomy at the Python boundary ──
     // capability_error → qarp.errors.CapabilityError (ValueError fallback if

@@ -47,6 +47,7 @@ add_executable(qarpx_tests
     test_operators_sparse.cpp
     test_operators_symbolic.cpp
     test_cpu_budget.cpp
+    test_blas_threads.cpp
 )
 
 target_link_libraries(qarpx_tests PRIVATE
