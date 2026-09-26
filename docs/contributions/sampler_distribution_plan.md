@@ -1,12 +1,12 @@
 # Return Sampler distributions as an array-backed `SamplingDistribution`
 
-**Status:** Draft
+**Status:** In progress
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-25
 **Tier:** Structural
 **Branch:** improvement/sampler-exact-speed
-**Green-lit:**
+**Green-lit:** 6df44e2 (2026-09-25), plan blob f948d8e66e2babf891009a4d338746866ea9af31
 **Scope:**
 - `qarp/_sampling_distribution.py` (new) — `SamplingDistribution`, the shared bit-projection kernel, the result builder
 - `qarp/_types.py` — `SamplingDictionary` becomes a read-only `Mapping` alias; `PrimitiveResult` alias
@@ -24,6 +24,9 @@
 - `docs/source/algorithms.rst`, `docs/source/configuration.rst`, `docs/source/tutorial.rst`, `docs/source/postselection.rst`, `docs/api/qarp.rst`
 - `examples/tutorial_02_primitives.ipynb` — one cell on bulk access
 - `docs/contributions/sampler_distribution_plan.md`, `docs/contributions/README.md` (index row, roadmap sentence)
+- Added in implementation (see the deviations log): `tests/test_pipeline/conftest.py`,
+  `qarp/plotting/_plot_histogram.py`, `qarp/algorithms/_spectral_estimation.py`,
+  `qarp/algorithms/_composite/montecarlo.py`, `docs/source/getting_started.rst`
 
 ---
 
@@ -67,8 +70,11 @@ arrays.  Reading it like the current dict keeps working: `d[bits]`, `.get`,
 - `n_bits_measured` — bits per key, `len(measured_qubits)`.
 
 Both arrays are read-only views.  Tuple keys are made on demand: iteration
-streams them from two cached half-tables, and `d[bits]` packs the tuple and
-binary-searches `outcomes`.  Nothing is materialised unless the caller asks
+streams them from two cached half-tables, and `d[bits]` packs the tuple
+through the inverse tables and binary-searches `outcomes`, trying the slot
+after the previous hit first so lookups in iteration order (`dict(d)`) skip
+the search.  `probability_of(k)` looks a probability up by its packed integer,
+0.0 when absent.  Nothing is materialised unless the caller asks
 with `to_dict()`.  Iteration is always ascending in the packed integer, for
 every register width.
 
@@ -89,10 +95,11 @@ three-way union spelled out in `PrimitiveAlgorithm.run` and the engines.
 `Sampler.run` returns exactly `SamplingDistribution`.
 
 **Post-selection.**  `PostSelection.apply` accepts any `SamplingDictionary`.
-On a `SamplingDistribution` it tests bits on `outcomes` in numpy, and fixed-bit specs
-drop the selected positions with `pack_bits`.  On a plain dict it keeps its
-current loop.  `PostSelected.distribution` becomes a `SamplingDistribution` either
-way.
+A plain dict is packed into a `SamplingDistribution` first, so one array path
+serves both: it evaluates the condition once per distinct selected-bit
+pattern, and fixed-bit specs drop the selected positions with `pack_bits`.
+Keys must be 0/1 tuples of one width.  `PostSelected.distribution` is a
+`SamplingDistribution`.
 
 **In-tree consumers.**  An audit found no mutation, JSON or pickling of a
 Sampler result in `qarp/`, `tests/`, `examples/` or `docs/`.  Two things
@@ -101,12 +108,19 @@ break and are fixed here:
   `isinstance(result, dict)`.  They check `Mapping` instead.
 - PCE calls `np.array(engine.run(...))`.  numpy treats a non-dict `Mapping` as
   a sequence, so the call either builds an array of key bits or raises.  PCE
-  builds its object array element by element instead.
+  passes Sampler results straight to its ungrouping helper; only scalar
+  results become an array.
+
+Two read-only consumers were annotated with `Dict` and rejected a
+`SamplingDistribution` for typed callers: `plot_histogram` now takes a
+`Mapping[Tuple[int, ...], float]` and the spectral estimator a
+`Mapping[Any, float]`.
 
 **What breaks for users.**  `isinstance(result, dict)`, mutation, and
 `np.array` over a list of results.  Mutation raises `TypeError` from the first
 release: there is no deprecation shim.  `to_dict()` is the migration for all
-three.  The repr changes to
+three.  `PostSelection.apply` rejects dict keys that are not 0/1 tuples of one
+width with a `ValueError`.  The repr changes to
 `SamplingDistribution({...})`, truncated past 16 entries.
 
 **Conventions.**  §1 is unchanged: keys stay LSB-first tuples, and `outcomes`
@@ -129,7 +143,8 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
     """Read-only sampling distribution over LSB-first bit tuples."""
 
     def __init__(self, outcomes: ArrayLike, probabilities: ArrayLike, n_bits_measured: int): ...
-    # outcomes strictly ascending and < 2**n_bits_measured; same length as probabilities
+    # outcomes: integers (TypeError otherwise), strictly ascending, < 2**n_bits_measured;
+    # same length as probabilities
 
     outcomes: np.ndarray        # read-only
     probabilities: np.ndarray   # read-only
@@ -137,9 +152,11 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
 
     def __getitem__(self, bits: tuple[int, ...]) -> float: ...   # KeyError if absent or wrong width
     def __iter__(self) -> Iterator[tuple[int, ...]]: ...           # ascending packed order
+    def __reversed__(self) -> Iterator[tuple[int, ...]]: ...       # descending packed order
     def __len__(self) -> int: ...
     def __contains__(self, bits: object) -> bool: ...
     def __eq__(self, other: object) -> bool: ...   # array fast path for SamplingDistribution, Mapping otherwise
+    def probability_of(self, outcome: int) -> float: ...   # 0.0 if absent; ValueError out of range
     def to_dict(self) -> dict[tuple[int, ...], float]: ...
 
 
@@ -187,28 +204,28 @@ for develop and for this branch, plus the cost of a full `to_dict()`.
 
 ### Phase 1 — `SamplingDistribution` and the kernel
 
-- [ ] `qarp/_sampling_distribution.py`: `SamplingDistribution`, `pack_bits`, `distribution_from_result`
-- [ ] `tests/test_sampling_distribution.py`
+- [x] `qarp/_sampling_distribution.py`: `SamplingDistribution`, `pack_bits`, `distribution_from_result` *(2026-09-25)*
+- [x] `tests/test_sampling_distribution.py` *(2026-09-25)*
 
 ### Phase 2 — producers
 
-- [ ] `Sampler.run` returns `SamplingDistribution`; `StructuredQPEPlan.sample` and `_reindex_exact` use the kernel
-- [ ] `SamplingDictionary` and `PrimitiveResult` aliases; primitive and engine annotations
-- [ ] Sampler tests against analytic marginals
+- [x] `Sampler.run` returns `SamplingDistribution`; `StructuredQPEPlan.sample` and `_reindex_exact` use the kernel *(2026-09-25)*
+- [x] `SamplingDictionary` and `PrimitiveResult` aliases; primitive and engine annotations *(2026-09-25)*
+- [x] Sampler tests against analytic marginals *(2026-09-25)*
 
 ### Phase 3 — consumers
 
-- [ ] Grover, AmplitudeAmplification, AmplitudeEstimation check `Mapping`
-- [ ] PCE builds its result array element by element
-- [ ] `PostSelection.apply` on `SamplingDistribution`; `PostSelected.distribution` is a `SamplingDistribution`
-- [ ] Test helpers that require `dict` accept `Mapping`
+- [x] Grover, AmplitudeAmplification, AmplitudeEstimation check `Mapping` *(2026-09-25)*
+- [x] PCE passes Sampler results straight to its ungrouping helper *(2026-09-25)*
+- [x] `PostSelection.apply` on `SamplingDistribution`; `PostSelected.distribution` is a `SamplingDistribution` *(2026-09-25)*
+- [x] Test helpers that require `dict` accept `Mapping` *(2026-09-25)*
 
 ### Phase 4 — contract and docs
 
-- [ ] §14 sentence in `qarp_conventions.md`; 0.2 and 1.0 roadmap paragraphs in the contributions README
-- [ ] `algorithms.rst`, `configuration.rst`, `tutorial.rst`, `postselection.rst`, `docs/api/qarp.rst`
-- [ ] Bulk-access cell in `tutorial_02_primitives.ipynb`
-- [ ] 22-qubit timing table in the PR
+- [x] §14 sentence in `qarp_conventions.md` *(2026-09-25)*; 0.2 and 1.0 roadmap paragraphs in the contributions README *(2026-09-26)*
+- [x] `algorithms.rst`, `configuration.rst`, `tutorial.rst`, `postselection.rst`, `docs/api/qarp.rst` *(2026-09-25)*
+- [x] Bulk-access cell in `tutorial_02_primitives.ipynb` *(2026-09-25)*
+- [x] 22-qubit timing table in the PR *(2026-09-25)*
 
 ## Decisions (sit-down, 2026-09-25)
 
@@ -221,6 +238,25 @@ for develop and for this branch, plus the cost of a full `to_dict()`.
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+Declared in the PR and folded in above.
+
+- **Post-selection has one path.**  A plain dict is packed first instead of
+  keeping the per-key loop; dict keys that are not 0/1 tuples of one width
+  now raise `ValueError`.
+- **PCE builds no array for Sampler results**, instead of an object array
+  built element by element.
+- **`probability_of(k)`**, a public lookup by packed integer, added on the
+  author's request.
+- **`__reversed__`**, since `Mapping` leaves it undefined and a `dict`
+  supports it.
+- **Constructor rejects non-integer outcomes** with `TypeError` instead of
+  truncating them.
+- **Lookups** go through inverse half-tables and a sequential cursor, so
+  `dict(d)` does not bisect per key.
+- **Private constructors** `_wrap` (takes ownership of validated arrays) and
+  `_from_mapping` (packs a tuple-keyed mapping), not in the API sketch.
+- **Scope:** `tests/test_pipeline/conftest.py` (type narrowing),
+  `qarp/plotting/_plot_histogram.py` and
+  `qarp/algorithms/_spectral_estimation.py` (`Dict` annotations widened),
+  `qarp/algorithms/_composite/montecarlo.py` (a comment), and
+  `docs/source/getting_started.rst` (printed output).

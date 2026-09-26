@@ -45,13 +45,33 @@ def test_iteration_is_ascending_in_the_packed_integer():
 
 @pytest.mark.parametrize(
     "bad_key",
-    [(1, 1), (1, 1, 0, 0), (2, 0, 0), [1, 1, 0], "110", 3],
+    [(1, 1), (1, 1, 0, 0), (2, 0, 0), (0.5, 0, 0), ([1], 0, 0), [1, 1, 0], "110", 3],
 )
 def test_absent_or_malformed_keys_are_missing(bad_key):
     d = _dist()
     assert bad_key not in d
     with pytest.raises(KeyError):
         d[bad_key]
+
+
+def test_lookups_in_any_order_agree_with_the_hand_written_dict():
+    d = _dist()
+    for bits in [(1, 0, 1), (0, 0, 0), (1, 0, 1), (1, 1, 0), (0, 0, 0)]:
+        assert d[bits] == _AS_DICT[bits]
+
+
+def test_dict_of_the_distribution_is_the_hand_written_dict_in_order():
+    out = dict(_dist())
+    assert type(out) is dict
+    assert list(out.items()) == list(_AS_DICT.items())
+
+
+@pytest.mark.parametrize("width", [3, 40, 70])
+def test_reversed_iterates_in_descending_packed_order(width):
+    """Keys are 0, 3 and 5 padded with zeros, so reversed order is 5, 3, 0."""
+    pad = (0,) * (width - 3)
+    d = SamplingDistribution([0, 3, 5], [0.2, 0.3, 0.5], width)
+    assert list(reversed(d)) == [(1, 0, 1) + pad, (1, 1, 0) + pad, (0, 0, 0) + pad]
 
 
 def test_bool_and_numpy_bits_match_like_dict_keys():
@@ -148,6 +168,21 @@ def test_arrays_and_width():
 def test_constructor_rejects_invalid_data(outcomes, probs, n_bits, match):
     with pytest.raises(ValueError, match=match):
         SamplingDistribution(outcomes, probs, n_bits)
+
+
+@pytest.mark.parametrize("outcomes", [[0.0, 1.0], [0.7, 1.9], [False, True], ["0", "1"]])
+def test_constructor_rejects_non_integer_outcomes(outcomes):
+    with pytest.raises(TypeError, match="outcomes must be integers"):
+        SamplingDistribution(outcomes, [0.5, 0.5], 1)
+
+
+def test_constructor_accepts_numpy_and_python_integers():
+    assert SamplingDistribution(np.array([0, 3], dtype=np.uint8), [0.5, 0.5], 2) == {
+        (0, 0): 0.5,
+        (1, 1): 0.5,
+    }
+    wide = SamplingDistribution(np.array([1, 1 << 69], dtype=object), [0.5, 0.5], 70)
+    assert wide.probability_of(1 << 69) == 0.5
 
 
 def test_wide_keys_use_python_ints():

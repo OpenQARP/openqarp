@@ -163,7 +163,8 @@ class PostSelection:
         if self.is_fixed:
             # Dropping bits that are constant across the kept outcomes keeps
             # the packed keys strictly ascending.
-            rest = [q for q in range(n_bits) if q not in set(self.qubits)]
+            selected = set(self.qubits)
+            rest = [q for q in range(n_bits) if q not in selected]
             keys, width = pack_bits(outcomes[keep], rest), len(rest)
         else:
             keys, width = outcomes[keep], n_bits
@@ -221,7 +222,8 @@ class PostSelection:
         success = float(np.sum(np.abs(sv[mask]) ** 2))
 
         if self.is_fixed:
-            survivors = [q for q in range(n_qubits) if q not in set(self.qubits)]
+            selected = set(self.qubits)
+            survivors = [q for q in range(n_qubits) if q not in selected]
             out = np.zeros(1 << len(survivors), dtype=complex)
             if success > 0.0:
                 ridx = np.zeros(dim, dtype=np.int64)

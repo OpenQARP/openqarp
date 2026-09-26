@@ -502,7 +502,7 @@ class MonteCarlo(CompositeAlgorithm):
             )
 
         # The engine's per-primitive result is a scalar expectation value here
-        # (never a Sampler distribution dict).
+        # (never a sampling distribution).
         matrix_element = cast(complex, result[0])
 
         # Calculate sign correction factor

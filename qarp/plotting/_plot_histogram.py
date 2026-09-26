@@ -1,5 +1,6 @@
 import itertools
-from typing import Dict, Optional, Tuple
+from collections.abc import Mapping
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 
@@ -8,7 +9,7 @@ from .styles._theme import qarp_rc
 
 
 def plot_histogram(
-    probs: Dict[Tuple[int, ...], float],
+    probs: Mapping[Tuple[int, ...], float],
     title: str = "",
     figsize: Tuple[int, int] = (10, 5),
     show_all_solutions: bool = False,
@@ -22,7 +23,8 @@ def plot_histogram(
     Plots a histogram of the probabilities of different solutions.
 
     Args:
-        probs: A dictionary mapping tuples of binary values (representing solutions) to their probabilities.
+        probs: A mapping from tuples of binary values (representing solutions) to their
+            probabilities, such as a :class:`~qarp.SamplingDistribution`.
         title: The title of the histogram.
         figsize: The size of the figure to create.
         show_all_solutions: If True, includes all possible solutions in the histogram, even those with zero probability.

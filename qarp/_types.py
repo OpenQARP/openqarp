@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 # Read-only view of a sampling result: LSB-first bit tuples to probabilities.
 # A SamplingDistribution and a plain dict both satisfy it.
 SamplingDictionary = Mapping[tuple[int, ...], float]
-# What a primitive's run() returns.
 PrimitiveResult = Union[float, complex, "SamplingDistribution"]
 
 
@@ -67,7 +66,8 @@ def outcome_arrays(result) -> tuple[np.ndarray, np.ndarray]:
     An :class:`ExactResult` hands over its arrays; a ``qx.SamplingResult``
     (whose ``counts`` property converts the C++ map on every access) is read
     once.  Outcomes are packed into int64, so registers wider than 63 qubits
-    must take the dict path instead.
+    are read from ``counts`` into Python-int arrays instead
+    (``distribution_from_result``).
     """
     keys = getattr(result, "keys", None)
     if keys is not None:

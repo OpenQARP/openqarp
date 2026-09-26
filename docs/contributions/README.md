@@ -109,10 +109,13 @@ before any layout move.  Type stubs for the compiled backend, then the
 configuration and agent-guide tidy-up.
 
 **The 0.2 cycle** — layout, so paths break once rather than twice.  The `src/`
-source root and the `cpp/` flattening.
+source root and the `cpp/` flattening.  `Sampler` also returns a read-only
+`SamplingDistribution` from this cycle
+([`sampler_distribution_plan.md`](sampler_distribution_plan.md)), which breaks
+`isinstance(result, dict)` and mutating a result.
 
-**The 1.0 item** — the only change on this roadmap that breaks user code.  One
-public import name, with `qarpx` kept as a deprecating shim for a full release.
+**The 1.0 item** — one public import name, with `qarpx` kept as a deprecating
+shim for a full release.
 
 A plan not tied to one of these windows lands when its own two gates clear.
 
@@ -131,6 +134,7 @@ Not a row: [`_template.md`](_template.md), the plan scaffold.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
-| [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | 📋 | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
+| [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | 🚧 | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
+| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Run OpenBLAS's parallel jobs on qarpx's OpenMP team | Stefano Scali | 📋 | Same PR as the `SamplingDistribution` plans; process-wide change to numpy's BLAS threading |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | 📋 | Same PR as `sampler_distribution_plan.md`; no convention edit |
 | [`example_plan.md`](example_plan.md) | Worked example of a plan | OpenQARP maintainers | 🗄️ | Illustrates the format only: a filled-in `_template.md` for a small standard-tier feature.  Not implemented; delete this row when the first real plan lands |

@@ -32,6 +32,12 @@ def _lsb_tuples(width: int) -> tuple[tuple[int, ...], ...]:
     return tuple(bits[::-1] for bits in product((0, 1), repeat=width))
 
 
+@lru_cache(maxsize=None)
+def _lsb_index(width: int) -> dict[tuple[int, ...], int]:
+    """Inverse of :func:`_lsb_tuples`: each ``width``-bit tuple to its integer."""
+    return {bits: i for i, bits in enumerate(_lsb_tuples(width))}
+
+
 def pack_bits(outcomes: np.ndarray, positions: Sequence[int]) -> np.ndarray:
     """Bit ``positions[i]`` of each outcome moved to bit ``i``; other bits dropped."""
     positions = list(positions)
@@ -45,6 +51,29 @@ def pack_bits(outcomes: np.ndarray, positions: Sequence[int]) -> np.ndarray:
 
 def _outcome_dtype(n_bits: int):
     return np.int64 if n_bits <= _INT64_BITS else object
+
+
+def _tuples(outcomes: np.ndarray, n_bits: int) -> Iterator[tuple[int, ...]]:
+    """LSB-first ``n_bits``-bit tuples of ``outcomes``, in the array's order."""
+    if n_bits <= _MAX_TABLE_BITS:
+        low = n_bits // 2
+        lo, hi = _lsb_tuples(low), _lsb_tuples(n_bits - low)
+        mask = (1 << low) - 1
+        for start in range(0, len(outcomes), _CHUNK):
+            block = outcomes[start : start + _CHUNK]
+            yield from map(
+                add,
+                map(lo.__getitem__, (block & mask).tolist()),
+                map(hi.__getitem__, (block >> low).tolist()),
+            )
+    elif n_bits <= _INT64_BITS:
+        shifts = np.arange(n_bits)
+        for start in range(0, len(outcomes), _CHUNK):
+            block = outcomes[start : start + _CHUNK]
+            yield from map(tuple, ((block[:, None] >> shifts) & 1).tolist())
+    else:
+        for key in outcomes.tolist():
+            yield tuple((key >> i) & 1 for i in range(n_bits))
 
 
 def distribution_from_result(result, measured: Sequence[int]) -> "SamplingDistribution":
@@ -71,6 +100,12 @@ def _bits_key(bits: object, n_bits: int) -> Optional[int]:
     """The packed integer of an LSB-first 0/1 tuple of length ``n_bits``, else ``None``."""
     if not isinstance(bits, tuple) or len(bits) != n_bits:
         return None
+    if n_bits <= _MAX_TABLE_BITS:
+        low = n_bits // 2
+        try:
+            return _lsb_index(low)[bits[:low]] | (_lsb_index(n_bits - low)[bits[low:]] << low)
+        except (KeyError, TypeError):
+            return None
     key = 0
     for i, b in enumerate(bits):
         if b == 1:
@@ -100,7 +135,8 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
     Reads like a ``{bits-tuple: probability}`` dict, iterating in ascending
     order of the packed integer.  ``outcomes`` and ``probabilities`` give the
     same data as aligned read-only arrays; ``probability_of(k)`` looks one up
-    by its packed integer; ``to_dict()`` makes a plain dict.
+    by its packed integer; ``to_dict()`` makes a plain dict, faster than
+    ``dict(d)``, which looks each key up again.
 
     Args:
         outcomes: Packed integers ``Σ_i b_i · 2**i`` of the keys, strictly
@@ -109,13 +145,25 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         n_bits_measured: Bits per key — the number of measured qubits.
     """
 
-    __slots__ = ("_n_bits", "_outcomes", "_probabilities")
+    __slots__ = ("_cursor", "_n_bits", "_outcomes", "_probabilities")
 
     def __init__(self, outcomes, probabilities, n_bits_measured: int):
         n_bits = int(n_bits_measured)
         if n_bits < 0:
             raise ValueError(f"n_bits_measured must be non-negative, got {n_bits}")
-        keys = np.array(outcomes, dtype=_outcome_dtype(n_bits)).reshape(-1)
+        raw = np.asarray(outcomes)
+        if raw.size and not (
+            raw.dtype.kind in "iu"
+            or (
+                raw.dtype.kind == "O"
+                and all(
+                    isinstance(k, (int, np.integer)) and not isinstance(k, bool)
+                    for k in raw.reshape(-1).tolist()
+                )
+            )
+        ):
+            raise TypeError(f"outcomes must be integers, got {raw.dtype} values")
+        keys = np.array(raw, dtype=_outcome_dtype(n_bits)).reshape(-1)
         probs = np.array(probabilities, dtype=np.float64).reshape(-1)
         if keys.shape != probs.shape:
             raise ValueError(
@@ -135,6 +183,7 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         self._outcomes = keys
         self._probabilities = probs
         self._n_bits = n_bits
+        self._cursor = 0
 
     @classmethod
     def _wrap(cls, keys: np.ndarray, probs: np.ndarray, n_bits: int) -> "SamplingDistribution":
@@ -150,6 +199,9 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
             return mapping
         if not mapping:
             return cls._wrap(np.zeros(0, dtype=np.int64), np.zeros(0), 0)
+        for bits in mapping:
+            if not isinstance(bits, tuple):
+                raise ValueError(f"distribution key {bits!r} is not a tuple of 0/1 bits")
         widths = {len(bits) for bits in mapping}
         if len(widths) != 1:
             raise ValueError(f"distribution keys have mixed widths {sorted(widths)}")
@@ -181,10 +233,15 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         return self._n_bits
 
     def _position(self, key: int) -> Optional[int]:
-        i = int(np.searchsorted(self._outcomes, key))
-        if i < len(self._outcomes) and self._outcomes[i] == key:
-            return i
-        return None
+        # Keys looked up in iteration order (``dict(d)``, ``d.items()`` in
+        # user loops) hit the slot after the previous hit; others bisect.
+        i = self._cursor
+        if not (i < len(self._outcomes) and self._outcomes[i] == key):
+            i = int(np.searchsorted(self._outcomes, key))
+            if not (i < len(self._outcomes) and self._outcomes[i] == key):
+                return None
+        self._cursor = i + 1
+        return i
 
     def _index(self, bits: object) -> Optional[int]:
         key = _bits_key(bits, self._n_bits)
@@ -216,26 +273,10 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         return len(self._outcomes)
 
     def __iter__(self) -> Iterator[tuple[int, ...]]:
-        n = self._n_bits
-        if n <= _MAX_TABLE_BITS:
-            low = n // 2
-            lo, hi = _lsb_tuples(low), _lsb_tuples(n - low)
-            mask = (1 << low) - 1
-            for start in range(0, len(self._outcomes), _CHUNK):
-                block = self._outcomes[start : start + _CHUNK]
-                yield from map(
-                    add,
-                    map(lo.__getitem__, (block & mask).tolist()),
-                    map(hi.__getitem__, (block >> low).tolist()),
-                )
-        elif n <= _INT64_BITS:
-            shifts = np.arange(n)
-            for start in range(0, len(self._outcomes), _CHUNK):
-                block = self._outcomes[start : start + _CHUNK]
-                yield from map(tuple, ((block[:, None] >> shifts) & 1).tolist())
-        else:
-            for key in self._outcomes.tolist():
-                yield tuple((key >> i) & 1 for i in range(n))
+        return _tuples(self._outcomes, self._n_bits)
+
+    def __reversed__(self) -> Iterator[tuple[int, ...]]:
+        return _tuples(self._outcomes[::-1], self._n_bits)
 
     def items(self) -> _Items:
         return _Items(self)

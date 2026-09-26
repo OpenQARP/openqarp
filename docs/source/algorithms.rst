@@ -629,7 +629,7 @@ The following one-qubit example starts with good-state probability
     distribution = amplification.run()
     print(distribution)
     print(amplification.success_probability)
-    # {(1,): approximately 1.0}
+    # SamplingDistribution({(1,): 1.0}), up to rounding
     # 1.0
 
 Sampler bit tuples are LSB-first. ``good_states`` instead uses ordinary

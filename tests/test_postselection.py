@@ -280,6 +280,11 @@ def test_impossible_condition_gives_an_empty_distribution_of_the_reduced_width()
     assert out.distribution.n_bits_measured == 1
 
 
+def test_integer_keyed_dict_is_rejected_with_a_clear_message():
+    with pytest.raises(ValueError, match="is not a tuple of 0/1 bits"):
+        PostSelection({0: 1}).apply({0: 0.5, 3: 0.5})
+
+
 def test_mixed_width_dict_is_rejected():
     with pytest.raises(ValueError, match="mixed widths"):
         PostSelection({0: 1}).apply({(1,): 0.5, (1, 0): 0.5})
