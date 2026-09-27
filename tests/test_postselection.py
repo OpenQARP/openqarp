@@ -299,3 +299,11 @@ def test_empty_dict_gives_an_empty_distribution():
 def test_tuple_key_with_a_non_bit_entry_is_rejected():
     with pytest.raises(ValueError, match="is not a tuple of 0/1 bits"):
         PostSelection({0: 1}).apply({(1, 2): 0.5, (0, 0): 0.5})
+
+
+def test_post_selection_keeps_the_kept_shot_count():
+    # Outcomes 1 and 3 have bit 0 set: 2 + 4 of the 10 shots survive.
+    sampled = SamplingDistribution([0, 1, 2, 3], [0.1, 0.2, 0.3, 0.4], 2, n_shots=10)
+    assert PostSelection({0: 1}).apply(sampled).distribution.n_shots == 6
+    exact = SamplingDistribution([0, 1, 2, 3], [0.1, 0.2, 0.3, 0.4], 2)
+    assert PostSelection({0: 1}).apply(exact).distribution.n_shots is None

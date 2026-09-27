@@ -141,7 +141,7 @@ class PostSelection:
         an empty distribution and a success rate of 0 — no raise, so
         parameter sweeps survive nodes with vanishing support.
         """
-        dist = SamplingDistribution._from_mapping(distribution)
+        dist = SamplingDistribution.from_dict(distribution)
         n_bits = dist.n_bits_measured
         qmax = self.qubits[-1]
         if len(dist) and qmax >= n_bits:
@@ -168,10 +168,11 @@ class PostSelection:
             keys, width = pack_bits(outcomes[keep], rest), len(rest)
         else:
             keys, width = outcomes[keep], n_bits
+        kept_shots = None if dist.n_shots is None else round(dist.n_shots * success)
         if success > 0.0:
-            kept = SamplingDistribution._wrap(keys.copy(), probs[keep] / success, width)
+            kept = SamplingDistribution._wrap(keys.copy(), probs[keep] / success, width, kept_shots)
         else:
-            kept = SamplingDistribution._wrap(keys[:0].copy(), np.zeros(0), width)
+            kept = SamplingDistribution._wrap(keys[:0].copy(), np.zeros(0), width, kept_shots)
         return PostSelected(distribution=kept, success_rate=success)
 
     def success_rate(self, distribution: SamplingDictionary) -> float:

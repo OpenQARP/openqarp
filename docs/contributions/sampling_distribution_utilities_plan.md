@@ -1,12 +1,12 @@
 # Add analysis utilities and shot metadata to `SamplingDistribution`
 
-**Status:** Draft
+**Status:** In progress
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-25
 **Tier:** Standard
 **Branch:** improvement/sampler-exact-speed
-**Green-lit:**
+**Green-lit:** 6df44e2 (2026-09-27), plan blob 000fceb472bf4634696a732bf817954528d37061
 **Scope:**
 - `qarp/_sampling_distribution.py` — the methods below, the `n_shots` attribute, public `from_dict`
 - `qarp/_postselection.py` — `n_shots` of the kept distribution; `from_dict` in place of `_from_mapping`
@@ -79,8 +79,8 @@ mappings.
 
 **Comparison and resampling.**  Both comparisons take any
 `SamplingDictionary`, converted with `from_dict`, require equal
-`n_bits_measured`, and use the probabilities as given, without
-renormalising.
+`n_bits_measured` unless one side is empty (as equality does), and use the
+probabilities as given, without renormalising.
 - `total_variation(other)` — `½ Σ |p − q|` over the union of outcomes.
 - `hellinger_fidelity(other)` — `(Σ √(p q))²`, the definition qiskit uses.
 - `sample(n_shots, seed=None)` — a multinomial draw of `n_shots` from the
@@ -148,34 +148,37 @@ marginals and dense vector are products of the per-qubit pairs.
 
 ### Phase 1 — shot metadata and construction
 
-- [ ] `n_shots` on the class and the builder; `counts`, `standard_errors`
-- [ ] Public `from_dict`; `PostSelection.apply` uses it and sets `n_shots`
+- [x] `n_shots` on the class and the builder; `counts`, `standard_errors` *(2026-09-27)*
+- [x] Public `from_dict`; `PostSelection.apply` uses it and sets `n_shots` *(2026-09-27)*
 
 ### Phase 2 — reductions
 
-- [ ] `marginal`, `to_dense`, `parity_expectation`, `top`, `most_likely`
+- [x] `marginal`, `to_dense`, `parity_expectation`, `top`, `most_likely` *(2026-09-27)*
 
 ### Phase 3 — comparison and resampling
 
-- [ ] `total_variation`, `hellinger_fidelity`, `sample`
+- [x] `total_variation`, `hellinger_fidelity`, `sample` *(2026-09-27)*
 
 ### Phase 4 — docs and example
 
-- [ ] Utilities subsection in `algorithms.rst`; API members
-- [ ] Tutorial cell
+- [x] Utilities subsection in `algorithms.rst`; API members *(2026-09-27)*
+- [x] Tutorial cell *(2026-09-27)*
 
-## Open items for the green-light
+## Decisions (green-light, 2026-09-27)
 
-- `to_dense`'s default `max_bits = 28`.
-- Equality ignoring `n_shots`.
-- No consumer migration here: QPE, Grover and PCE could use `most_likely`
-  and `parity_expectation` in a later change.
-- Names: `marginal`, `to_dense`, `parity_expectation`, `top`,
-  `most_likely`, `total_variation`, `hellinger_fidelity`, `sample`,
-  `from_dict`, `counts`, `standard_errors`.
+Green-lit offline with the open items resolved as proposed:
+- `to_dense` defaults to `max_bits = 28`.
+- Equality ignores `n_shots`.
+- No consumer migration here.
+- The names as listed.
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+Declared in the PR and folded in above.
+
+- **Empty distributions compare.**  `total_variation` and
+  `hellinger_fidelity` accept a width mismatch when either side is empty, as
+  `==` does, instead of always requiring equal widths.
+- **`n_shots` may be 0**, so a post-selection that keeps no shots carries
+  `n_shots = 0`; negative counts raise `ValueError`.
+- **`sample` validates** `n_shots ≥ 1` and a positive total probability.

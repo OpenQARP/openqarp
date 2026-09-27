@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import qarpx as qx
 from qarp import EXACT, ExactResult, SamplingDistribution
 from qarp.algorithms import Sampler
 from qarp.blocks import ComputationalBasisStateBlock, HnBlock, SimpleBlock
@@ -254,3 +255,15 @@ def test_run_register_across_the_int64_boundary(n):
     dist = Sampler(ket=None, measured_qubits=[n - 1, 0]).run([sr])
     assert dist == {(0, 0): pytest.approx(0.7), (1, 0): pytest.approx(0.3)}
     assert dist.outcomes.tolist() == [0, 1]
+
+
+def test_n_shots_and_counts_come_from_the_simulator_result():
+    """counts() recovers the raw SamplingResult's integer counts exactly."""
+    block = _RyProduct(_THETAS)
+    block.build()
+    raw = qx.QarpSimulator().run(list(block.flatten()), len(_THETAS), 1000, 7)
+    dist = Sampler(ket=None, measured_qubits=list(range(len(_THETAS)))).run([raw])
+    assert dist.n_shots == 1000
+    assert dict(zip(dist.outcomes.tolist(), dist.counts().tolist(), strict=True)) == raw.counts
+    assert _run(_RyProduct(_THETAS), 500, seed=1).n_shots == 500
+    assert _run(_RyProduct(_THETAS), EXACT).n_shots is None

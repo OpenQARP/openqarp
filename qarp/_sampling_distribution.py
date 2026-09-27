@@ -11,7 +11,7 @@ from collections.abc import ItemsView, Iterator, Mapping, Sequence, ValuesView
 from functools import lru_cache
 from itertools import product
 from operator import add, index
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -91,9 +91,23 @@ def distribution_from_result(result, measured: Sequence[int]) -> "SamplingDistri
         weights = np.fromiter(counts.values(), dtype=np.float64, count=len(counts))
     weights = weights / result.n_shots
     keys, inverse = np.unique(pack_bits(outcomes, measured), return_inverse=True)
+    n_shots = None if getattr(result, "is_exact", False) else int(result.n_shots)
     return SamplingDistribution._wrap(
-        keys, np.bincount(inverse, weights=weights, minlength=len(keys)), len(measured)
+        keys, np.bincount(inverse, weights=weights, minlength=len(keys)), len(measured), n_shots
     )
+
+
+def _checked_shots(n_shots: Optional[int]) -> Optional[int]:
+    if n_shots is None:
+        return None
+    shots = index(n_shots)
+    if shots < 0:
+        raise ValueError(f"n_shots must be non-negative, got {shots}")
+    return shots
+
+
+def _rebuild(outcomes, probabilities, n_bits_measured, n_shots):
+    return SamplingDistribution(outcomes, probabilities, n_bits_measured, n_shots=n_shots)
 
 
 def _bits_key(bits: object, n_bits: int) -> Optional[int]:
@@ -136,18 +150,23 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
     order of the packed integer.  ``outcomes`` and ``probabilities`` give the
     same data as aligned read-only arrays; ``probability_of(k)`` looks one up
     by its packed integer; ``to_dict()`` makes a plain dict, faster than
-    ``dict(d)``, which looks each key up again.
+    ``dict(d)``, which looks each key up again.  Positions passed to the
+    analysis methods index the key tuple, not physical qubits.
 
     Args:
         outcomes: Packed integers ``Σ_i b_i · 2**i`` of the keys, strictly
             ascending, each below ``2**n_bits_measured``.
         probabilities: One probability per outcome.
         n_bits_measured: Bits per key — the number of measured qubits.
+        n_shots: Shots behind a sampled distribution; ``None`` for an exact
+            one.  Equality and iteration ignore it.
     """
 
-    __slots__ = ("_cursor", "_n_bits", "_outcomes", "_probabilities")
+    __slots__ = ("_cursor", "_n_bits", "_n_shots", "_outcomes", "_probabilities")
 
-    def __init__(self, outcomes, probabilities, n_bits_measured: int):
+    def __init__(
+        self, outcomes, probabilities, n_bits_measured: int, *, n_shots: Optional[int] = None
+    ):
         n_bits = int(n_bits_measured)
         if n_bits < 0:
             raise ValueError(f"n_bits_measured must be non-negative, got {n_bits}")
@@ -172,31 +191,55 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
                 raise ValueError("outcomes must be strictly ascending")
             if int(keys[0]) < 0 or int(keys[-1]) >> n_bits:
                 raise ValueError(f"outcomes must lie in [0, 2**{n_bits})")
-        self._init(keys, probs, n_bits)
+        self._init(keys, probs, n_bits, _checked_shots(n_shots))
 
-    def _init(self, keys: np.ndarray, probs: np.ndarray, n_bits: int) -> None:
+    def _init(
+        self, keys: np.ndarray, probs: np.ndarray, n_bits: int, n_shots: Optional[int]
+    ) -> None:
         keys = keys.astype(_outcome_dtype(n_bits), copy=False)
         keys.flags.writeable = False
         probs.flags.writeable = False
         self._outcomes = keys
         self._probabilities = probs
         self._n_bits = n_bits
+        self._n_shots = n_shots
         self._cursor = 0
 
     @classmethod
-    def _wrap(cls, keys: np.ndarray, probs: np.ndarray, n_bits: int) -> "SamplingDistribution":
+    def _wrap(
+        cls, keys: np.ndarray, probs: np.ndarray, n_bits: int, n_shots: Optional[int] = None
+    ) -> "SamplingDistribution":
         """Take ownership of arrays already known to be valid."""
         self = cls.__new__(cls)
-        self._init(keys, probs, n_bits)
+        self._init(keys, probs, n_bits, n_shots)
         return self
 
     @classmethod
-    def _from_mapping(cls, mapping: Mapping) -> "SamplingDistribution":
-        """Pack a ``{bits-tuple: probability}`` mapping whose keys share one width."""
+    def from_dict(
+        cls,
+        mapping: Mapping,
+        *,
+        n_bits_measured: Optional[int] = None,
+        n_shots: Optional[int] = None,
+    ) -> "SamplingDistribution":
+        """A distribution from a ``{bits-tuple: probability}`` mapping.
+
+        Keys must be 0/1 tuples of one width.  ``n_bits_measured`` gives the
+        width of an empty mapping and must match the keys otherwise.  A
+        ``SamplingDistribution`` comes back as it is unless ``n_shots`` is given.
+        """
+        shots = _checked_shots(n_shots)
         if isinstance(mapping, SamplingDistribution):
-            return mapping
+            if n_bits_measured is not None and n_bits_measured != mapping._n_bits:
+                raise ValueError(
+                    f"keys have {mapping._n_bits} bits, not n_bits_measured={n_bits_measured}"
+                )
+            if shots is None:
+                return mapping
+            return cls._wrap(mapping._outcomes, mapping._probabilities, mapping._n_bits, shots)
         if not mapping:
-            return cls._wrap(np.zeros(0, dtype=np.int64), np.zeros(0), 0)
+            width = 0 if n_bits_measured is None else int(n_bits_measured)
+            return cls._wrap(np.zeros(0, dtype=np.int64), np.zeros(0), width, shots)
         for bits in mapping:
             if not isinstance(bits, tuple):
                 raise ValueError(f"distribution key {bits!r} is not a tuple of 0/1 bits")
@@ -204,6 +247,8 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         if len(widths) != 1:
             raise ValueError(f"distribution keys have mixed widths {sorted(widths)}")
         (n_bits,) = widths
+        if n_bits_measured is not None and n_bits_measured != n_bits:
+            raise ValueError(f"keys have {n_bits} bits, not n_bits_measured={n_bits_measured}")
         packed = []
         for bits in mapping:
             key = _bits_key(bits, n_bits)
@@ -213,7 +258,7 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         keys = np.array(packed, dtype=_outcome_dtype(n_bits))
         order = np.argsort(keys, kind="stable")
         probs = np.fromiter(mapping.values(), dtype=np.float64, count=len(mapping))
-        return cls._wrap(keys[order], probs[order], n_bits)
+        return cls._wrap(keys[order], probs[order], n_bits, shots)
 
     @property
     def outcomes(self) -> np.ndarray:
@@ -229,6 +274,126 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
     def n_bits_measured(self) -> int:
         """Bits per key: the number of measured qubits."""
         return self._n_bits
+
+    @property
+    def n_shots(self) -> Optional[int]:
+        """Shots behind a sampled distribution; ``None`` for an exact one."""
+        return self._n_shots
+
+    def counts(self) -> np.ndarray:
+        """Shot counts aligned with :attr:`outcomes`.  ``ValueError`` when exact."""
+        if self._n_shots is None:
+            raise ValueError("an exact distribution has no shot counts")
+        return np.rint(self._probabilities * self._n_shots).astype(np.int64)
+
+    def standard_errors(self) -> np.ndarray:
+        """Binomial standard error ``sqrt(p(1 - p) / n_shots)`` per outcome;
+        zeros for an exact distribution, whose values carry no shot noise."""
+        p = self._probabilities
+        if self._n_shots is None:
+            return np.zeros_like(p)
+        return np.sqrt(p * (1.0 - p) / self._n_shots)
+
+    def _checked_positions(self, positions) -> list[int]:
+        chosen = [index(q) for q in positions]
+        if len(set(chosen)) != len(chosen):
+            raise ValueError(f"positions must be distinct, got {chosen}")
+        for q in chosen:
+            if not 0 <= q < self._n_bits:
+                raise ValueError(f"position {q} is outside the {self._n_bits}-bit keys")
+        return chosen
+
+    def marginal(self, positions) -> "SamplingDistribution":
+        """The distribution over ``positions``: bit ``i`` of a new key is key
+        position ``positions[i]``.  Keeps ``n_shots``."""
+        chosen = self._checked_positions(positions)
+        keys, inverse = np.unique(pack_bits(self._outcomes, chosen), return_inverse=True)
+        probs = np.bincount(inverse, weights=self._probabilities, minlength=len(keys))
+        return SamplingDistribution._wrap(keys, probs, len(chosen), self._n_shots)
+
+    def to_dense(self, max_bits: int = 28) -> np.ndarray:
+        """The length ``2**n_bits_measured`` probability vector, indexed by
+        packed outcome.  ``ValueError`` past ``max_bits``, which bounds the
+        allocation (``2**28`` doubles are 2 GiB)."""
+        if self._n_bits > max_bits:
+            raise ValueError(
+                f"{self._n_bits}-bit keys need 2**{self._n_bits} entries; max_bits is {max_bits}"
+            )
+        dense = np.zeros(1 << self._n_bits)
+        dense[self._outcomes] = self._probabilities
+        return dense
+
+    def parity_expectation(self, positions) -> float:
+        """``Σ p · (−1)^(parity of the bits at positions)``: the expectation of
+        ``Z`` on each position.  Empty ``positions`` give the total probability."""
+        parity = np.zeros_like(self._outcomes)
+        for q in self._checked_positions(positions):
+            parity ^= (self._outcomes >> q) & 1
+        signs = 1.0 - 2.0 * parity.astype(np.float64)
+        return float(signs @ self._probabilities)
+
+    def top(self, k: int) -> list[tuple[tuple[int, ...], float]]:
+        """The ``k`` most probable ``(bits, probability)`` pairs, most probable
+        first; ties go to the smaller packed outcome."""
+        count = index(k)
+        if count < 0:
+            raise ValueError(f"k must be non-negative, got {count}")
+        order = np.argsort(-self._probabilities, kind="stable")[:count]
+        return list(
+            zip(
+                _tuples(self._outcomes[order], self._n_bits),
+                self._probabilities[order].tolist(),
+                strict=True,
+            )
+        )
+
+    def most_likely(self) -> tuple[tuple[int, ...], float]:
+        """The most probable ``(bits, probability)``; the smaller packed
+        outcome wins a tie.  ``ValueError`` when empty."""
+        if not len(self):
+            raise ValueError("an empty distribution has no most likely outcome")
+        return self.top(1)[0]
+
+    def _aligned(self, other) -> tuple[np.ndarray, np.ndarray]:
+        """Both distributions' probabilities over the union of their outcomes."""
+        theirs = SamplingDistribution.from_dict(other)
+        if theirs._n_bits != self._n_bits and len(theirs) and len(self):
+            raise ValueError(
+                f"cannot compare {self._n_bits}-bit keys with {theirs._n_bits}-bit keys"
+            )
+        union = np.union1d(self._outcomes, theirs._outcomes)
+        mine, other_probs = np.zeros(len(union)), np.zeros(len(union))
+        mine[np.searchsorted(union, self._outcomes)] = self._probabilities
+        other_probs[np.searchsorted(union, theirs._outcomes)] = theirs._probabilities
+        return mine, other_probs
+
+    def total_variation(self, other: Mapping) -> float:
+        """``½ Σ |p − q|`` over the union of outcomes, probabilities as given."""
+        p, q = self._aligned(other)
+        return float(0.5 * np.abs(p - q).sum())
+
+    def hellinger_fidelity(self, other: Mapping) -> float:
+        """``(Σ √(p q))²``, qiskit's definition, probabilities as given."""
+        p, q = self._aligned(other)
+        return float(np.sqrt(p * q).sum() ** 2)
+
+    def sample(
+        self, n_shots: int, seed: Union[int, np.random.Generator, None] = None
+    ) -> "SamplingDistribution":
+        """A multinomial draw of ``n_shots`` from the probabilities renormalised
+        to sum to 1 (exact results prune below 1e-12).  Outcomes drawn zero
+        times are dropped."""
+        shots = index(n_shots)
+        if shots < 1:
+            raise ValueError(f"n_shots must be positive, got {shots}")
+        total = float(self._probabilities.sum())
+        if not total > 0.0:
+            raise ValueError("cannot sample a distribution with no probability mass")
+        drawn = np.random.default_rng(seed).multinomial(shots, self._probabilities / total)
+        kept = drawn > 0
+        return SamplingDistribution._wrap(
+            self._outcomes[kept].copy(), drawn[kept] / shots, self._n_bits, shots
+        )
 
     def _position(self, key: int) -> Optional[int]:
         # Keys looked up in iteration order (``dict(d)``, ``d.items()`` in
@@ -299,7 +464,7 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         return NotImplemented
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (type(self), (self._outcomes, self._probabilities, self._n_bits))
+        return (_rebuild, (self._outcomes, self._probabilities, self._n_bits, self._n_shots))
 
     def __repr__(self) -> str:
         head = SamplingDistribution._wrap(

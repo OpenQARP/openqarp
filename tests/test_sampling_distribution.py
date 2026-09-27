@@ -7,14 +7,21 @@ Expected values are written out by hand from the §1 encoding: key tuple
 import copy
 import pickle
 import random
+from functools import reduce
+from itertools import product
+from math import cos, prod, sin, sqrt
 
 import numpy as np
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
+import qarp
 from qarp import SamplingDistribution
 from qarp._sampling_distribution import pack_bits
+from qarp.algorithms import Sampler
+from qarp.blocks import SimpleBlock
+from qarp.engines import QarpEngine
 
 # 3-bit keys: 0 = (0,0,0), 3 = (1,1,0), 5 = (1,0,1).
 _OUTCOMES = [0, 3, 5]
@@ -314,3 +321,193 @@ def test_lookup_iteration_and_arrays_agree(spec):
         absent = next(k for k in range(2 ** min(width, 20)) if k not in set(keys))
         assert bits(absent) not in d
         assert d.probability_of(absent) == 0.0
+
+
+# ── analysis utilities ──────────────────────────────────────────────────
+# ⊗_q Ry(θ_q)|0⟩: bit q is 1 with probability sin²(θ_q/2), independently, so
+# ⟨Z_q⟩ = cos θ_q and every marginal is a product over its positions.
+
+_THETAS = (0.3, 1.1, 2.0, 0.7, 2.6)
+
+
+class _RyProduct(SimpleBlock):
+    def __init__(self):
+        super().__init__(len(_THETAS))
+
+    def build_vanilla(self):
+        for q, theta in enumerate(_THETAS):
+            self.ry(q, theta)
+
+
+class _Ghz(SimpleBlock):
+    def __init__(self, n):
+        super().__init__(n)
+
+    def build_vanilla(self):
+        self.h(0)
+        for q in range(self.n_qubits - 1):
+            self.cx(q, q + 1)
+
+
+def _exact(block):
+    sampler = Sampler(ket=block, n_shots=qarp.EXACT)
+    engine = QarpEngine()
+    engine.build([sampler])
+    return engine.run()[0]
+
+
+def _bit_probability(q, bit):
+    return sin(_THETAS[q] / 2) ** 2 if bit else cos(_THETAS[q] / 2) ** 2
+
+
+@pytest.mark.parametrize("positions", [[0, 1, 2, 3, 4], [0, 2, 4], [3, 0, 1]])
+def test_marginal_of_the_product_state(positions):
+    marginal = _exact(_RyProduct()).marginal(positions)
+    expected = {
+        bits: prod(_bit_probability(q, b) for q, b in zip(positions, bits, strict=True))
+        for bits in product((0, 1), repeat=len(positions))
+    }
+    assert marginal.n_bits_measured == len(positions)
+    assert marginal.keys() == expected.keys()
+    for bits, p in expected.items():
+        assert marginal[bits] == pytest.approx(p, abs=1e-12)
+
+
+@pytest.mark.parametrize("positions", [[0, 0], [5], [-1]])
+def test_marginal_rejects_repeated_or_missing_positions(positions):
+    with pytest.raises(ValueError):
+        _dist().marginal(positions)
+
+
+def test_to_dense_of_the_product_state():
+    pairs = [np.array([_bit_probability(q, 0), _bit_probability(q, 1)]) for q in range(5)]
+    expected = reduce(np.kron, reversed(pairs))  # qubit 0 innermost
+    np.testing.assert_allclose(_exact(_RyProduct()).to_dense(), expected, atol=1e-12)
+
+
+def test_to_dense_refuses_past_max_bits():
+    with pytest.raises(ValueError, match="max_bits"):
+        SamplingDistribution([0], [1.0], 29).to_dense()
+    with pytest.raises(ValueError, match="max_bits"):
+        _dist().to_dense(max_bits=2)
+
+
+@pytest.mark.parametrize(
+    ("positions", "expected"),
+    [
+        ([1], cos(_THETAS[1])),
+        ([3], cos(_THETAS[3])),
+        ([0, 2], cos(_THETAS[0]) * cos(_THETAS[2])),
+        ([1, 4], cos(_THETAS[1]) * cos(_THETAS[4])),
+        ([], 1.0),
+    ],
+)
+def test_parity_expectation_of_the_product_state(positions, expected):
+    value = _exact(_RyProduct()).parity_expectation(positions)
+    assert value == pytest.approx(expected, abs=1e-10)
+
+
+def test_parity_expectation_of_ghz():
+    dist = _exact(_Ghz(3))
+    assert dist.parity_expectation([0]) == pytest.approx(0.0, abs=1e-12)
+    assert dist.parity_expectation([0, 1]) == pytest.approx(1.0, abs=1e-12)
+    assert dist.parity_expectation([0, 1, 2]) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_top_and_most_likely_break_ties_by_smaller_outcome():
+    # 0 = (0, 0), 1 = (1, 0), 2 = (0, 1), 3 = (1, 1)
+    d = SamplingDistribution([0, 1, 2, 3], [0.2, 0.3, 0.3, 0.2], 2)
+    assert d.top(3) == [((1, 0), 0.3), ((0, 1), 0.3), ((0, 0), 0.2)]
+    assert d.most_likely() == ((1, 0), 0.3)
+    assert d.top(0) == []
+    assert len(d.top(10)) == 4
+    with pytest.raises(ValueError):
+        d.top(-1)
+    with pytest.raises(ValueError):
+        SamplingDistribution([], [], 2).most_likely()
+
+
+def test_most_likely_outcome_of_the_product_state():
+    bits = tuple(int(_bit_probability(q, 1) > _bit_probability(q, 0)) for q in range(5))
+    best_bits, best_p = _exact(_RyProduct()).most_likely()
+    assert best_bits == bits
+    assert best_p == pytest.approx(prod(_bit_probability(q, b) for q, b in enumerate(bits)))
+
+
+def test_from_dict_packs_infers_width_and_validates():
+    d = SamplingDistribution.from_dict({(0, 1): 0.75, (1, 0): 0.25})
+    assert d.outcomes.tolist() == [1, 2]
+    assert d.probabilities.tolist() == [0.25, 0.75]
+    assert d.n_bits_measured == 2
+    assert SamplingDistribution.from_dict({}).n_bits_measured == 0
+    assert SamplingDistribution.from_dict({}, n_bits_measured=3).n_bits_measured == 3
+    assert SamplingDistribution.from_dict(d) is d
+    assert SamplingDistribution.from_dict(d, n_shots=40).n_shots == 40
+    for bad in ({(0, 1): 0.5, (1,): 0.5}, {3: 1.0}, {(2, 0): 1.0}):
+        with pytest.raises(ValueError):
+            SamplingDistribution.from_dict(bad)
+    with pytest.raises(ValueError):
+        SamplingDistribution.from_dict({(0, 1): 1.0}, n_bits_measured=3)
+
+
+def test_distances_between_one_bit_distributions():
+    """p(1) = 0.3 against q(1) = 0.8, and disjoint supports."""
+    d = SamplingDistribution([0, 1], [0.7, 0.3], 1)
+    other = {(0,): 0.2, (1,): 0.8}
+    assert d.total_variation(other) == pytest.approx(0.5)
+    assert d.hellinger_fidelity(other) == pytest.approx((sqrt(0.3 * 0.8) + sqrt(0.7 * 0.2)) ** 2)
+    assert d.total_variation(d) == pytest.approx(0.0)
+    assert d.hellinger_fidelity(d) == pytest.approx(1.0)
+    disjoint = SamplingDistribution([0], [1.0], 1).total_variation({(1,): 1.0})
+    assert disjoint == pytest.approx(1.0)
+    with pytest.raises(ValueError):
+        d.total_variation({(0, 0): 1.0})
+
+
+def test_sample_frequencies_sit_within_five_sigma():
+    exact = _exact(_RyProduct())
+    n = 10**6
+    sampled = exact.sample(n, seed=0)
+    assert sampled.n_shots == n
+    assert int(sampled.counts().sum()) == n
+    for bits in product((0, 1), repeat=5):
+        p = prod(_bit_probability(q, b) for q, b in enumerate(bits))
+        assert abs(sampled.get(bits, 0.0) - p) <= 5 * sqrt(p * (1 - p) / n) + 1e-12
+
+
+def test_sample_renormalises_missing_mass():
+    """Half the mass is missing (pruned outcomes); the draw is still 50/50."""
+    n = 10**6
+    sampled = SamplingDistribution([0, 1], [0.25, 0.25], 1).sample(n, seed=1)
+    for bits in [(0,), (1,)]:
+        assert abs(sampled[bits] - 0.5) <= 5 * sqrt(0.25 / n)
+
+
+def test_sample_is_reproducible_and_validated():
+    """Reproducibility is additional to the frequency oracle above."""
+    d = _dist()
+    assert d.sample(1000, seed=3) == d.sample(1000, seed=np.random.default_rng(3))
+    with pytest.raises(ValueError):
+        d.sample(0)
+    with pytest.raises(ValueError):
+        SamplingDistribution([], [], 2).sample(10)
+
+
+def test_counts_and_standard_errors():
+    sampled = SamplingDistribution([0, 1], [0.25, 0.75], 1, n_shots=100)
+    assert sampled.counts().tolist() == [25, 75]
+    np.testing.assert_allclose(sampled.standard_errors(), [sqrt(0.25 * 0.75 / 100)] * 2)
+    exact = SamplingDistribution([0, 1], [0.25, 0.75], 1)
+    assert exact.n_shots is None
+    np.testing.assert_array_equal(exact.standard_errors(), [0.0, 0.0])
+    with pytest.raises(ValueError, match="no shot counts"):
+        exact.counts()
+
+
+def test_n_shots_is_kept_validated_and_ignored_by_equality():
+    sampled = SamplingDistribution([0, 1], [0.25, 0.75], 1, n_shots=100)
+    assert sampled == SamplingDistribution([0, 1], [0.25, 0.75], 1)
+    assert pickle.loads(pickle.dumps(sampled)).n_shots == 100
+    assert sampled.marginal([0]).n_shots == 100
+    with pytest.raises(ValueError):
+        SamplingDistribution([0], [1.0], 1, n_shots=-1)
