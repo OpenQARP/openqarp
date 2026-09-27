@@ -151,19 +151,17 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         n_bits = int(n_bits_measured)
         if n_bits < 0:
             raise ValueError(f"n_bits_measured must be non-negative, got {n_bits}")
-        raw = np.asarray(outcomes)
-        if raw.size and not (
-            raw.dtype.kind in "iu"
-            or (
-                raw.dtype.kind == "O"
-                and all(
-                    isinstance(k, (int, np.integer)) and not isinstance(k, bool)
-                    for k in raw.reshape(-1).tolist()
-                )
-            )
-        ):
-            raise TypeError(f"outcomes must be integers, got {raw.dtype} values")
-        keys = np.array(raw, dtype=_outcome_dtype(n_bits)).reshape(-1)
+        wide = n_bits > _INT64_BITS
+        # Past 63 bits the keys stay Python ints: numpy infers float64 for a
+        # list mixing ints below and above 2**63.
+        raw = np.asarray(outcomes, dtype=object if wide else None).reshape(-1)
+        if raw.dtype.kind not in "iu":
+            for k in raw.tolist():
+                if not isinstance(k, (int, np.integer)) or isinstance(k, bool):
+                    raise TypeError(f"outcomes must be integers, got {k!r}")
+        keys = (
+            np.array([int(k) for k in raw.tolist()], dtype=object) if wide else raw.astype(np.int64)
+        )
         probs = np.array(probabilities, dtype=np.float64).reshape(-1)
         if keys.shape != probs.shape:
             raise ValueError(

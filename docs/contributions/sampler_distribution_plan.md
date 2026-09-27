@@ -26,7 +26,8 @@
 - `docs/contributions/sampler_distribution_plan.md`, `docs/contributions/README.md` (index row, roadmap sentence)
 - Added in implementation (see the deviations log): `tests/test_pipeline/conftest.py`,
   `qarp/plotting/_plot_histogram.py`, `qarp/algorithms/_spectral_estimation.py`,
-  `qarp/algorithms/_composite/montecarlo.py`, `docs/source/getting_started.rst`
+  `qarp/algorithms/_composite/montecarlo.py`, `docs/source/getting_started.rst`,
+  `tests/test_plotting/test_plot_histogram.py`, `tests/test_algorithms/test_spectral_estimation.py`
 
 ---
 
@@ -259,4 +260,7 @@ Declared in the PR and folded in above.
   `qarp/plotting/_plot_histogram.py` and
   `qarp/algorithms/_spectral_estimation.py` (`Dict` annotations widened),
   `qarp/algorithms/_composite/montecarlo.py` (a comment), and
-  `docs/source/getting_started.rst` (printed output).
+  `docs/source/getting_started.rst` (printed output),
+  `tests/test_plotting/test_plot_histogram.py` and
+  `tests/test_algorithms/test_spectral_estimation.py` (both consumers fed a
+  `SamplingDistribution`).

@@ -244,3 +244,13 @@ def test_run_wide_register_iterates_in_ascending_order():
     dist = Sampler(ket=None, measured_qubits=[n - 1, 0, 5]).run([sr])
     assert list(dist) == [(0, 0, 0), (1, 1, 1)]
     assert dist.outcomes.tolist() == [0, 0b111]
+
+
+@pytest.mark.parametrize("n", [63, 64])
+def test_run_register_across_the_int64_boundary(n):
+    """Counts on the top qubit of a 63- or 64-qubit register."""
+    top = 1 << (n - 1)
+    sr = SimpleNamespace(counts={top: 300, 0: 700}, n_shots=1000, n_qubits=n)
+    dist = Sampler(ket=None, measured_qubits=[n - 1, 0]).run([sr])
+    assert dist == {(0, 0): pytest.approx(0.7), (1, 0): pytest.approx(0.3)}
+    assert dist.outcomes.tolist() == [0, 1]

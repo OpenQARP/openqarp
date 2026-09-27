@@ -228,6 +228,30 @@ def test_missing_libraries_and_entry_points_are_skipped(monkeypatch, tmp_path):
         assert _blas_threads.install() == []
 
 
+def test_install_is_idempotent():
+    paths = [library.path for library in _blas_threads._installed]
+    assert _blas_threads.install() == paths
+    assert _blas_threads.install() == paths
+
+
+def test_native_opt_out_in_process(monkeypatch):
+    monkeypatch.setenv("QARP_BLAS_THREADS", "Native")
+    monkeypatch.setattr(_blas_threads, "_installed", [])
+    assert _blas_threads.install() == []
+
+
+def test_blas_during_interpreter_shutdown():
+    out = _run(
+        """
+        import atexit
+        import numpy as np, qarp
+        q, _ = np.linalg.qr(np.random.default_rng(0).normal(size=(1000, 1000)))
+        atexit.register(lambda: print(float(np.abs(q @ q.T - np.eye(1000)).max()) < 1e-12))
+        """
+    )
+    assert out == "True"
+
+
 # ── no deadlock, fork ───────────────────────────────────────────────────
 
 

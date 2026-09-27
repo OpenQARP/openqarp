@@ -6,9 +6,12 @@ Expected values are written out by hand from the §1 encoding: key tuple
 
 import copy
 import pickle
+import random
 
 import numpy as np
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from qarp import SamplingDistribution
 from qarp._sampling_distribution import pack_bits
@@ -229,3 +232,85 @@ def test_pack_bits_identity_positions_drop_higher_bits():
     outcomes = np.array([0b1011, 0b0110], dtype=np.int64)
     assert pack_bits(outcomes, [0, 1]).tolist() == [0b11, 0b10]
     assert pack_bits(outcomes, []).tolist() == [0, 0]
+
+
+# ── widths at the edges ─────────────────────────────────────────────────
+
+
+def test_zero_width_has_the_empty_tuple_as_its_only_key():
+    d = SamplingDistribution([0], [1.0], 0)
+    assert list(d) == [()] == list(reversed(d))
+    assert d[()] == 1.0
+    assert d.probability_of(0) == 1.0
+    with pytest.raises(ValueError):
+        d.probability_of(1)
+
+
+@pytest.mark.parametrize("width", [63, 64, 65])
+def test_keys_across_the_int64_boundary(width):
+    """63 bits fit int64; from 64 the keys are Python ints, including the list
+    [1, 2**63 + 1] that numpy alone would turn into floats."""
+    top = (1 << (width - 1)) | 1
+    top_bits = (1,) + (0,) * (width - 2) + (1,)
+    d = SamplingDistribution([1, top], [0.25, 0.75], width)
+    assert d.outcomes.dtype == (np.int64 if width <= 63 else object)
+    assert all(type(k) is int for k in d.outcomes.tolist())
+    assert list(d) == [(1,) + (0,) * (width - 1), top_bits]
+    assert list(reversed(d)) == list(d)[::-1]
+    assert d[top_bits] == 0.75
+    assert d.probability_of(top) == 0.75
+    assert pickle.loads(pickle.dumps(d)) == d
+
+
+def test_wide_key_with_a_non_bit_entry_is_missing():
+    d = SamplingDistribution([0], [1.0], 40)
+    assert (2,) + (0,) * 39 not in d
+    assert d.get((2,) + (0,) * 39) is None
+
+
+# ── property: every view of a distribution agrees ───────────────────────
+
+
+@st.composite
+def _distributions(draw):
+    """A width, a seed and an outcome count; the outcomes come from the seed."""
+    return (
+        draw(st.integers(min_value=0, max_value=70)),
+        draw(st.integers(min_value=0, max_value=2**32 - 1)),
+        draw(st.integers(min_value=0, max_value=12)),
+    )
+
+
+@pytest.mark.property
+@example((0, 0, 1))
+@example((32, 1, 12))
+@example((33, 2, 12))
+@example((63, 3, 12))
+@example((64, 4, 12))
+@example((65, 5, 12))
+@given(_distributions())
+def test_lookup_iteration_and_arrays_agree(spec):
+    width, seed, count = spec
+    rng = random.Random(seed)
+    count = min(count, 2**width)
+    keys = (
+        sorted(rng.sample(range(2**width), count))
+        if width < 20
+        else sorted({rng.getrandbits(width) for _ in range(count)})
+    )
+    probs = [rng.random() for _ in keys]
+    d = SamplingDistribution(keys, probs, width)
+
+    def bits(k):
+        return tuple((k >> i) & 1 for i in range(width))
+
+    assert list(d) == [bits(k) for k in keys]
+    assert list(reversed(d)) == [bits(k) for k in reversed(keys)]
+    assert d.to_dict() == {bits(k): p for k, p in zip(keys, probs, strict=True)}
+    for k, p in zip(keys, probs, strict=True):
+        assert d[bits(k)] == p
+        assert d.probability_of(k) == p
+    if count < 2**width:
+        absent = next(k for k in range(2 ** min(width, 20)) if k not in set(keys))
+        assert bits(absent) not in d
+        assert d.probability_of(absent) == 0.0

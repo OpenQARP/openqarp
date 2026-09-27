@@ -288,3 +288,14 @@ def test_integer_keyed_dict_is_rejected_with_a_clear_message():
 def test_mixed_width_dict_is_rejected():
     with pytest.raises(ValueError, match="mixed widths"):
         PostSelection({0: 1}).apply({(1,): 0.5, (1, 0): 0.5})
+
+
+def test_empty_dict_gives_an_empty_distribution():
+    out = PostSelection({0: 1}).apply({})
+    assert out.success_rate == 0.0
+    assert out.distribution == {}
+
+
+def test_tuple_key_with_a_non_bit_entry_is_rejected():
+    with pytest.raises(ValueError, match="is not a tuple of 0/1 bits"):
+        PostSelection({0: 1}).apply({(1, 2): 0.5, (0, 0): 0.5})

@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from qarp import SamplingDistribution
 from qarp.plotting import plot_histogram
 from qarp.plotting.styles import _theme as theme
 
@@ -93,3 +94,19 @@ def test_heights_sum_matches_distribution_mass():
     heights, _ = _heights_and_labels(ax)
     assert np.isclose(sum(heights), sum(_PROBS.values()))
     plt.close(fig)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{}, {"sort_by_prob": True}, {"top_k": 2}, {"show_all_solutions": True}],
+)
+def test_sampling_distribution_plots_like_the_same_dict(options):
+    """(0,0), (1,0), (0,1) pack to 0, 1, 2: the Sampler's type for _PROBS."""
+    dist = SamplingDistribution([0, 1, 2], [0.1, 0.6, 0.3], 2)
+    fig_d, ax_d = plot_histogram(_PROBS, return_plotter=True, **options)
+    fig_s, ax_s = plot_histogram(dist, return_plotter=True, **options)
+    assert _heights_and_labels(ax_s) == _heights_and_labels(ax_d)
+    if not options:
+        assert _heights_and_labels(ax_s) == ([0.1, 0.6, 0.3], ["00", "10", "01"])
+    plt.close(fig_d)
+    plt.close(fig_s)
