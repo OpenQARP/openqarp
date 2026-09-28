@@ -21,6 +21,11 @@ constexpr std::chrono::microseconds kIdleSpin{50};
 
 std::atomic<std::uint64_t> g_invocations{0};
 
+// A call is one word: its sequence number above kJobBits and its job count
+// below, so a worker learns from a single load whether a call needs it.
+constexpr int kJobBits = 16;
+constexpr std::uint64_t kJobMask = (std::uint64_t{1} << kJobBits) - 1;
+
 struct Jobs {
     OpenblasDojob dojob;
     int numjobs;
@@ -46,15 +51,17 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             while (static_cast<int>(workers_.size()) < jobs.numjobs - 1) {
                 const int w = static_cast<int>(workers_.size()) + 1;
-                // A new worker starts at the current call number, so it only
-                // takes calls dispatched after it exists.
-                const std::uint64_t now = generation_.load(std::memory_order_relaxed);
+                // A new worker starts at the current call, so it only takes
+                // calls dispatched after it exists.
+                const std::uint64_t now = call_.load(std::memory_order_relaxed);
                 workers_.emplace_back([this, w, now] { work(w, now); });
             }
+            const std::uint64_t next =
+                (((call_.load(std::memory_order_relaxed) >> kJobBits) + 1) << kJobBits) |
+                static_cast<std::uint64_t>(jobs.numjobs);
             jobs_.store(&jobs, std::memory_order_relaxed);
-            numjobs_.store(jobs.numjobs, std::memory_order_relaxed);
             remaining_.store(jobs.numjobs - 1, std::memory_order_relaxed);
-            generation_.fetch_add(1, std::memory_order_release);
+            call_.store(next, std::memory_order_release);
             sleepers = sleeping_ > 0;
         }
         if (sleepers) wake_.notify_all();
@@ -85,7 +92,7 @@ private:
 
     std::uint64_t next_call(std::uint64_t seen) {
         const auto moved = [this, seen] {
-            return generation_.load(std::memory_order_acquire) != seen;
+            return call_.load(std::memory_order_acquire) != seen;
         };
         if (!poll(moved)) {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -93,20 +100,16 @@ private:
             wake_.wait(lock, moved);
             --sleeping_;
         }
-        return generation_.load(std::memory_order_acquire);
+        return call_.load(std::memory_order_acquire);
     }
 
     void work(int w, std::uint64_t seen) {
         for (;;) {
-            const std::uint64_t call = next_call(seen);
-            const int numjobs = numjobs_.load(std::memory_order_relaxed);
-            const Jobs* jobs = jobs_.load(std::memory_order_relaxed);
-            seen = call;
-            // A call cannot end before its workers' jobs do, so a moved call
-            // number means this worker was not needed and read the next call.
-            if (generation_.load(std::memory_order_acquire) != call) continue;
-            if (w >= numjobs) continue;
-            jobs->run(w);
+            seen = next_call(seen);
+            if (w >= static_cast<int>(seen & kJobMask)) continue;
+            // This call cannot end, nor the next begin, before this job does,
+            // so the job pointer read here is the call's own.
+            jobs_.load(std::memory_order_relaxed)->run(w);
             if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                 std::lock_guard<std::mutex> lock(mutex_);
                 done_.notify_one();
@@ -120,9 +123,8 @@ private:
     std::vector<std::thread> workers_;
     int sleeping_ = 0;
     std::atomic<const Jobs*> jobs_{nullptr};
-    std::atomic<int> numjobs_{0};
     std::atomic<int> remaining_{0};
-    std::atomic<std::uint64_t> generation_{0};
+    std::atomic<std::uint64_t> call_{0};
 };
 
 // Never destroyed: a joinable std::thread must not meet a destructor at exit,

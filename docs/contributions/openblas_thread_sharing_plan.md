@@ -101,9 +101,11 @@ sweep of numpy and scipy linear algebra saw no nested entry in 85,642 calls.
   after running job 0.
 - Both hand-offs, a new call to the workers and the last finished job back
   to the caller, poll for 50 µs and then block on a condition variable; a
-  wake-up is signalled only to a thread that went to sleep.  A worker the call
-  does not need re-checks the call number after reading the job count, since
-  it may have read the next call's.
+  wake-up is signalled only to a thread that went to sleep.  A call is
+  published as one atomic word holding its sequence number and job count,
+  stored after the job pointer and counter; a worker decides from that word
+  alone whether the call needs it, so it never acts on the next call's
+  fields.
 - A worker that cannot be created terminates the process through the
   `noexcept` callback, since the jobs already started would wait for it
   forever.
@@ -186,6 +188,7 @@ No public Python API.  Users see only `QARP_BLAS_THREADS`.
 | Concurrent calls never run the same job index together | per-index busy flags standing in for OpenBLAS's scratch buffers | `test_blas_threads.cpp` |
 | Workers are reused and grow to the largest call | `blas_pool_workers()` after calls of 4, 2 and 8 jobs: 3, 3, 7 | `test_blas_threads.cpp` |
 | Idle workers do not spin | process CPU time stays flat while the pool idles for 200 ms after a call | `test_blas_threads.cpp` |
+| Calls of changing size never run a job twice or in the wrong call, one caller and two | 20 000 calls alternating 8 and 2 jobs; two callers × 50 000 calls of 8, 2 and 5 jobs; per-call run counts per slot | `test_blas_threads.cpp` |
 | A forked child's first BLAS call rebuilds the pool | child: `blas_pool_workers()` 0 before, correct counters after | `test_blas_threads.cpp` (POSIX) |
 | A child forked after numpy-only BLAS runs a qarpx simulation | uniform-amplitude statevector `2^{-n/2}`, within a timeout | `test_blas_threads.py` |
 | A forked child runs numpy BLAS | `Q Qᵀ = I` within a timeout | `test_blas_threads.py` |
@@ -258,5 +261,12 @@ Declared in the PR and folded in above.
 - **Both hand-offs poll.**  The design had only idle workers poll; without the
   caller polling too, every call ended in a kernel wake-up and QR ran at
   290–300 ms.
+- **The call is one atomic word.**  The design had workers read the job count
+  and pointer, then re-check the call number.  Both were stored before the
+  number moved, so a worker the previous call did not need could read the
+  next call's fields, pass the re-check and run a job before its call began:
+  a duplicated job that left the caller waiting forever (a full `pytest`
+  stalled in a 4096² `eigvalsh`).  Packing the job count into the call word
+  removes the window.
 - **ABI 11**, for the `_blas_pool_workers` binding (scope already covered
   `qarp/_abi.py`).

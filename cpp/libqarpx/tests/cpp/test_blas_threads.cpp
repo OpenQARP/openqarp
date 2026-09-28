@@ -97,6 +97,71 @@ TEST(BlasThreads, ConcurrentCallsNeverShareAJobSlot) {
     EXPECT_EQ(g_slot_overlaps.load(), 0);
 }
 
+// Stamped by each job: which call it ran in, and how often, so a job run
+// twice or under the wrong call shows up.
+struct StampSlot {
+    std::atomic<int> runs{0};
+    std::atomic<int> call{-1};
+};
+std::atomic<int> g_current_call{0};
+std::atomic<int> g_misplaced{0};
+
+void stamp_job(int /*thread_num*/, void* jobdata, int dojob_data) {
+    auto* slot = static_cast<StampSlot*>(jobdata);
+    slot->runs.fetch_add(1);
+    slot->call.store(dojob_data);
+    if (dojob_data != g_current_call.load()) g_misplaced.fetch_add(1);
+}
+
+TEST(BlasThreads, AlternatingCallSizesRunEachJobOnceInItsOwnCall) {
+    // Small calls leave most workers idle and polling while the next large
+    // call is set up: the window where a worker could read that call early.
+    g_misplaced = 0;
+    std::vector<StampSlot> slots(8);
+    for (int call = 0; call < 20000; ++call) {
+        const int numjobs = (call % 2 == 0) ? 8 : 2;
+        for (int i = 0; i < numjobs; ++i) slots[i].runs = 0;
+        g_current_call = call;
+        qarpx::qarpx_openblas_threads(1, &stamp_job, numjobs, sizeof(StampSlot), slots.data(), call);
+        for (int i = 0; i < numjobs; ++i) {
+            ASSERT_EQ(slots[i].runs.load(), 1) << "call " << call << " job " << i;
+            ASSERT_EQ(slots[i].call.load(), call) << "call " << call << " job " << i;
+        }
+    }
+    EXPECT_EQ(g_misplaced.load(), 0);
+}
+
+// Per-caller stamping for concurrent callers (each owns its slots and ids).
+struct CallerStamp {
+    StampSlot slots[8];
+};
+
+void caller_stamp_job(int /*thread_num*/, void* jobdata, int dojob_data) {
+    auto* slot = static_cast<StampSlot*>(jobdata);
+    slot->runs.fetch_add(1);
+    slot->call.store(dojob_data);
+}
+
+TEST(BlasThreads, TwoCallersAlternatingSizesNeverDuplicateOrMisplaceAJob) {
+    std::atomic<int> bad{0};
+    auto caller = [&bad](int id) {
+        CallerStamp stamp;
+        for (int call = 0; call < 50000; ++call) {
+            const int numjobs = ((call + id) % 3 == 0) ? 8 : ((call % 2) ? 2 : 5);
+            const int tag = id * 1000000 + call;
+            for (int i = 0; i < numjobs; ++i) stamp.slots[i].runs = 0;
+            qarpx::qarpx_openblas_threads(1, &caller_stamp_job, numjobs, sizeof(StampSlot),
+                                          stamp.slots, tag);
+            for (int i = 0; i < numjobs; ++i)
+                if (stamp.slots[i].runs.load() != 1 || stamp.slots[i].call.load() != tag) bad.fetch_add(1);
+        }
+    };
+    std::thread a(caller, 1), b(caller, 2);
+    a.join();
+    b.join();
+    EXPECT_EQ(bad.load(), 0);
+}
+
 TEST(BlasThreads, ZeroJobsIsANoOp) {
     qarpx::qarpx_openblas_threads(1, &rendezvous_job, 0, sizeof(JobSlot), nullptr, 0);
 }
