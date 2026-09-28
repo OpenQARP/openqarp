@@ -121,6 +121,80 @@ def test_writes_raise_and_arrays_are_frozen():
         d.probabilities[0] = 1.0
 
 
+def _built_by(path):
+    d = _dist()
+    return {
+        "constructor": lambda: d,
+        "from_dict": lambda: SamplingDistribution.from_dict(_AS_DICT),
+        "from_dict_shared": lambda: SamplingDistribution.from_dict(d, n_shots=10),
+        "marginal": lambda: d.marginal([0, 2]),
+        "sample": lambda: d.sample(100, seed=1),
+        "postselect": lambda: qarp.PostSelection({2: 1}).apply(d).distribution,
+        "pickle": lambda: pickle.loads(pickle.dumps(d)),
+        "sampler": lambda: _exact(_RyProduct()),
+    }[path]()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "constructor",
+        "from_dict",
+        "from_dict_shared",
+        "marginal",
+        "sample",
+        "postselect",
+        "pickle",
+        "sampler",
+    ],
+)
+@pytest.mark.parametrize("name", ["outcomes", "probabilities"])
+def test_arrays_cannot_be_made_writable_again(path, name):
+    array = getattr(_built_by(path), name)
+    with pytest.raises(ValueError):
+        array.flags.writeable = True
+
+
+@pytest.mark.parametrize(
+    "convert",
+    [np.array, np.asarray, np.sum, lambda d: np.array([d, d])],
+    ids=["array", "asarray", "sum", "list_of_two"],
+)
+def test_numpy_refuses_to_read_the_mapping_as_an_array(convert):
+    with pytest.raises(TypeError, match=r"\.probabilities"):
+        convert(_dist())
+
+
+def test_explicit_arrays_still_convert():
+    d = _dist()
+    assert np.array(list(d.values())).tolist() == _PROBS
+    assert np.asarray(d.probabilities).tolist() == _PROBS
+
+
+_BUILDERS = {
+    "constructor": lambda width: SamplingDistribution([1], [1.0], width),
+    "from_dict_empty": lambda width: SamplingDistribution.from_dict({}, n_bits_measured=width),
+    "from_dict": lambda width: SamplingDistribution.from_dict({(1, 0): 1.0}, n_bits_measured=width),
+    "from_dict_shared": lambda width: SamplingDistribution.from_dict(
+        SamplingDistribution([1], [1.0], 2), n_bits_measured=width
+    ),
+}
+
+
+@pytest.mark.parametrize("builder", sorted(_BUILDERS))
+@pytest.mark.parametrize(
+    ("width", "error"), [(-1, ValueError), (2.7, TypeError), (2.0, TypeError), ("2", TypeError)]
+)
+def test_widths_must_be_non_negative_integers(builder, width, error):
+    with pytest.raises(error):
+        _BUILDERS[builder](width)
+
+
+@pytest.mark.parametrize("builder", sorted(_BUILDERS))
+def test_numpy_integer_widths_are_accepted(builder):
+    assert _BUILDERS[builder](np.int64(2)).n_bits_measured == 2
+
+
 def test_constructor_copies_its_inputs():
     outcomes = np.array(_OUTCOMES)
     d = SamplingDistribution(outcomes, _PROBS, 3)
@@ -141,6 +215,14 @@ def test_equals_dict_literal_approx_and_itself():
     assert d != {(0, 0, 0): 1.0}
     assert d != SamplingDistribution([0, 3, 5], [0.2, 0.3, 0.4], 3)
     assert SamplingDistribution([], [], 2) == SamplingDistribution([], [], 5) == {}
+
+
+def test_equal_keys_of_different_widths_are_different_outcomes():
+    """Key 1 is (1, 0) at width 2 and (1, 0, 0) at width 3."""
+    narrow = SamplingDistribution([1], [1.0], 2)
+    assert narrow != SamplingDistribution([1], [1.0], 3)
+    assert narrow == {(1, 0): 1.0}
+    assert narrow != {(1, 0, 0): 1.0}
 
 
 def test_to_dict_is_a_plain_dict_in_order():
@@ -205,6 +287,18 @@ def test_wide_keys_use_python_ints():
     assert list(d) == [(1,) + (0,) * 69, (1,) + (0,) * 68 + (1,)]
     assert d.probability_of(top) == 0.75
     assert d.probability_of(top + 2) == 0.0
+
+
+@pytest.mark.parametrize("width", [18, 40])
+def test_iteration_across_the_chunk_boundary(width):
+    """65 540 outcomes span two 65 536-key chunks, on the lookup-table path (18
+    bits) and the shift path (40 bits)."""
+    keys = [3 * k for k in range(65_540)]
+    d = SamplingDistribution(keys, np.full(len(keys), 1 / len(keys)), width)
+    tuples = list(d)
+    assert len(tuples) == len(keys)
+    for i in (0, 65_535, 65_536, 65_537, len(keys) - 1):
+        assert tuples[i] == tuple((keys[i] >> b) & 1 for b in range(width))
 
 
 # ── copies ──────────────────────────────────────────────────────────────
@@ -464,6 +558,15 @@ def test_distances_between_one_bit_distributions():
         d.total_variation({(0, 0): 1.0})
 
 
+def test_distances_use_partial_mass_as_given():
+    """p = {0: 0.25} is not renormalised: TV = (0.25 + 0.5) / 2 and the
+    fidelity is (√(0.25 · 0.5))²; renormalising would give 0.5 for both."""
+    d = SamplingDistribution([0], [0.25], 1)
+    fair = {(0,): 0.5, (1,): 0.5}
+    assert d.total_variation(fair) == pytest.approx(0.375)
+    assert d.hellinger_fidelity(fair) == pytest.approx(0.125)
+
+
 def test_sample_frequencies_sit_within_five_sigma():
     exact = _exact(_RyProduct())
     n = 10**6
@@ -483,6 +586,14 @@ def test_sample_renormalises_missing_mass():
         assert abs(sampled[bits] - 0.5) <= 5 * sqrt(0.25 / n)
 
 
+def test_sample_drops_outcomes_drawn_zero_times():
+    """Outcome 1 has probability 0, so no draw can hit it."""
+    sampled = SamplingDistribution([0, 1, 2], [0.5, 0.0, 0.5], 2).sample(1000, seed=0)
+    assert (1, 0) not in sampled
+    assert sampled.outcomes.tolist() == [0, 2]
+    assert int(sampled.counts().sum()) == 1000
+
+
 def test_sample_is_reproducible_and_validated():
     """Reproducibility is additional to the frequency oracle above."""
     d = _dist()
@@ -497,6 +608,8 @@ def test_counts_and_standard_errors():
     sampled = SamplingDistribution([0, 1], [0.25, 0.75], 1, n_shots=100)
     assert sampled.counts().tolist() == [25, 75]
     np.testing.assert_allclose(sampled.standard_errors(), [sqrt(0.25 * 0.75 / 100)] * 2)
+    unequal = SamplingDistribution([0, 1, 2], [0.1, 0.3, 0.6], 2, n_shots=100)
+    np.testing.assert_allclose(unequal.standard_errors(), [0.03, sqrt(0.0021), sqrt(0.0024)])
     exact = SamplingDistribution([0, 1], [0.25, 0.75], 1)
     assert exact.n_shots is None
     np.testing.assert_array_equal(exact.standard_errors(), [0.0, 0.0])

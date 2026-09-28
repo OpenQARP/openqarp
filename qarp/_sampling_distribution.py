@@ -106,6 +106,13 @@ def _checked_shots(n_shots: Optional[int]) -> Optional[int]:
     return shots
 
 
+def _checked_width(n_bits_measured: int) -> int:
+    width = index(n_bits_measured)
+    if width < 0:
+        raise ValueError(f"n_bits_measured must be non-negative, got {width}")
+    return width
+
+
 def _rebuild(outcomes, probabilities, n_bits_measured, n_shots):
     return SamplingDistribution(outcomes, probabilities, n_bits_measured, n_shots=n_shots)
 
@@ -167,9 +174,7 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
     def __init__(
         self, outcomes, probabilities, n_bits_measured: int, *, n_shots: Optional[int] = None
     ):
-        n_bits = int(n_bits_measured)
-        if n_bits < 0:
-            raise ValueError(f"n_bits_measured must be non-negative, got {n_bits}")
+        n_bits = _checked_width(n_bits_measured)
         wide = n_bits > _INT64_BITS
         # Past 63 bits the keys stay Python ints: numpy infers float64 for a
         # list mixing ints below and above 2**63.
@@ -181,7 +186,7 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         keys = (
             np.array([int(k) for k in raw.tolist()], dtype=object) if wide else raw.astype(np.int64)
         )
-        probs = np.array(probabilities, dtype=np.float64).reshape(-1)
+        probs = np.array(np.reshape(probabilities, -1), dtype=np.float64)
         if keys.shape != probs.shape:
             raise ValueError(
                 f"{len(keys)} outcomes but {len(probs)} probabilities; they must align"
@@ -209,7 +214,8 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
     def _wrap(
         cls, keys: np.ndarray, probs: np.ndarray, n_bits: int, n_shots: Optional[int] = None
     ) -> "SamplingDistribution":
-        """Take ownership of arrays already known to be valid."""
+        """Take ownership of arrays already known to be valid.  Each must own its
+        memory: numpy lets a view of writable memory be made writable again."""
         self = cls.__new__(cls)
         self._init(keys, probs, n_bits, n_shots)
         return self
@@ -229,6 +235,8 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         ``SamplingDistribution`` comes back as it is unless ``n_shots`` is given.
         """
         shots = _checked_shots(n_shots)
+        if n_bits_measured is not None:
+            n_bits_measured = _checked_width(n_bits_measured)
         if isinstance(mapping, SamplingDistribution):
             if n_bits_measured is not None and n_bits_measured != mapping._n_bits:
                 raise ValueError(
@@ -238,7 +246,7 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
                 return mapping
             return cls._wrap(mapping._outcomes, mapping._probabilities, mapping._n_bits, shots)
         if not mapping:
-            width = 0 if n_bits_measured is None else int(n_bits_measured)
+            width = 0 if n_bits_measured is None else n_bits_measured
             return cls._wrap(np.zeros(0, dtype=np.int64), np.zeros(0), width, shots)
         for bits in mapping:
             if not isinstance(bits, tuple):
@@ -263,12 +271,13 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
     @property
     def outcomes(self) -> np.ndarray:
         """Packed keys ``Σ_i b_i · 2**i``, strictly ascending, read-only."""
-        return self._outcomes
+        # A view, so numpy refuses to make it writable: its base is read-only.
+        return self._outcomes.view()
 
     @property
     def probabilities(self) -> np.ndarray:
         """Probabilities aligned with :attr:`outcomes`, read-only."""
-        return self._probabilities
+        return self._probabilities.view()
 
     @property
     def n_bits_measured(self) -> int:
@@ -324,8 +333,9 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         return dense
 
     def parity_expectation(self, positions) -> float:
-        """``Σ p · (−1)^(parity of the bits at positions)``: the expectation of
-        ``Z`` on each position.  Empty ``positions`` give the total probability."""
+        """``Σ p · (−1)^(parity of the bits at positions)``: the expectation of the
+        product of ``Z`` over ``positions``, probabilities as given.  Empty
+        ``positions`` give the total probability."""
         parity = np.zeros_like(self._outcomes)
         for q in self._checked_positions(positions):
             parity ^= (self._outcomes >> q) & 1
@@ -440,6 +450,13 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
 
     def __reversed__(self) -> Iterator[tuple[int, ...]]:
         return _tuples(self._outcomes[::-1], self._n_bits)
+
+    def __array__(self, dtype: Any = None, copy: Any = None) -> np.ndarray:
+        # numpy would otherwise read the mapping as a sequence of key tuples.
+        raise TypeError(
+            "a SamplingDistribution is a mapping, not an array; use .probabilities, "
+            ".outcomes or .to_dense()"
+        )
 
     def items(self) -> _Items:
         return _Items(self)

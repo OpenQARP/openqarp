@@ -625,12 +625,12 @@ class PCE(CompositeAlgorithm):
 
         def f(x):
             symbol_map = dict(zip(self.ket.symbols, x, strict=True))
-            # run (values), then run_gradient (Jacobian ∂⟨P_j⟩/∂θ_i,
-            # shape [n_ev][n_symbols]).
-            values = np.array(self.engine.run(symbol_map)).real
+            # Jacobian ∂⟨P_j⟩/∂θ_i, shape [n_ev][n_symbols], first: it refuses a
+            # primitive with no gradient before its values reach numpy.
             jacobian = np.array(
                 self.engine.run_gradient(symbol_map, method=self.gradient_method or "default")
             ).real
+            values = np.array(self.engine.run(symbol_map)).real
 
             def loss(v):
                 result_loss, regulation_term, _ = self.quantum_f(

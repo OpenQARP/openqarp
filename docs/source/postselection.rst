@@ -54,8 +54,8 @@ Fixed bits on a readout distribution
 ``apply`` returns a :class:`~qarp.PostSelected`, a ``(distribution,
 success_rate)`` pair. The conditioned distribution is renormalised (probabilities sum to 1
 over the surviving keys); ``success_rate`` is the probability mass that satisfied the
-condition before renormalisation. Zero surviving mass returns ``PostSelected({}, 0.0)``
-rather than raising, so a condition with vanishing support does not break a parameter sweep.
+condition before renormalisation. Zero surviving mass returns an empty distribution with
+``success_rate`` 0.0 rather than raising, so a condition with vanishing support does not break a parameter sweep.
 
 The same spec applies to any :class:`~qarp.algorithms.Sampler` output, whether it came from
 finite shots or the exact Born distribution (``n_shots=qarp.EXACT``):

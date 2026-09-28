@@ -1,6 +1,6 @@
 # Run OpenBLAS's parallel work on a qarpx-owned parking pool
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-28
@@ -192,7 +192,8 @@ No public Python API.  Users see only `QARP_BLAS_THREADS`.
 | A forked child's first BLAS call rebuilds the pool | child: `blas_pool_workers()` 0 before, correct counters after | `test_blas_threads.cpp` (POSIX) |
 | A child forked after numpy-only BLAS runs a qarpx simulation | uniform-amplitude statevector `2^{-n/2}`, within a timeout | `test_blas_threads.py` |
 | A forked child runs numpy BLAS | `Q Qᵀ = I` within a timeout | `test_blas_threads.py` |
-| numpy BLAS through the callback: `Q Qᵀ`, `norm(ones(n))`, `solve(A, A x)`, complex product | `I`, `√n`, `x`, a BLAS-free `einsum`; `1e-12` for the identities, `1e-10` for the solve and the complex product | `test_blas_threads.py` |
+| numpy BLAS through the callback: `Q Qᵀ`, `norm(ones(n))`, `solve(A, A x)`, complex product | `I`, `√n`, `x`, a BLAS-free `einsum`; `1e-12` for `Q Qᵀ`, relative `1e-14` for the norm, `1e-10` for the solve and the complex product | `test_blas_threads.py` |
+| A matrix product through the callback and through OpenBLAS's own pool | bit-for-bit equal (OpenBLAS partitions the jobs either way) | `test_blas_threads.py` |
 | A broad numpy/scipy linear-algebra sweep | the same routines on OpenBLAS's own pool (reference implementation) | `test_blas_threads.py` |
 | numpy BLAS from four Python threads, and BLAS beside a simulation | `Q Qᵀ = I`, uniform amplitudes; subprocess with a timeout | `test_blas_threads.py` |
 | Exit with daemon threads still in BLAS | exit code 0 in 10 runs, each within a timeout | `test_blas_threads.py` |

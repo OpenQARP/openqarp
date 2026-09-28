@@ -307,3 +307,9 @@ def test_post_selection_keeps_the_kept_shot_count():
     assert PostSelection({0: 1}).apply(sampled).distribution.n_shots == 6
     exact = SamplingDistribution([0, 1, 2, 3], [0.1, 0.2, 0.3, 0.4], 2)
     assert PostSelection({0: 1}).apply(exact).distribution.n_shots is None
+
+
+def test_kept_shot_count_rounds_rather_than_truncates():
+    # 100 × 0.29 is 28.999999999999996 in floating point; 29 shots were kept.
+    sampled = SamplingDistribution([0, 1], [0.71, 0.29], 1, n_shots=100)
+    assert PostSelection({0: 1}).apply(sampled).distribution.n_shots == 29

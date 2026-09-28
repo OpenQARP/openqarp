@@ -1,6 +1,6 @@
 # Return Sampler distributions as an array-backed `SamplingDistribution`
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-25
@@ -194,7 +194,7 @@ the same product over the measured qubits.
 | `> 63`-qubit result: keys, values and ascending order | hand-computed Python ints | `test_sampler.py` |
 | 31 / 32 / 33 / 40 measured bits across the half-table boundary | tuples listed from chosen set bits | `test_sampler.py` |
 | `PostSelection` fixed-bit on a product-state `SamplingDistribution` | analytic conditional marginal; success `sin²(θ_0/2)` | `test_postselection.py` |
-| `PostSelection.hamming_weight` on an EXACT GHZ `SamplingDistribution` | analytic sector weights | `test_postselection.py` |
+| `PostSelection.hamming_weight` on an EXACT product-state `SamplingDistribution` | analytic sector mass and renormalised weights | `test_postselection.py` |
 | Structured QPE returns a `SamplingDistribution` peaked at the eigenphase | existing analytic-eigenphase QPE tests | existing `test_qpe.py` |
 | Grover, amplitude amplification / estimation, PCE with a Sampler | their existing analytic targets | existing composite tests |
 
@@ -251,11 +251,20 @@ Declared in the PR and folded in above.
 - **`__reversed__`**, since `Mapping` leaves it undefined and a `dict`
   supports it.
 - **Constructor rejects non-integer outcomes** with `TypeError` instead of
-  truncating them.
+  truncating them; a non-integer `n_bits_measured` likewise, in the
+  constructor and `from_dict`.
+- **`np.array(d)` raises `TypeError`** (`__array__`), since numpy would read
+  the mapping as its key tuples; PCE's gradient asks for the Jacobian first,
+  so a Sampler still meets the `CapabilityError`.
+- **`outcomes` and `probabilities` return views**, which numpy refuses to make
+  writable again.
+- **`hamming_weight` is tested on the product state, not GHZ**: GHZ's
+  one-bit sector over two qubits is empty, the product state's is not.
 - **Lookups** go through inverse half-tables and a sequential cursor, so
   `dict(d)` does not bisect per key.
-- **Private constructors** `_wrap` (takes ownership of validated arrays) and
-  `_from_mapping` (packs a tuple-keyed mapping), not in the API sketch.
+- **Private constructor** `_wrap` (takes ownership of validated arrays), not
+  in the API sketch; packing a tuple-keyed mapping became the public
+  `from_dict` in the utilities plan.
 - **Scope:** `tests/test_pipeline/conftest.py` (type narrowing),
   `qarp/plotting/_plot_histogram.py` and
   `qarp/algorithms/_spectral_estimation.py` (`Dict` annotations widened),

@@ -1,6 +1,6 @@
 # Add analysis utilities and shot metadata to `SamplingDistribution`
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-25
