@@ -1,18 +1,18 @@
 # Run OpenBLAS's parallel work on a qarpx-owned parking pool
 
-**Status:** Revision 2 — draft, awaiting green-light
+**Status:** In progress
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-28
 **Tier:** Structural
 **Branch:** improvement/sampler-exact-speed
-**Green-lit:** revision 1 at 7a90d38 (2026-09-26), plan blob bf26f62cc09220a9333afaab68d33479a20e3ba5; revision 2 pending
+**Green-lit:** revision 2 at 837527d (2026-09-28), plan blob 5d8cd2eff7f7b9ef6ddba79d1b7477501e5d57a1; revision 1 at 7a90d38 (2026-09-26), plan blob bf26f62cc09220a9333afaab68d33479a20e3ba5
 **Scope:**
 - `cpp/libqarpx/include/qarpx/parallel/blas_threads.h`, `cpp/libqarpx/src/parallel/blas_threads.cpp` — the callback and its worker pool
 - `cpp/libqarpx/CMakeLists.txt` (source list), `cpp/libqarpx/tests/cpp/CMakeLists.txt` (test list)
 - `cpp/libqarpx/python/bindings.cpp` — callback address, invocation counter, configured thread count; `qarp/_abi.py` — the matching ABI version
 - `qarp/_blas_threads.py` — discovery, install, opt-out
-- `qarp/__init__.py` — install at import; `qarp/engines/_qarp_engine.py` — install again when an engine is built
+- `qarp/engines/_qarp_engine.py`, `qarp/blocks/_block.py` — install at the first simulation (see the deviations log; `qarp/__init__.py` no longer installs)
 - `cpp/libqarpx/tests/cpp/test_blas_threads.cpp`, `tests/test_blas_threads.py`
 - `docs/source/configuration.rst` — the Threads section
 - `docs/contributions/openblas_thread_sharing_plan.md`, `docs/contributions/README.md` (index row)
@@ -99,10 +99,11 @@ sweep of numpy and scipy linear algebra saw no nested entry in 85,642 calls.
 - Dispatch sets the job for workers `1 … numjobs − 1` and notifies them; each
   runs its job and decrements a remaining-jobs counter; the caller waits on it
   after running job 0.
-- Idle workers block on a condition variable.  Whether a short bounded spin
-  before blocking (no more than 50 µs) pays for itself on calls that arrive in
-  quick succession (numpy QR makes about 2,000 calls) is settled by
-  measurement in phase 3; the spin never outlasts that bound.
+- Both hand-offs, a new call to the workers and the last finished job back
+  to the caller, poll for 50 µs and then block on a condition variable; a
+  wake-up is signalled only to a thread that went to sleep.  A worker the call
+  does not need re-checks the call number after reading the job count, since
+  it may have read the next call's.
 - A worker that cannot be created terminates the process through the
   `noexcept` callback, since the jobs already started would wait for it
   forever.
@@ -128,7 +129,9 @@ exit-time teardown never runs under a job.
 libraries bundled in the numpy and scipy wheels (`numpy.libs/`,
 `numpy/.dylibs/`, `scipy.libs/`, `scipy/.dylibs/`), and only for packages
 already in `sys.modules`, so it never loads a library the process has not
-loaded.  It opens each with `ctypes` and resolves the setter under its
+loaded; it imports numpy itself first, which qarp needs anyway, so numpy's
+library is found whatever the import order.  It opens each with `ctypes` and
+resolves the setter under its
 prefixed names: `scipy_openblas_set_threads_callback_function64_` (ILP64,
 numpy) and `scipy_openblas_set_threads_callback_function` (LP64, scipy),
 with the matching `set_num_threads`.  Anything else is left alone: other BLAS
@@ -136,11 +139,14 @@ vendors (MKL, Accelerate, an unprefixed conda OpenBLAS) and builds without
 the entry point.  Discovery never raises: an unreadable directory, a module
 without a spec or a library that fails to load skips that candidate.
 
-**Install.**  `import qarp` installs into every library found (numpy's, since
-qarp imports numpy; scipy's if scipy is already imported).  Building a
-`QarpEngine` runs the same idempotent install, so a scipy imported after qarp
-is covered from the first engine on.  `QARP_BLAS_THREADS=native` skips both;
-any other value than `native` or unset warns and is treated as unset.
+**Install.**  The first simulation installs into every library found: the
+first `QarpEngine` built, or the first `Block.statevector` or
+`Block.unitary_matrix`.  Each later one runs the same idempotent install, so
+a scipy imported later is covered from the next simulation on, and a process
+that imports qarp but never simulates keeps OpenBLAS untouched.  Simulators
+that algorithms build internally run inside algorithms that build engines.
+`QARP_BLAS_THREADS=native` skips the install; any other value than `native`
+or unset warns and is treated as unset.
 
 No convention edit: the conventions say nothing about threads.  The
 configuration page's Threads section documents the change, including that
@@ -203,27 +209,28 @@ cases (`bm_lqlga_d1q2_8_bb` and two MS cases) run with a norm in the loop.
 
 ### Phase R1 — the pool
 
-- [ ] Pool, dispatch, one-call mutex, fork and exit handlers, counters; OpenMP code removed
-- [ ] C++ tests; the `_blas_pool_workers` binding
+- [x] Pool, dispatch, one-call mutex, fork and exit handlers, counters; OpenMP code removed *(2026-09-28)*
+- [x] C++ tests; the `_blas_pool_workers` binding *(2026-09-28)*
 
 ### Phase R2 — discovery and install
 
-- [ ] Fail-safe discovery of already-imported packages only; install at import and at engine build; env handling; Python fork reset removed
-- [ ] Python tests
+- [x] Fail-safe discovery of already-imported packages only; install at import and at engine build; env handling; Python fork reset removed *(2026-09-28)*
+- [x] Python tests *(2026-09-28)*
 
 ### Phase R3 — docs and numbers
 
-- [ ] Threads section of `configuration.rst`, with the one-call-at-a-time rule
-- [ ] Spin-before-block decision from measurement; timing tables and qlbm cases in the PR
+- [x] Threads section of `configuration.rst`, with the one-call-at-a-time rule *(2026-09-28)*
+- [x] Spin-before-block decision from measurement; timing tables and qlbm cases in the PR *(2026-09-28)*
 
 ## Decisions (revision 2, 2026-09-28)
 
-- **Idle policy:** decided by measurement in phase R3.  Both variants are
-  built; a spin of up to 50 µs before blocking stays only if it clearly pays
-  on numpy QR's burst of small calls and does not reopen the gap table's
-  penalty.  The choice and its numbers are recorded here.
-- **scipy coverage:** install at `import qarp` for packages already loaded,
-  and again at each `QarpEngine` build.  No `sys.meta_path` hook.
+- **Idle policy:** decided by measurement in phase R3: **50 µs**.  numpy QR
+  of 1200² (about 2,000 calls) took 289–302 ms with no spin and 183–218 ms
+  with 50 µs, against 147–177 ms for OpenBLAS at 6 threads; a `statevector`
+  right after a norm stayed at 4.5–4.9 ms either way.
+- **scipy coverage:** covered at each simulation once scipy is imported (see
+  the deviations log for the move from import to the first simulation).  No
+  `sys.meta_path` hook.
 - **Unknown `QARP_BLAS_THREADS` values** warn with the accepted values and
   are treated as unset.
 
@@ -237,6 +244,19 @@ cases (`bm_lqlga_d1q2_8_bb` and two MS cases) run with a norm in the loop.
 
 ## Deviations log
 
-- (empty for revision 2.  Revision 1's declared deviations — the thread-count
-  binding, the ABI file, the one-call mutex — are part of this revision's
-  Design and Scope.)
+Declared in the PR and folded in above.
+
+- **Installed at the first simulation, not at `import qarp`** (author's
+  decision after measuring the pool's costs).  Against OpenBLAS capped at
+  qarpx's thread count the pool is 1.4–1.7× slower on mid-size factorisation
+  loops and serialises BLAS from several Python threads; a process that
+  imports qarp without simulating now pays none of it.  `qarp/blocks/_block.py`
+  joins the scope; `qarp/__init__.py` no longer installs.
+- **`_blas_threads` imports numpy itself.**  `import qarp` ran before qarp's
+  own modules imported numpy, so a script importing qarp before numpy found
+  no numpy library.  A test pins that import order.
+- **Both hand-offs poll.**  The design had only idle workers poll; without the
+  caller polling too, every call ended in a kernel wake-up and QR ran at
+  290–300 ms.
+- **ABI 11**, for the `_blas_pool_workers` binding (scope already covered
+  `qarp/_abi.py`).
