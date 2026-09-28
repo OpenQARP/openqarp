@@ -138,7 +138,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 10
+#define QARPX_ABI_VERSION 11
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -158,9 +158,11 @@ NB_MODULE(qarpx, m) {
     m.def("_openblas_threads_callback_address", [] {
         return reinterpret_cast<std::uintptr_t>(&qarpx::qarpx_openblas_threads);
     }, "Internal: address of the OpenBLAS threading callback that runs BLAS "
-       "jobs on qarpx's OpenMP team.");
+       "jobs on qarpx's parking pool.");
     m.def("_blas_callback_invocations", &qarpx::blas_callback_invocations,
           "Internal: calls of the OpenBLAS threading callback so far.");
+    m.def("_blas_pool_workers", &qarpx::blas_pool_workers,
+          "Internal: workers of the OpenBLAS callback's pool alive now.");
     m.def("_configured_thread_count", &qarpx::configured_thread_count,
           "Internal: the worker count every qarpx parallel layer uses.");
 

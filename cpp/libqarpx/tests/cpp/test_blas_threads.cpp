@@ -3,11 +3,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <thread>
+#include <utility>
 #include <vector>
 
-#ifdef _OPENMP
-#include <omp.h>
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -106,8 +109,8 @@ TEST(BlasThreads, CountsInvocations) {
 }
 
 #ifdef _OPENMP
-TEST(BlasThreads, FallsBackInsideAnActiveParallelRegion) {
-    // With nesting off the nested team has one thread, too few for the jobs.
+TEST(BlasThreads, WorksFromInsideAnOpenMPRegion) {
+    // The pool is independent of OpenMP, so a caller inside a region is fine.
     bool ran = false;
 #pragma omp parallel num_threads(2)
     {
@@ -119,15 +122,53 @@ TEST(BlasThreads, FallsBackInsideAnActiveParallelRegion) {
     }
     EXPECT_TRUE(ran);
 }
+#endif
 
-TEST(BlasThreads, IgnoresASmallDefaultTeamAndRestoresDynamic) {
-    const int threads = omp_get_max_threads();
-    const int dynamic = omp_get_dynamic();
-    omp_set_num_threads(2);
-    omp_set_dynamic(1);
+TEST(BlasThreads, IdleWorkersDoNotSpin) {
     expect_all_jobs_ran_together(8);
-    EXPECT_EQ(omp_get_dynamic(), 1);
-    omp_set_num_threads(threads);
-    omp_set_dynamic(dynamic);
+    const std::clock_t before = std::clock();  // CPU time of every thread
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const double busy_ms = 1000.0 * static_cast<double>(std::clock() - before) / CLOCKS_PER_SEC;
+    EXPECT_LT(busy_ms, 20.0) << "idle pool used " << busy_ms << " ms of CPU in 200 ms";
+}
+
+#ifndef _WIN32
+// Exit status of a forked child running `body`, which returns 0 on success.
+template <typename Body>
+int in_forked_child(Body body) {
+    const pid_t pid = fork();
+    if (pid == 0) _exit(body());
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 100 + WTERMSIG(status);
+}
+
+// Jobs of a call that each count once and wait for all the others; returns
+// 0 when every job ran exactly once, together, as job i.
+int run_rendezvous(int numjobs) {
+    std::vector<JobSlot> slots(static_cast<std::size_t>(numjobs));
+    Rendezvous rv;
+    rv.numjobs = numjobs;
+    g_rendezvous = &rv;
+    qarpx::qarpx_openblas_threads(1, &rendezvous_job, numjobs, sizeof(JobSlot), slots.data(), 0);
+    if (rv.timed_out.load()) return 1;
+    for (int i = 0; i < numjobs; ++i)
+        if (slots[i].runs.load() != 1 || slots[i].thread_num != i) return 2;
+    return 0;
+}
+
+TEST(BlasThreads, ForkedChildStartsAFreshPoolThatGrowsAndIsReused) {
+    expect_all_jobs_ran_together(8);  // the parent's pool has workers
+    const int status = in_forked_child([] {
+        if (qarpx::blas_pool_workers() != 0) return 3;
+        const std::pair<int, std::size_t> calls[] = {{4, 3}, {2, 3}, {8, 7}};
+        for (const auto& [numjobs, workers] : calls) {
+            if (const int failed = run_rendezvous(numjobs)) return failed;
+            if (qarpx::blas_pool_workers() != workers) return 4;
+        }
+        return 0;
+    });
+    EXPECT_EQ(status, 0);
+    expect_all_jobs_ran_together(8);  // and the parent's still works
 }
 #endif

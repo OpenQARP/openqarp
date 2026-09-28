@@ -6,6 +6,7 @@ import numpy as np
 
 import qarpx as qx
 
+from .. import _blas_threads
 from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._engine import (
@@ -161,6 +162,9 @@ class QarpEngine(Engine):
         n_shots: Union[int, Shots] = 10_000,
         seed: Optional[int] = None,
     ):
+        # BLAS starts sharing the machine with the simulator from here; a
+        # no-op once numpy and scipy are both examined.
+        _blas_threads.install()
         self._device = _build_effective_device(
             device,
             n_qubits=n_qubits,

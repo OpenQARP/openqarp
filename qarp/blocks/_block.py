@@ -25,6 +25,8 @@ from sympy import Symbol
 
 import qarpx as qx
 
+from .. import _blas_threads
+
 
 def as_param(angle) -> qx.Param:
     """The one angle → ``qx.Param`` coercion (§13: parameters coerce to Param).
@@ -953,6 +955,7 @@ class _BlockMixin:
                 per step.
         """
         cmds = self._simulable_commands("statevector")
+        _blas_threads.install()
         if initial_state is None:
             return np.asarray(qx.QarpSimulator().statevector(cmds, self.n_qubits))
         psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
@@ -965,6 +968,7 @@ class _BlockMixin:
         an exploration/validation tool, not a simulation path.
         """
         cmds = self._simulable_commands("unitary_matrix")
+        _blas_threads.install()
         return np.asarray(qx.QarpSimulator().unitary_matrix(cmds, self.n_qubits))
 
     # ── deepcopy ──────────────────────────────────────────────────────

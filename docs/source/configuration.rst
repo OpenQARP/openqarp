@@ -165,13 +165,21 @@ pool.  After a multi-threaded BLAS call (a complex ``np.linalg.norm``, a
 matrix product, a solve) its workers keep spinning for 100–200 ms, and a
 simulator call started in that window competes with them for the cores: a
 16-qubit ``statevector`` right after a norm took 108 ms instead of 5 ms.
-``import qarp`` therefore hands those OpenBLAS copies a threading callback,
-so their parallel jobs run on qarpx's OpenMP team and the process keeps one
-pool.  BLAS stays multi-threaded, sized by ``QARP_NUM_THREADS`` unless
-``OPENBLAS_NUM_THREADS`` is set; BLAS calls from several Python threads run
-one at a time, as they do on OpenBLAS's own pool.  A child created with ``fork`` goes back to
-OpenBLAS's own pool.  Other BLAS libraries (MKL, Accelerate, a conda
-OpenBLAS) are left alone.  To keep OpenBLAS's own threading:
+qarp therefore hands those OpenBLAS copies a threading callback that runs
+their parallel jobs on a small pool of qarpx's own, whose idle workers sleep
+the moment a call ends.  BLAS stays multi-threaded, sized by
+``QARP_NUM_THREADS`` unless ``OPENBLAS_NUM_THREADS`` or ``GOTO_NUM_THREADS``
+is set.  BLAS calls from several Python threads run one at a time, because
+OpenBLAS's per-job scratch buffers are shared between calls.  A child created
+with ``fork`` starts a fresh pool, so numpy work before a fork never affects
+the child's simulations.
+
+The callback is installed at the first simulation: the first ``QarpEngine``
+built, or the first ``Block.statevector`` or ``Block.unitary_matrix``.  A
+process that imports qarp but never simulates keeps OpenBLAS exactly as it
+was.  scipy's copy is hooked at the first simulation after scipy is imported;
+qarp never loads scipy itself.  Other BLAS libraries (MKL, Accelerate, a
+conda OpenBLAS) are left alone.  To keep OpenBLAS's own threading:
 
 .. code-block:: bash
 
