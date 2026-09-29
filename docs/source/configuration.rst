@@ -135,7 +135,9 @@ scheduler CPU binding are honoured), capped one below its logical CPUs: a
 spinning OpenMP worker on each hardware thread starves the process.  A
 container CPU limit (``docker run --cpus``, a Kubernetes ``limits.cpu``, any
 cgroup v1 or v2 CPU quota) counts as the logical CPUs when it is fewer,
-rounded up to whole CPUs.  Where the topology is unreadable (outside Linux)
+rounded up to whole CPUs.  OpenMP binding (``OMP_PROC_BIND``, ``OMP_PLACES``)
+pins the main thread to one place; the CPUs counted are then those of all
+the places, so binding does not shrink the count.  Where the topology is unreadable (outside Linux)
 the count is the logical CPUs minus one.  The physical cores are those the
 kernel reports: under WSL and some virtual machines the virtual topology
 pairs CPUs that are separate cores on the hardware and so undercounts them;
@@ -167,10 +169,16 @@ simulator call started in that window competes with them for the cores: a
 16-qubit ``statevector`` right after a norm took 108 ms instead of 5 ms.
 qarp therefore hands those OpenBLAS copies a threading callback that runs
 their parallel jobs on a small pool of qarpx's own, whose idle workers sleep
-the moment a call ends.  BLAS stays multi-threaded, sized by
-``QARP_NUM_THREADS`` unless ``OPENBLAS_NUM_THREADS`` or ``GOTO_NUM_THREADS``
-is set.  BLAS calls from several Python threads run one at a time, because
-OpenBLAS's per-job scratch buffers are shared between calls.  A child created
+the moment a call ends.  BLAS stays multi-threaded: its thread count is
+lowered to qarp's (``QARP_NUM_THREADS``), and numpy and scipy keep that count
+for the rest of the process.  A count set in ``OPENBLAS_NUM_THREADS`` or
+``GOTO_NUM_THREADS`` stays, and so does a lower limit set in code before the
+first simulation (``threadpoolctl``); one set inside a ``with`` block that
+the first simulation runs in is restored by ``threadpoolctl`` to OpenBLAS's
+own count when the block ends.  BLAS calls from several Python threads run one at a time, because
+OpenBLAS's per-job scratch buffers are shared between calls.  The pool's
+workers run on every CPU the process may use, even when the thread that
+made the first call is pinned to one.  A child created
 with ``fork`` starts a fresh pool, so numpy work before a fork never affects
 the child's simulations.
 

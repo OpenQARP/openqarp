@@ -9,8 +9,14 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <csignal>
+#include <cstdlib>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#ifdef __linux__
+#include <sched.h>
 #endif
 
 namespace {
@@ -235,5 +241,121 @@ TEST(BlasThreads, ForkedChildStartsAFreshPoolThatGrowsAndIsReused) {
     });
     EXPECT_EQ(status, 0);
     expect_all_jobs_ran_together(8);  // and the parent's still works
+}
+#endif
+
+#ifndef _WIN32
+namespace {
+
+enum class AtExit { nothing, call, fork_and_call, call_from_another_thread };
+AtExit g_at_exit = AtExit::nothing;
+
+// Ends the process with 0 when the pool behaved during exit.
+void exit_probe() {
+    switch (g_at_exit) {
+        case AtExit::nothing:
+            return;
+        case AtExit::call:
+            _exit(run_rendezvous(4));
+        case AtExit::fork_and_call: {
+            const pid_t pid = fork();
+            if (pid == 0) _exit(run_rendezvous(4));
+            int status = 0;
+            waitpid(pid, &status, 0);
+            _exit(WIFEXITED(status) ? WEXITSTATUS(status) : 50);
+        }
+        case AtExit::call_from_another_thread: {
+            static std::atomic<bool> returned{false};
+            std::thread([] {
+                run_rendezvous(4);
+                returned = true;
+            }).detach();
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            _exit(returned.load() ? 1 : 0);
+        }
+    }
+}
+
+// Registered at load, before the pool's own exit handler, so it runs after it.
+const int g_exit_probe_registered = std::atexit(&exit_probe);
+
+// Exit status of a forked child that calls exit() with `probe` armed; 124
+// when it has not ended within ten seconds.
+int exit_status_with(AtExit probe) {
+    (void)g_exit_probe_registered;
+    const pid_t pid = fork();
+    if (pid == 0) {
+        g_at_exit = probe;
+        std::exit(99);
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    int status = 0;
+    while (waitpid(pid, &status, WNOHANG) == 0) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            return 124;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 100 + WTERMSIG(status);
+}
+
+}  // namespace
+
+TEST(BlasThreads, TheExitingThreadStillRunsCallsAfterThePoolsExitHandler) {
+    expect_all_jobs_ran_together(4);  // registers the pool's exit handler
+    EXPECT_EQ(exit_status_with(AtExit::call), 0);
+}
+
+TEST(BlasThreads, TheExitingThreadCanForkAfterThePoolsExitHandler) {
+    expect_all_jobs_ran_together(4);
+    EXPECT_EQ(exit_status_with(AtExit::fork_and_call), 0);
+}
+
+TEST(BlasThreads, AnotherThreadsCallNeverReturnsOnceExitHasBegun) {
+    expect_all_jobs_ran_together(4);
+    EXPECT_EQ(exit_status_with(AtExit::call_from_another_thread), 0);
+}
+#endif
+
+#ifdef __linux__
+namespace {
+
+struct MaskSlot {
+    cpu_set_t mask;
+};
+
+void mask_job(int /*thread_num*/, void* jobdata, int /*dojob_data*/) {
+    auto* slot = static_cast<MaskSlot*>(jobdata);
+    CPU_ZERO(&slot->mask);
+    sched_getaffinity(0, sizeof(slot->mask), &slot->mask);
+}
+
+}  // namespace
+
+TEST(BlasThreads, WorkersCreatedByAPinnedCallerRunOnEveryProcessCpu) {
+    cpu_set_t all;
+    CPU_ZERO(&all);
+    ASSERT_EQ(sched_getaffinity(0, sizeof(all), &all), 0);
+    if (CPU_COUNT(&all) < 2) GTEST_SKIP() << "needs two usable CPUs";
+    int first = 0;
+    while (!CPU_ISSET(first, &all)) ++first;
+    cpu_set_t one;
+    CPU_ZERO(&one);
+    CPU_SET(first, &one);
+
+    // More jobs than workers, so the pinned caller creates the new ones.
+    const int numjobs = static_cast<int>(qarpx::blas_pool_workers()) + 4;
+    std::vector<MaskSlot> slots(static_cast<std::size_t>(numjobs));
+    ASSERT_EQ(sched_setaffinity(0, sizeof(one), &one), 0);
+    qarpx::qarpx_openblas_threads(1, &mask_job, numjobs, sizeof(MaskSlot), slots.data(), 0);
+    ASSERT_EQ(sched_setaffinity(0, sizeof(all), &all), 0);
+
+    EXPECT_TRUE(CPU_EQUAL(&slots[0].mask, &one)) << "job 0 runs on the caller";
+    for (int i = 1; i < numjobs; ++i) {
+        EXPECT_TRUE(CPU_EQUAL(&slots[i].mask, &all))
+            << "worker " << i << " may use " << CPU_COUNT(&slots[i].mask) << " CPUs";
+    }
 }
 #endif

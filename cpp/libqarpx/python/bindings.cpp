@@ -156,6 +156,7 @@ NB_MODULE(qarpx, m) {
        "limit) and the default thread count it gives.");
 
     m.def("_openblas_threads_callback_address", [] {
+        qarpx::register_blas_process_hooks();
         return reinterpret_cast<std::uintptr_t>(&qarpx::qarpx_openblas_threads);
     }, "Internal: address of the OpenBLAS threading callback that runs BLAS "
        "jobs on qarpx's parking pool.");

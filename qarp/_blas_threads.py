@@ -20,10 +20,19 @@ import numpy  # noqa: F401  (qarp needs it anyway; its OpenBLAS must be loaded b
 import qarpx as qx
 
 # Entry points of the scipy-openblas builds in the numpy (ILP64, suffix
-# ``64_``) and scipy (LP64) wheels, as (callback setter, thread-count setter).
+# ``64_``) and scipy (LP64) wheels, as (callback setter, thread-count setter,
+# thread-count getter).
 _ENTRY_POINTS = (
-    ("scipy_openblas_set_threads_callback_function64_", "scipy_openblas_set_num_threads64_"),
-    ("scipy_openblas_set_threads_callback_function", "scipy_openblas_set_num_threads"),
+    (
+        "scipy_openblas_set_threads_callback_function64_",
+        "scipy_openblas_set_num_threads64_",
+        "scipy_openblas_get_num_threads64_",
+    ),
+    (
+        "scipy_openblas_set_threads_callback_function",
+        "scipy_openblas_set_num_threads",
+        "scipy_openblas_get_num_threads",
+    ),
 )
 _PACKAGES = ("numpy", "scipy")
 # Counts the user set for OpenBLAS; qarp then leaves the count alone.
@@ -34,6 +43,7 @@ class _Library(NamedTuple):
     path: str
     set_callback: Callable[[Optional[int]], None]
     set_num_threads: Callable[[int], None]
+    get_num_threads: Callable[[], int]
 
 
 _installed: list[_Library] = []
@@ -64,16 +74,32 @@ def _open(path: Path) -> Optional[_Library]:
         handle = ctypes.CDLL(str(path))
     except OSError:
         return None
-    for callback_name, threads_name in _ENTRY_POINTS:
-        set_callback = getattr(handle, callback_name, None)
-        set_num_threads = getattr(handle, threads_name, None)
-        if set_callback is not None and set_num_threads is not None:
-            set_callback.argtypes = [ctypes.c_void_p]
-            set_callback.restype = None
-            set_num_threads.argtypes = [ctypes.c_int]
-            set_num_threads.restype = None
-            return _Library(str(path), set_callback, set_num_threads)
+    for names in _ENTRY_POINTS:
+        set_callback, set_num_threads, get_num_threads = (
+            getattr(handle, name, None) for name in names
+        )
+        if set_callback is None or set_num_threads is None or get_num_threads is None:
+            continue
+        set_callback.argtypes = [ctypes.c_void_p]
+        set_callback.restype = None
+        set_num_threads.argtypes = [ctypes.c_int]
+        set_num_threads.restype = None
+        get_num_threads.argtypes = []
+        get_num_threads.restype = ctypes.c_int
+        return _Library(str(path), set_callback, set_num_threads, get_num_threads)
     return None
+
+
+def _user_set_count() -> bool:
+    """Whether the environment names a thread count OpenBLAS itself honours:
+    a positive integer, anything else it ignores."""
+    for name in _USER_COUNT_VARIABLES:
+        try:
+            if int(os.environ.get(name, "")) > 0:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _opted_out() -> bool:
@@ -93,6 +119,20 @@ def _opted_out() -> bool:
     return False
 
 
+def _follows_qarp(count: int) -> bool:
+    """Whether OpenBLAS's ``count`` gives way to qarpx's.  A higher one does;
+    a lower one is a limit the user set, unless it is the size of this
+    thread's CPU mask under OpenMP binding, which is what OpenBLAS counts
+    when it loads after the binding."""
+    if count > qx._configured_thread_count():
+        return True
+    affinity = getattr(os, "sched_getaffinity", None)
+    if affinity is None:
+        return False
+    bound = len(affinity(0))
+    return count == bound and bound < qx._cpu_budget()["logical"]
+
+
 def install() -> list[str]:
     """Install qarpx's callback into the bundled OpenBLAS of every imported
     package not yet examined; return the paths of all libraries it is in.
@@ -100,22 +140,23 @@ def install() -> list[str]:
     Runs at the first simulation (a ``QarpEngine`` built, ``Block.statevector``
     or ``Block.unitary_matrix``) and again at each later one, so a process
     that never simulates keeps OpenBLAS untouched and a scipy imported later
-    is covered from the next simulation on.  OpenBLAS's thread count follows
-    qarpx's unless the user set one.
+    is covered from the next simulation on.  OpenBLAS's thread count is
+    lowered to qarpx's and left alone when the environment sets it; it is
+    raised only from the count OpenBLAS took from a thread bound by OpenMP.
     """
     if _opted_out():
         return [library.path for library in _installed]
     pending = [p for p in _PACKAGES if p not in _examined_packages and p in sys.modules]
     if pending:
         address = qx._openblas_threads_callback_address()
-        keep_count = any(name in os.environ for name in _USER_COUNT_VARIABLES)
+        keep_count = _user_set_count()
         for package in pending:
             _examined_packages.add(package)
             for path in _candidate_paths(package):
                 library = _open(path)
                 if library is None:
                     continue
-                if not keep_count:
+                if not keep_count and _follows_qarp(library.get_num_threads()):
                     library.set_num_threads(qx._configured_thread_count())
                 library.set_callback(address)
                 _installed.append(library)

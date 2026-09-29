@@ -8,6 +8,8 @@
 #include <thread>
 #include <vector>
 
+#include "qarpx/parallel/cpu_budget.h"
+
 #ifndef _WIN32
 #include <pthread.h>
 #endif
@@ -104,6 +106,7 @@ private:
     }
 
     void work(int w, std::uint64_t seen) {
+        detail::use_process_cpus();
         for (;;) {
             seen = next_call(seen);
             if (w >= static_cast<int>(seen & kJobMask)) continue;
@@ -155,29 +158,49 @@ void after_fork_in_child() {
 }
 #endif
 
-// Waits for a call in flight on another thread and admits no new one, so
-// OpenBLAS's exit-time teardown never runs under a job.
-void hold_calls_at_exit() { g_one_call_at_a_time.lock(); }
+// Set under the call mutex once exit has begun; only the exiting thread,
+// whose handlers and destructors may still use BLAS, is admitted after that.
+std::atomic<bool> g_exiting{false};
+std::thread::id g_exiting_thread;
 
-void register_process_hooks() {
-#ifndef _WIN32
-    pthread_atfork(&before_fork, &after_fork_in_parent, &after_fork_in_child);
-#endif
-    std::atexit(&hold_calls_at_exit);
+// Waits for a call in flight on another thread, so OpenBLAS's exit-time
+// teardown never runs under a job of a thread that outlives it.
+void admit_only_this_thread_from_now() {
+    const std::lock_guard<std::mutex> lock(g_one_call_at_a_time);
+    g_exiting_thread = std::this_thread::get_id();
+    g_exiting.store(true, std::memory_order_release);
+}
+
+[[noreturn]] void park_until_the_process_ends() {
+    for (;;) std::this_thread::sleep_for(std::chrono::hours(1));
 }
 
 }  // namespace
+
+void register_blas_process_hooks() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+#ifndef _WIN32
+        pthread_atfork(&before_fork, &after_fork_in_parent, &after_fork_in_child);
+#endif
+        std::atexit(&admit_only_this_thread_from_now);
+    });
+}
 
 // OpenBLAS always passes sync = 1; running every job to completion before
 // returning satisfies either value.
 extern "C" void qarpx_openblas_threads(int /*sync*/, OpenblasDojob dojob, int numjobs,
                                        std::size_t jobdata_elsize, void* jobdata,
                                        int dojob_data) noexcept {
-    static std::once_flag hooks;
-    std::call_once(hooks, &register_process_hooks);
+    register_blas_process_hooks();
     g_invocations.fetch_add(1, std::memory_order_relaxed);
     if (numjobs <= 0) return;
-    const std::lock_guard<std::mutex> lock(g_one_call_at_a_time);
+    std::unique_lock<std::mutex> lock(g_one_call_at_a_time);
+    if (g_exiting.load(std::memory_order_acquire) &&
+        std::this_thread::get_id() != g_exiting_thread) {
+        lock.unlock();
+        park_until_the_process_ends();
+    }
     const Jobs jobs{dojob, numjobs, jobdata_elsize, jobdata, dojob_data};
     if (numjobs == 1) {
         jobs.run(0);

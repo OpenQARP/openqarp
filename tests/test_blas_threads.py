@@ -211,6 +211,138 @@ def test_openblas_follows_qarp_thread_count_unless_the_user_set_it():
         assert blas == "2", variable
 
 
+_COUNT_AFTER_INSTALL = """
+    import ctypes, sys
+    if sys.argv[3] == "qarpx_first":
+        import qarpx
+    import numpy as np
+    lib = ctypes.CDLL(sys.argv[1])
+    if sys.argv[2] != "-":
+        lib.scipy_openblas_set_num_threads64_(int(sys.argv[2]))
+    print(lib.scipy_openblas_get_num_threads64_())
+    import qarp
+    from qarp.engines import QarpEngine
+    QarpEngine()
+    print(lib.scipy_openblas_get_num_threads64_())
+"""
+
+
+def _count_after_install(env, limit=None, first="numpy_first"):
+    """numpy's OpenBLAS thread count before and after the first engine, with
+    the count set to ``limit`` in code beforehand when given.  ``first`` is
+    the library loaded first, numpy's OpenBLAS or qarpx with its OpenMP."""
+    args = [_NUMPY_OPENBLAS[0], "-" if limit is None else str(limit), first]
+    clean = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("QARP_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+        and k != "GOTO_NUM_THREADS"
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(_COUNT_AFTER_INSTALL), *args],
+        env={**clean, "SKBUILD_EDITABLE_VERBOSE": "0", **env},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    before, after = result.stdout.split()
+    return int(before), int(after)
+
+
+def test_a_thread_limit_set_in_code_survives_the_install():
+    assert _count_after_install({"QARP_NUM_THREADS": "2"}, limit=1) == (1, 1)
+
+
+def test_install_never_raises_the_thread_count():
+    native, after = _count_after_install({"QARP_NUM_THREADS": "100"})
+    assert after == native
+    assert _count_after_install({"QARP_NUM_THREADS": "8", "OMP_NUM_THREADS": "2"}) == (2, 2)
+
+
+def test_a_limit_set_in_code_survives_the_install_under_openmp_binding():
+    """Bound to one CPU, OpenBLAS starts at 1 thread and is raised; a limit of
+    2 is the user's and stays."""
+    if not hasattr(os, "sched_getaffinity") or len(os.sched_getaffinity(0)) < 4:
+        pytest.skip("needs four usable CPUs")
+    env = {"QARP_NUM_THREADS": "3", "OMP_PROC_BIND": "true"}
+    assert _count_after_install(env, first="qarpx_first") == (1, 3)
+    assert _count_after_install(env, limit=2, first="qarpx_first") == (2, 2)
+
+
+@pytest.mark.parametrize("variable", ["OPENBLAS_NUM_THREADS", "GOTO_NUM_THREADS"])
+def test_a_count_in_the_environment_wins_even_above_qarps(variable):
+    assert _count_after_install({"QARP_NUM_THREADS": "2", variable: "3"}) == (3, 3)
+
+
+@pytest.mark.parametrize("value", ["", "abc", "0", "-2"])
+def test_a_count_openblas_ignores_does_not_stop_the_lowering(value):
+    native, after = _count_after_install({"QARP_NUM_THREADS": "2", "OPENBLAS_NUM_THREADS": value})
+    assert native >= 2
+    assert after == 2
+
+
+_WORKER_MASKS = """
+    import glob, os, sys
+    import numpy as np
+    full = sorted(os.sched_getaffinity(0))
+    import qarp, qarpx
+    from qarp.engines import QarpEngine
+
+    def threads():
+        return {os.path.basename(d) for d in glob.glob("/proc/self/task/*")}
+
+    QarpEngine()
+    a = np.random.default_rng(0).normal(size=(1200, 1200))
+    before = threads()
+    if sys.argv[1] == "pin":
+        os.sched_setaffinity(0, {full[0]})
+    a @ a
+    os.sched_setaffinity(0, full)
+    masks = [sorted(os.sched_getaffinity(int(t))) for t in threads() - before]
+    print(qarpx._blas_pool_workers(), len(masks), all(m == full for m in masks))
+"""
+
+
+@pytest.mark.skipif(not hasattr(os, "sched_setaffinity"), reason="CPU affinity is Linux-only")
+@pytest.mark.parametrize(
+    ("pin", "env"),
+    [("pin", {}), ("free", {"OMP_PROC_BIND": "true"})],
+    ids=["pinned_caller", "openmp_binding"],
+)
+def test_pool_workers_run_on_every_cpu_of_the_process(pin, env):
+    """The thread making the first parallel BLAS call is pinned to one CPU, by
+    itself or by OpenMP binding; the workers it creates are not."""
+    if len(os.sched_getaffinity(0)) < 2:
+        pytest.skip("needs at least two usable CPUs")
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(_WORKER_MASKS), pin],
+        env={**os.environ, "SKBUILD_EDITABLE_VERBOSE": "0", **env},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    workers, created, on_every_cpu = result.stdout.split()
+    assert int(workers) >= 1
+    assert int(created) == int(workers)
+    assert on_every_cpu == "True"
+
+
+def test_openblas_stays_multi_threaded_under_openmp_binding():
+    probe = """
+        import ctypes, qarp, qarpx
+        from qarp import _blas_threads
+        from qarp.engines import QarpEngine
+        QarpEngine()
+        lib = ctypes.CDLL(_blas_threads.install()[0])
+        print(lib.scipy_openblas_get_num_threads64_())
+    """
+    unbound = _run(probe)
+    assert int(unbound) == qx._configured_thread_count()
+    assert _run(probe, {"OMP_PROC_BIND": "true"}) == unbound
+
+
 def test_native_opt_out_leaves_openblas_alone():
     out = _run(
         """

@@ -278,6 +278,26 @@ def test_default_thread_count_follows_the_cpu_affinity():
     _assert_default_follows_the_budget(_thread_probe({}, cpus=set(subset)), subset)
 
 
+@pytest.mark.parametrize(
+    "binding",
+    [{"OMP_PROC_BIND": "true"}, {"OMP_PROC_BIND": "close", "OMP_PLACES": "cores"}],
+    ids=["bind", "bind_cores"],
+)
+def test_default_thread_count_ignores_openmp_binding_of_the_main_thread(binding):
+    """OpenMP binding pins the main thread to one place; the budget is still
+    the CPUs the process was started with."""
+    import os
+
+    if not hasattr(os, "sched_setaffinity"):
+        pytest.skip("CPU affinity is Linux-only")
+    cpus = _usable_cpus()
+    if len(cpus) < 2:
+        pytest.skip("needs at least two usable CPUs")
+    _assert_default_follows_the_budget(_thread_probe(binding), cpus)
+    subset = cpus[:4]
+    _assert_default_follows_the_budget(_thread_probe(binding, cpus=set(subset)), subset)
+
+
 def test_omp_num_threads_is_honoured_when_qarp_num_threads_is_unset():
     """``OMP_NUM_THREADS`` sizes the layers when ``QARP_NUM_THREADS`` is
     unset, and ``QARP_NUM_THREADS`` wins when both are set."""

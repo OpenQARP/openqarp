@@ -14,10 +14,16 @@ using OpenblasDojob = void (*)(int thread_num, void* jobdata, int dojob_data);
 /// busy-wait on each other, so fewer threads than ``numjobs`` would deadlock.
 /// Calls run one at a time, since jobs of different calls would share
 /// OpenBLAS's per-job scratch buffers.  After ``fork`` the child starts a
-/// fresh pool.  Returns with every job done.
+/// fresh pool.  Once the process is exiting, only the exiting thread's calls
+/// run; any other thread's call never returns.  Returns with every job done.
 extern "C" void qarpx_openblas_threads(int sync, OpenblasDojob dojob, int numjobs,
                                        std::size_t jobdata_elsize, void* jobdata,
                                        int dojob_data) noexcept;
+
+/// Registers the fork and exit handlers, once.  Called where the callback is
+/// handed to OpenBLAS: a fork already under way when the first call
+/// registered them would copy that call without its child handler.
+void register_blas_process_hooks();
 
 /// Calls of ``qarpx_openblas_threads`` so far.
 std::uint64_t blas_callback_invocations();

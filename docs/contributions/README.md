@@ -134,6 +134,6 @@ Not a row: [`_template.md`](_template.md), the plan scaffold.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
-| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Run OpenBLAS's parallel jobs on a qarpx-owned parking pool | Stefano Scali | ✅ | Revision 2: a qarpx-owned pool installed at the first simulation; the OpenMP team (revision 1) broke `fork` |
+| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | 🚧 | Revision 3 awaits its green-light: OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool` |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | ✅ | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | ✅ | Same PR as `sampler_distribution_plan.md`; no convention edit |
