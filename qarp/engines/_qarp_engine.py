@@ -6,12 +6,12 @@ import numpy as np
 
 import qarpx as qx
 
-from .. import _blas_threads
+from .. import _blas_threads, _program
 from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
-    StructuredQPEPlan,
+    _exact_program_result,
     _exact_result,
     _reindex_exact,
 )
@@ -145,6 +145,10 @@ class QarpEngine(Engine):
                   ``qarp.EXACT`` makes exact readout the engine-wide default.
         seed:     Optional RNG seed (passed to QarpSimulator).  EXACT readouts
                   involve no RNG and are seed-independent / bit-reproducible.
+        structured: Run sampling primitives' block structure as typed
+                  kernels where cheaper than their gates (§14 *Structured
+                  execution*); ``None`` follows ``QARP_STRUCTURED`` (default
+                  on).  Engines with a ``device`` always run the gate path.
     """
 
     supports_initial_state = True
@@ -161,6 +165,7 @@ class QarpEngine(Engine):
         directedness: bool = False,
         n_shots: Union[int, Shots] = 10_000,
         seed: Optional[int] = None,
+        structured: Optional[bool] = None,
     ):
         # BLAS starts sharing the machine with the simulator from here; a
         # no-op once numpy and scipy are both examined.
@@ -185,10 +190,9 @@ class QarpEngine(Engine):
             self._sim = qx.QarpSimulator()
             self._sim_noise_enabled = False
 
-        # Standalone Transpiler — used by the no-device path and by
-        # ``prepare_structured_qpe``, which compiles the fast-path ingredient
-        # blocks (U, state-prep, IQFT) independently of the device pipeline.
-        # Defaults to device.gate_set when available, otherwise native_gateset.
+        # Standalone Transpiler — used by the no-device path and for the gates
+        # kernels of structured programs.  Defaults to device.gate_set when
+        # available, otherwise native_gateset.
         device_gateset = (
             self._device.gate_set
             if self._device is not None and self._device.gate_set is not None
@@ -203,6 +207,8 @@ class QarpEngine(Engine):
             )
         self._n_shots = n_shots
         self._seed = seed
+        self._structured = _program.resolve(structured)
+        self._programs = {}
         self._primitives: list[Runnable] = []
         # Parallel to each prim.compiled_circuits[i]: logical→physical map
         # (or None when no routing happened).  Used by run()/batch_run() to
@@ -283,61 +289,6 @@ class QarpEngine(Engine):
 
     # ── Engine API ──────────────────────────────────────────────────────────
 
-    def prepare_structured_qpe(
-        self,
-        kind,
-        unitary,
-        state,
-        n_ancilla: int,
-        primitive: Runnable,
-    ) -> Optional[StructuredQPEPlan]:
-        """Structured QPE / DOS-QPE fast path (matrix exponentiation in C++).
-
-        Eligibility — any miss falls back to the generic circuit (None):
-
-        1. EXACT readout (primitive or engine-wide): the structured C++
-           sampler has no analytic branch.
-        2. Enabled noise model: ``simulate_*_structured`` applies raw
-           commands only — the fast path would silently drop the noise.
-        3. Routed device: the fast path bypasses the routing/l2p pipeline.
-        4. Parametric U after transpile: the ladder needs a concrete matrix.
-        5. Seeded primitive: ``sample()`` cannot thread ``initial_state``
-           (the C++ signature has no such parameter) — the generic path can.
-
-        The fast path never runs ``build()``/``_validate_primitive`` — the
-        primitive is consulted only for shot resolution at sample() time.
-        """
-        if getattr(primitive, "n_shots", None) is Shots.EXACT or self._n_shots is Shots.EXACT:
-            return None
-        if getattr(primitive, "initial_state", None) is not None:
-            return None
-        nm = self.noise_model
-        if nm is not None and nm.enabled:
-            return None
-        if self._routed():
-            return None
-        u_compiled = self._transpiler.transpile_and_optimize(unitary.flatten())
-        if any(cmd.is_parametric() for cmd in u_compiled):
-            return None
-
-        # Engines carry no module-level block imports; lazy, mirroring
-        # blocks/block.py's plotting import.
-        from ..blocks._primitives import QFTBlock
-
-        state_compiled = self._transpiler.transpile_and_optimize(state.flatten())
-        iqft_flat = QFTBlock(n_ancilla).dagger().build().flatten()
-        iqft_compiled = self._transpiler.transpile_and_optimize(iqft_flat)
-        return StructuredQPEPlan(
-            engine=self,
-            kind=kind,
-            u=u_compiled,
-            state_prep=state_compiled,
-            iqft=iqft_compiled,
-            n_system=unitary.n_qubits,
-            n_ancilla=n_ancilla,
-            primitive=primitive,
-        )
-
     # ── Template hooks (build()/run() live on the base Engine) ─────────────
 
     def _post_compile_check(self, prim: Runnable, compiled, layout: Optional[_Layout]) -> None:
@@ -362,7 +313,25 @@ class QarpEngine(Engine):
         for layout in layouts:
             _reject_routed_initial_state(prim, layout)
 
-    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int):
+    def _plan_one(self, prim: Runnable, blk, flat) -> Optional["qx.Program"]:
+        # A device means "simulate what the device runs" (and is the only
+        # carrier of noise), so it keeps the gate path.
+        if not self._structured or self._device is not None:
+            return None
+        if prim.consumes is not Consumes.COUNTS:
+            return None
+        found = _program.plan(blk, blk.n_qubits, list(flat))
+        if found is None:
+            return None
+        return found.program(compile_gates=self._transpiler.transpile_and_optimize)
+
+    def _programs_for(self, prim: Runnable, params) -> list:
+        programs = self._programs.get(id(prim)) or [None] * len(prim.compiled_circuits)
+        if not params:
+            return programs
+        return [None if p is None else p.substituted(params) for p in programs]
+
+    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int, params):
         if prim.consumes is Consumes.AMPLITUDES:
             return prim.run_from_amplitudes(substituted, simulator=self._sim), ordinal
         n_shots = self._resolve_shots(prim)
@@ -371,25 +340,33 @@ class QarpEngine(Engine):
         psi = prim.initial_state
         if psi is not None:
             psi = np.ascontiguousarray(psi, dtype=np.complex128)
+        programs = self._programs_for(prim, params)
         if n_shots is Shots.EXACT:
             sampling_results = [
-                self._maybe_reindex(_exact_result(self._sim, cmds, n_q, initial_state=psi), l2p)
-                for cmds, n_q, l2p in zip(substituted, prim._n_qubits_list, l2p_list, strict=True)
+                self._maybe_reindex(
+                    _exact_result(self._sim, cmds, n_q, initial_state=psi)
+                    if prog is None
+                    else _exact_program_result(self._sim, prog, n_q, initial_state=psi),
+                    l2p,
+                )
+                for cmds, prog, n_q, l2p in zip(
+                    substituted, programs, prim._n_qubits_list, l2p_list, strict=True
+                )
             ]
         else:
             sampling_results = [
                 self._maybe_reindex(
                     self._sim.run(
-                        cmds,
-                        n_q,
-                        n_shots,
-                        self._circuit_seed(ordinal + k),
-                        initial_state=psi,
+                        cmds, n_q, n_shots, self._circuit_seed(ordinal + k), initial_state=psi
+                    )
+                    if prog is None
+                    else self._sim.program_run(
+                        prog, n_q, n_shots, self._circuit_seed(ordinal + k), initial_state=psi
                     ),
                     l2p,
                 )
-                for k, (cmds, n_q, l2p) in enumerate(
-                    zip(substituted, prim._n_qubits_list, l2p_list, strict=True)
+                for k, (cmds, prog, n_q, l2p) in enumerate(
+                    zip(substituted, programs, prim._n_qubits_list, l2p_list, strict=True)
                 )
             ]
             ordinal += len(sampling_results)
@@ -470,13 +447,25 @@ class QarpEngine(Engine):
                 if prim.consumes is Consumes.AMPLITUDES:
                     set_results.append(prim.run_from_amplitudes(substituted, simulator=self._sim))
                 else:  # EXACT readout
+                    # Programs mirror the built circuits only; a caller that
+                    # hands in rewritten circuits (gradients) keeps the gate path.
+                    programs = (
+                        self._programs_for(prim, ps)
+                        if circuits is prim.compiled_circuits
+                        else [None] * len(circuits)
+                    )
                     sampling_results = [
                         self._maybe_reindex(
-                            _exact_result(self._sim, cmds, n_q, initial_state=prim.initial_state),
+                            _exact_result(self._sim, cmds, n_q, initial_state=prim.initial_state)
+                            if prog is None
+                            else _exact_program_result(
+                                self._sim, prog, n_q, initial_state=prim.initial_state
+                            ),
                             l2p,
                         )
-                        for cmds, n_q, l2p in zip(
+                        for cmds, prog, n_q, l2p in zip(
                             substituted,
+                            programs,
                             prim._n_qubits_list,
                             l2p_per_prim[prim_idx],
                             strict=True,

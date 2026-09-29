@@ -49,18 +49,14 @@ class QPE(CompositeAlgorithm):
         self.bitstring = None
         self.result = None
         self.result_probability = None
-        self._plan = None
 
     def build(self):
         """
         Build the Canonical Phase Estimation circuit.
 
-        First offers the problem to the engine's structured fast path
-        (``Engine.prepare_structured_qpe`` — matrix exponentiation, the
-        controlled-U ladder is never compiled).  Engines without the path,
-        or refusing it (EXACT readout, noise, routing, parametric U — see
-        ``QarpEngine.prepare_structured_qpe``), return None and the full
-        QPE circuit is built instead.
+        ``QarpEngine`` runs the controlled-U ladder as one controlled-powers
+        kernel where that is cheaper than its gates (§14 *Structured
+        execution*).
 
         Returns:
             self: The instance of the class.
@@ -69,13 +65,6 @@ class QPE(CompositeAlgorithm):
         self.unitary.build()
         self.state.build()
 
-        self._plan = self.engine.prepare_structured_qpe(
-            "qpe", self.unitary, self.state, self.n_ancilla, self.primitive
-        )
-        if self._plan is not None:
-            return self
-
-        # Generic path: build and compile the full QPE circuit.
         self.block = QPEBlock(
             self.state,
             self.unitary,
@@ -103,17 +92,13 @@ class QPE(CompositeAlgorithm):
         Returns:
             result: The estimated eigenvalue.
         """
-        if self._plan is not None:
-            # Fast path: matrix-exponentiation QPE (no full circuit simulation).
-            self.distribution = self._plan.sample()
-        else:
-            if self.block is None or not self.block.is_built:
-                raise ValueError("Circuit not built. Call build() before run().")
-            self.distribution = self.engine.run()[0]
+        if self.block is None or not self.block.is_built:
+            raise ValueError("Circuit not built. Call build() before run().")
+        self.distribution = self.engine.run()[0]
 
         self.bitstring = max(self.distribution, key=self.distribution.get)
         self.result_probability = self.distribution[self.bitstring]
-        # Both structured path and Sampler emit LSB-first tuples.
+        # Sampler emits LSB-first tuples.
         self.result = bits_to_label(self.bitstring) / 2**self.n_ancilla
 
         return self.result

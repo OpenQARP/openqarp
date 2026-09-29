@@ -66,7 +66,7 @@ def generate_dirichlet_dist(phase, n_ancilla):
     x = [i / N for i in range(N)]
     y = dirichlet_kernel_squared(np.array(x), phase, N)
     y = y / np.sum(y)
-    # qarpx SamplingResult / structured QPE both emit LSB-first keys
+    # qarpx SamplingResult emits LSB-first keys
     # (qubit q's measurement is at bit q of the integer outcome).
     distribution = {tuple((i >> q) & 1 for q in range(n_ancilla)): y[i] for i in range(N)}
     return distribution
@@ -82,31 +82,6 @@ def test_estimate_phase_matches_known_dirichlet_peak(true_phase):
     assert np.isclose(estimated, true_phase, atol=1e-2), f"Expected ~{true_phase}, got {estimated}"
 
 
-def test_qpe_engine_wide_exact_bypasses_structured_path():
-    """QarpEngine(n_shots=qarp.EXACT): the structured C++ sampler has no
-    analytic branch, so QPE must take the generic path (which supports
-    EXACT) instead of feeding the enum into nanobind."""
-    import qarp
-
-    u = SimpleBlock(1, name="U")
-    u.p(0, 2 * np.pi * 0.375)
-    u.build()
-    eigenstate = ComputationalBasisStateBlock([1])
-    qpe = QPE(
-        state=eigenstate,
-        unitary=u,
-        n_ancilla=3,
-        engine=QarpEngine(n_shots=qarp.EXACT),
-    ).build()
-    assert qpe._plan is None
-    result = qpe.run()
-    assert result == pytest.approx(0.375, abs=1e-12)
-    assert qpe.result_probability == pytest.approx(1.0, abs=1e-10)
-
-
-# ── Structured fast-path eligibility (Engine.prepare_structured_qpe) ──────
-
-
 def _phase_u(phi=0.375):
     u = SimpleBlock(1, name="U")
     u.p(0, 2 * np.pi * phi)
@@ -114,11 +89,30 @@ def _phase_u(phi=0.375):
     return u
 
 
-def test_qpe_primitive_exact_bypasses_structured_path():
-    """A per-primitive EXACT override must refuse the fast path too (it wins
-    over the engine default in shot resolution)."""
+def _programs(qpe):
+    return qpe.engine._programs[id(qpe.primitive)]
+
+
+@pytest.mark.parametrize("n_shots", ["exact", 500])
+def test_qpe_ladder_runs_as_one_controlled_powers_kernel(n_shots):
+    """Eleven ancillas over P(2π·φ): the 2047-step controlled-U ladder is one
+    kernel, and φ = 3/8 is read exactly (analytic: all weight on one bin)."""
     import qarp
-    from qarp.algorithms import Sampler
+
+    shots = qarp.EXACT if n_shots == "exact" else n_shots
+    qpe = QPE(
+        state=ComputationalBasisStateBlock([1]),
+        unitary=_phase_u(),
+        n_ancilla=11,
+        engine=QarpEngine(seed=0, n_shots=shots),
+    ).build()
+    assert "controlled_powers" in _programs(qpe)[0].kinds()
+    assert qpe.run() == pytest.approx(0.375, abs=1e-12)
+    assert qpe.result_probability == pytest.approx(1.0, abs=1e-10)
+
+
+def test_qpe_primitive_exact_readout_recovers_the_phase():
+    import qarp
 
     qpe = QPE(
         state=ComputationalBasisStateBlock([1]),
@@ -127,98 +121,81 @@ def test_qpe_primitive_exact_bypasses_structured_path():
         primitive=Sampler(n_shots=qarp.EXACT),
         engine=QarpEngine(n_shots=500),
     ).build()
-    assert qpe._plan is None
     assert qpe.run() == pytest.approx(0.375, abs=1e-12)
 
 
-def test_qpe_noisy_engine_bypasses_structured_path():
-    """Enabled noise → generic (trajectory) path.
-
-    Regression: the structured C++ sampler never applies the noise model, so
-    taking the fast path under noise silently returned noiseless samples.
-    """
+def test_qpe_noisy_engine_keeps_the_gate_path():
+    """A device carries the noise model, and a device keeps the gate path."""
     from qarp.devices import NoiseModel
 
     qpe = QPE(
         state=ComputationalBasisStateBlock([1]),
         unitary=_phase_u(),
-        n_ancilla=3,
-        engine=QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
+        n_ancilla=11,
+        engine=QarpEngine(n_qubits=12, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
-    assert qpe._plan is None
+    assert _programs(qpe) == [None]
     qpe.run()
     assert sum(qpe.distribution.values()) == pytest.approx(1.0)
 
 
-def test_qpe_parametric_unitary_gets_no_plan():
+def test_qpe_parametric_unitary_is_not_a_controlled_powers_kernel(monkeypatch):
     from sympy import Symbol
 
-    from qarp.algorithms import Sampler
+    from qarp import _program
+    from qarp.blocks import QPEBlock
 
+    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
     u = SimpleBlock(1, name="U")
     u.p(0, Symbol("theta"))
     u.build()
-    state = ComputationalBasisStateBlock([1]).build()
-    plan = QarpEngine(n_shots=100).prepare_structured_qpe("qpe", u, state, 2, Sampler())
-    assert plan is None
+    block = QPEBlock(ComputationalBasisStateBlock([1]), u, 3, 1).build()
+    plan = _program.plan(block, block.n_qubits)
+    assert plan is None or "controlled_powers" not in plan.kinds()
 
 
-def test_qpe_routed_engine_gets_no_plan():
-    from qarp.algorithms import Sampler
+def test_qpe_routed_engine_keeps_the_gate_path():
     from qarp.devices import Architecture
 
-    state = ComputationalBasisStateBlock([1]).build()
-    eng = QarpEngine(
-        n_qubits=4,
-        architecture=Architecture(4, [(0, 1), (1, 2), (2, 3)], "directed_edge"),
-        n_shots=100,
+    qpe = QPE(
+        state=ComputationalBasisStateBlock([1]),
+        unitary=_phase_u(),
+        n_ancilla=11,
+        engine=QarpEngine(
+            n_qubits=12,
+            architecture=Architecture(12, [(i, i + 1) for i in range(11)], "directed_edge"),
+            n_shots=100,
+        ),
     )
-    plan = eng.prepare_structured_qpe("qpe", _phase_u(), state, 3, Sampler())
-    assert plan is None
+    qpe.primitive.n_shots = 100
+    qpe.build()
+    assert _programs(qpe) == [None]
 
 
-def test_qpe_seeded_primitive_bypasses_structured_path():
-    """A Sampler carrying initial_state must refuse the plan — ``sample()``
-    cannot thread the seed.  The generic path must read phase 3/4 from the
-    seeded |1⟩ eigenstate; a fast path ignoring the seed would read 0 (|0⟩ is
-    also an eigenstate of P)."""
+def test_qpe_seeded_primitive_reads_the_seeded_eigenstate():
+    """The eigenstate comes from initial_state: phase 3/4 from |1⟩ (|0⟩ is
+    also an eigenstate of P and would read 0)."""
     phi = 0.75
-    u = SimpleBlock(1, name="U")
-    u.p(0, 2 * np.pi * phi)
-    u.build()
-    prep = SimpleBlock(1)  # identity prep: the eigenstate comes from the seed
-    n_ancilla = 2
+    n_ancilla = 11
     psi = np.zeros(2 ** (n_ancilla + 1), dtype=complex)
     psi[1 << n_ancilla] = 1.0  # system qubit (index n_ancilla) in |1⟩
-
     qpe = QPE(
-        state=prep,
-        unitary=u,
+        state=SimpleBlock(1),
+        unitary=_phase_u(phi),
         n_ancilla=n_ancilla,
         primitive=Sampler(n_shots=500, initial_state=psi),
         engine=QarpEngine(seed=0),
     ).build()
-    assert qpe._plan is None
-    result = qpe.run()
-    assert result == pytest.approx(phi)
+    assert "controlled_powers" in _programs(qpe)[0].kinds()
+    assert qpe.run() == pytest.approx(phi)
 
 
-def test_base_engine_default_has_no_structured_path():
-    """Engines without an override (a base-default stub here) fall back by
-    contract, not by the old accidental hasattr(engine._sim, ...) miss."""
-    from qarp.algorithms import Sampler
-    from tests.conftest import _StubEngine
-
-    state = ComputationalBasisStateBlock([1]).build()
-    assert _StubEngine().prepare_structured_qpe("qpe", _phase_u(), state, 3, Sampler()) is None
-
-
-def test_structured_plan_refuses_late_enabled_noise():
-    """A plan prepared noise-free must not silently run once noise is enabled."""
+def test_qpe_built_noise_free_runs_noisy_once_noise_is_enabled():
+    """Noise enabled after build() must reach the run: noiseless, φ = 3/8 is
+    read with probability 1 (analytic), so any weight elsewhere is the noise."""
     from qarp.devices import NoiseModel
-    from qarp.errors import CapabilityError
 
-    eng = QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0)
+    eng = QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.05), n_shots=2000, seed=0)
     eng.noise_model.enabled = False
     qpe = QPE(
         state=ComputationalBasisStateBlock([1]),
@@ -226,10 +203,12 @@ def test_structured_plan_refuses_late_enabled_noise():
         n_ancilla=3,
         engine=eng,
     ).build()
-    assert qpe._plan is not None
+    assert qpe.run() == pytest.approx(0.375)
+    assert qpe.result_probability == pytest.approx(1.0)
     eng.noise_model.enabled = True
-    with pytest.raises(CapabilityError):
-        qpe.run()
+    qpe.run()
+    assert qpe.result_probability < 0.99
+    assert sum(qpe.distribution.values()) == pytest.approx(1.0)
 
 
 def test_qpe_run_before_build_raises():
@@ -304,8 +283,7 @@ def test_qpe_presets_sampler_measured_qubits_respected():
     )
     qpe.primitive.measured_qubits = [0, 1, 2]
     qpe.build()
-    if qpe._plan is None:
-        assert qpe.primitive.measured_qubits == [0, 1, 2]
+    assert qpe.primitive.measured_qubits == [0, 1, 2]
     assert qpe.run() == pytest.approx(0.375)
 
 
@@ -333,6 +311,31 @@ def test_qpe_with_synthesized_unitary_recovers_eigenphase():
     ).build()
     result = qpe.run()
     assert result == pytest.approx(round(0.3 * 2**n_anc) / 2**n_anc)  # 5/16
+
+
+def test_qpe_ladder_kernel_is_phase_exact_over_a_synthesized_unitary():
+    """The same pin through the controlled-powers kernel: ten ancillas put the
+    ladder on twelve qubits, and U's global phase sits under every control."""
+    import qarp
+    from qarp.blocks import SynthesizedStateBlock, SynthesizedUnitaryBlock
+
+    rng = np.random.default_rng(5)
+    m = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    q, r = np.linalg.qr(m)
+    v = q * (np.diag(r) / np.abs(np.diag(r)))
+    # Eigenphases on the ten-bit grid: the readout is exact (analytic).
+    phis = np.array([307, 635, 113, 870]) / 1024
+    u = v @ np.diag(np.exp(2j * np.pi * phis)) @ v.conj().T
+
+    qpe = QPE(
+        state=SynthesizedStateBlock(2, list(v[:, 0])),
+        unitary=SynthesizedUnitaryBlock(u),
+        n_ancilla=10,
+        engine=QarpEngine(n_shots=qarp.EXACT),
+    ).build()
+    assert "controlled_powers" in _programs(qpe)[0].kinds()
+    assert qpe.run() == pytest.approx(307 / 1024, abs=1e-12)
+    assert qpe.result_probability == pytest.approx(1.0, abs=1e-8)
 
 
 @pytest.mark.parametrize(

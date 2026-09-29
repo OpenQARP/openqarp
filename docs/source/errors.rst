@@ -44,8 +44,6 @@ and the emit boundary is reached when you call ``to_<sdk>()``.
      - ``StateVector contracts amplitudes in logical qubit order, but routing permuted the register ... Use a sampling primitive, n_shots=qarp.EXACT, or an architecture-free device``
    * - ``QarpEngine(n_shots=qarp.EXACT)`` constructed with noise already enabled
      - ``QarpEngine(n_shots=qarp.EXACT) with an enabled noise model is self-contradictory: exact amplitudes are undefined under noise``
-   * - A structured (noiseless-only) QPE plan is sampled after the engine's noise model was enabled post-``build()``
-     - ``This structured QPE plan was prepared without noise, but the engine's noise model is now enabled; rebuild the algorithm ...``
    * - An engine that cannot execute mid-circuit operations at all is given a circuit containing one (independently of whether amplitudes are involved)
      - ``{Engine}: mid-circuit measurement / Reset / classical control is not supported in primitive '{name}'. ... Use QarpEngine for circuits with mid-circuit measurement``
    * - A primitive carrying ``initial_state`` declares ``accepts_initial_state = False`` (every primitive except ``Sampler`` and ``StateVector``), see `Initial State Injection in Primitives`_ below

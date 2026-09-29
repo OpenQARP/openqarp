@@ -34,33 +34,29 @@ def test_dosqpe_plot(scaled_h2_hamiltonian_jw):
     plt.close(fig)
 
 
-def test_dosqpe_structured_matches_generic_exact():
-    """Fast path (sampled, seeded) vs generic path (EXACT analytic) on a
-    1-qubit U = P(2π·3/8) over the maximally mixed probe: the DOS is half
-    weight at phase 0, half at 3/8, both exactly representable at
-    n_ancilla=3.  Pins the two paths to the same distribution."""
+@pytest.mark.parametrize("n_shots", ["exact", 4000])
+def test_dosqpe_ladder_as_controlled_powers_matches_the_analytic_spectrum(monkeypatch, n_shots):
+    """U = P(2π·3/8) over the maximally mixed probe: half the weight at phase
+    0, half at 3/8, both exactly representable at n_ancilla=3 (analytic)."""
     import qarp
+    from qarp import _program
     from qarp.blocks import SimpleBlock
     from qarp.engines import QarpEngine
 
+    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
     u = SimpleBlock(1, name="U")
     u.p(0, 2 * np.pi * 0.375)
     u.build()
-
-    structured = DOSQPE(unitary=u, n_ancilla=3, engine=QarpEngine(seed=0, n_shots=4000)).build()
-    assert structured._plan is not None
-    d_fast = structured.run()
-
-    generic = DOSQPE(unitary=u, n_ancilla=3, engine=QarpEngine(n_shots=qarp.EXACT)).build()
-    assert generic._plan is None
-    d_exact = generic.run()
-
-    keys = set(d_fast) | set(d_exact)
-    tv = 0.5 * sum(abs(d_fast.get(k, 0.0) - d_exact.get(k, 0.0)) for k in keys)
-    assert tv < 0.05
-    # Both paths: half the weight at phase 0 (bits (0,0,0)), half at 3/8 (bits LSB-first of 3).
-    assert d_exact[(0, 0, 0)] == pytest.approx(0.5, abs=1e-10)
-    assert d_exact[(1, 1, 0)] == pytest.approx(0.5, abs=1e-10)
+    shots = qarp.EXACT if n_shots == "exact" else n_shots
+    dos = DOSQPE(unitary=u, n_ancilla=3, engine=QarpEngine(seed=0, n_shots=shots)).build()
+    assert "controlled_powers" in dos.engine._programs[id(dos.primitive)][0].kinds()
+    dist = dos.run()
+    expected = {(0, 0, 0): 0.5, (1, 1, 0): 0.5}
+    if n_shots == "exact":
+        assert dict(dist) == pytest.approx(expected, abs=1e-10)
+    else:
+        keys = set(dist) | set(expected)
+        assert 0.5 * sum(abs(dist.get(k, 0.0) - expected.get(k, 0.0)) for k in keys) < 0.05
 
 
 def test_dosqpe_recovers_synthesized_spectrum():
@@ -193,11 +189,13 @@ def test_dosqpe_plot_against_spectrum_structural(monkeypatch):
     plt.close("all")
 
 
-def test_dosqpe_noisy_engine_bypasses_structured_path():
+def test_dosqpe_noisy_engine_keeps_the_gate_path(monkeypatch):
+    from qarp import _program
     from qarp.blocks import SimpleBlock
     from qarp.devices import NoiseModel
     from qarp.engines import QarpEngine
 
+    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
     u = SimpleBlock(1, name="U")
     u.p(0, 2 * np.pi * 0.375)
     u.build()
@@ -206,7 +204,7 @@ def test_dosqpe_noisy_engine_bypasses_structured_path():
         n_ancilla=2,
         engine=QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
-    assert dosqpe._plan is None
+    assert dosqpe.engine._programs[id(dosqpe.primitive)] == [None]
     dist = dosqpe.run()
     assert sum(dist.values()) == pytest.approx(1.0)
 

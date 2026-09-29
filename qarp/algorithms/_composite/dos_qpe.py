@@ -45,7 +45,6 @@ class DOSQPE(CompositeAlgorithm):
         self.n_qubits = None
         self.state = None
         self.distribution = None
-        self._plan = None
 
     @property
     def freqs(self):
@@ -58,12 +57,9 @@ class DOSQPE(CompositeAlgorithm):
         """
         Build the DOS Phase Estimation circuit.
 
-        First offers the problem to the engine's structured fast path
-        (``Engine.prepare_structured_qpe`` — matrix exponentiation, the
-        controlled-U ladder is never compiled).  Engines without the path,
-        or refusing it (EXACT readout, noise, routing, parametric U — see
-        ``QarpEngine.prepare_structured_qpe``), return None and the full
-        DOSQPEBlock circuit is built instead.
+        ``QarpEngine`` runs the controlled-U ladder as one controlled-powers
+        kernel where that is cheaper than its gates (§14 *Structured
+        execution*).
 
         Returns:
             self: The instance of the class.
@@ -77,13 +73,6 @@ class DOSQPE(CompositeAlgorithm):
         else:
             self.state = DickeStateBlock(self.n_qubits, self.hamming_weight).build()
 
-        self._plan = self.engine.prepare_structured_qpe(
-            "dosqpe", self.unitary, self.state, self.n_ancilla, self.primitive
-        )
-        if self._plan is not None:
-            return self
-
-        # Generic path: build and compile the full DOSQPE circuit.
         self.block = DOSQPEBlock(
             self.state,
             self.unitary,
@@ -112,13 +101,9 @@ class DOSQPE(CompositeAlgorithm):
         Returns:
             distribution: The distribution of the measurement results.
         """
-        if self._plan is not None:
-            # Fast path: matrix-exponentiation DOSQPE.
-            self.distribution = self._plan.sample()
-        else:
-            if self.block is None or not self.block.is_built:
-                raise ValueError("Circuit not built. Call build() before run().")
-            self.distribution = self.engine.run()[0]
+        if self.block is None or not self.block.is_built:
+            raise ValueError("Circuit not built. Call build() before run().")
+        self.distribution = self.engine.run()[0]
 
         return self.distribution
 

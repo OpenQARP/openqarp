@@ -25,7 +25,7 @@ from sympy import Symbol
 
 import qarpx as qx
 
-from .. import _blas_threads
+from .. import _blas_threads, _program
 
 
 def as_param(angle) -> qx.Param:
@@ -936,7 +936,12 @@ class _BlockMixin:
             )
         return self.flatten()
 
-    def statevector(self, initial_state: "np.ndarray | None" = None) -> "np.ndarray":
+    def statevector(
+        self,
+        initial_state: "np.ndarray | None" = None,
+        *,
+        structured: Optional[bool] = None,
+    ) -> "np.ndarray":
         """Exact statevector of this block applied to ``initial_state``
         (default ``|0…0⟩``).
 
@@ -953,13 +958,39 @@ class _BlockMixin:
                 renormalised).  The returned statevector feeds back in
                 unchanged, so step → snapshot → re-seed loops are O(2^n)
                 per step.
+            structured: Run the block's structure as typed kernels (§14
+                *Structured execution*) where it is cheaper than its gates;
+                ``False`` runs the gate stream as-is.  ``None`` follows
+                ``QARP_STRUCTURED`` (default on).
         """
         cmds = self._simulable_commands("statevector")
         _blas_threads.install()
-        if initial_state is None:
-            return np.asarray(qx.QarpSimulator().statevector(cmds, self.n_qubits))
-        psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
-        return np.asarray(qx.QarpSimulator().statevector(cmds, self.n_qubits, initial_state=psi))
+        psi = None
+        if initial_state is not None:
+            psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
+        sim = qx.QarpSimulator()
+        if _program.resolve(structured):
+            program = _program.cached_program(self, cmds, self.n_qubits)
+            if program is not None:
+                return np.asarray(
+                    sim.program_statevector(program, self.n_qubits, initial_state=psi)
+                )
+        if psi is None:
+            return np.asarray(sim.statevector(cmds, self.n_qubits))
+        return np.asarray(sim.statevector(cmds, self.n_qubits, initial_state=psi))
+
+    def classical_action(self, indices: "np.ndarray") -> "np.ndarray | None":
+        """Images of local basis indices under this block, or ``None``.
+
+        A block that is a basis-state permutation may override this to
+        return ``f(indices)`` (int64, LSB, same shape) so structured
+        execution (§14) applies it as one gather instead of its gates.
+        Overriding it promises ``U|x⟩ = |f(x)⟩`` exactly, phase included
+        (§13): the block may sit under ``ControlledBlock``.
+        """
+        return None
+
+    classical_action._qarp_default = True  # type: ignore[attr-defined]
 
     def unitary_matrix(self) -> "np.ndarray":
         """Dense ``2^n × 2^n`` unitary of this block, global phase included.
