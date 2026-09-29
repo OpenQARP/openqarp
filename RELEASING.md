@@ -115,7 +115,7 @@ Check the result in a clean venv:
 
 ```
 awk '/^## \[X.Y.Z\]/{f=1; next} /^## \[/{f=0} f' CHANGELOG.md > notes.md
-gh release create vX.Y.Z --verify-tag --title "OpenQARP X.Y.Z" --notes-file notes.md
+gh release create vX.Y.Z --verify-tag --title vX.Y.Z --notes-file notes.md
 ```
 
 Publishing the release makes Zenodo archive the tag and create the version
