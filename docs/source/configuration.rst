@@ -237,6 +237,32 @@ the kernel layer unless you set it: csim's own per-kernel default of 13
 forks an OpenMP team where the fork costs more than the gate, which is
 where a 13-qubit circuit used to run 11× its 12-qubit twin.
 
+Structured execution
+====================
+
+Fusion folds gates it can see; it cannot see that a thousand gates only
+permute basis states.  ``Block.statevector`` and ``QarpEngine``'s sampling
+paths therefore read the block tree first and run each piece as the
+cheapest exact kernel: a basis-state permutation as one gather (declared by
+``classical_action``, or found from the gates), a small block as one dense
+matrix, a ladder of the same controlled block as one controlled-powers
+kernel, and everything else as its fused gates.  A circuit with no such
+structure runs exactly as before.  See §14 of the conventions for the full
+contract.
+
+.. code-block:: python
+
+    from qarp.blocks import XnBlock
+    from qarp.engines import QarpEngine
+
+    block = XnBlock(14).build()
+    block.statevector(structured=False)   # the gate stream as-is
+    QarpEngine(structured=False)          # same, for every primitive it builds
+
+``QARP_STRUCTURED`` sets the process-wide default, read once; ``0``,
+``false``, ``off`` and ``no`` turn it off.  Engines with a ``device``,
+amplitude-consuming primitives and gradients always run the gate path.
+
 MPI
 ===
 

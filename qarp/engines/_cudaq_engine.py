@@ -225,7 +225,7 @@ class CudaqEngine(Engine):
             reason=("The CUDA-Q lowerer handles unitary gates plus end-of-circuit sampling only."),
         )
 
-    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int):
+    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int, params):
         if prim.consumes is Consumes.AMPLITUDES:
             if _is_gpu_expectation(prim):
                 # Pad to the operator width (idle qubits stay |0>).

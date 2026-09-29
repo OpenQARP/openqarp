@@ -114,6 +114,7 @@ add_library(qarpx
     src/simulator/dense_kernel.cpp
     src/simulator/fusion.cpp
     src/simulator/pauli_expectation.cpp
+    src/simulator/program.cpp
     src/simulator/qarp_simulator.cpp
     # Throwing stubs with available()==false unless QARP_WITH_CUDAQ is set
     # (see below); no CUDA dependency in the default build.

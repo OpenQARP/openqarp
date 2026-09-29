@@ -542,6 +542,13 @@ above.
   land on the generic branch — so a wrong `α` on those two branches leaves an entire QSD suite
   green while `exp(-iHt)` for a Hubbard Hamiltonian comes out with an arbitrary per-`t` phase.
   Testing rule in §18.
+- **`classical_action` declares a basis-state permutation.** A block may override
+  `classical_action(indices)` to return the images of its local basis indices (int64, LSB)
+  under its unitary.  The override promises `U|x⟩ = |f(x)⟩` exactly, global phase included —
+  the block may sit under `ControlledBlock` — and structured execution (§14) trusts it at run
+  time.  Every overriding class is registered in `tests/test_blocks/test_classical_action.py`,
+  whose completeness guard fails on an unregistered one, and is checked there against its
+  `unitary_matrix()`.
 
 ## 14. Engine, device & execution conventions
 
@@ -603,9 +610,9 @@ How circuits run.
   `NotImplementedError` — so callers handle every capability failure with one except clause
   and can fall back programmatically.
 - **Capability checks re-validate at run time.** Mutable state that affects eligibility
-  (e.g. `noise_model.enabled`) is re-checked per `run()`, not only at `build()`: a structured
-  plan prepared noise-free refuses to run once noise is enabled
-  (`test_structured_plan_refuses_late_enabled_noise`). Engines copy the noise model at
+  (e.g. `noise_model.enabled`) is re-checked per `run()`, not only at `build()`: an
+  amplitude primitive built noise-free refuses to run once noise is enabled
+  (`test_run_revalidates_after_noise_toggle`). Engines copy the noise model at
   construction — the live handle is `engine.noise_model`, not the object passed in.
 - **Per-circuit seeds are prime-stride derived.** `Engine._circuit_seed(ordinal)` =
   `(seed + 100_003 · ordinal) mod 2³²` (`None` stays `None`). Circuits within one call —
@@ -625,10 +632,11 @@ How circuits run.
   needs a shared qubit (a 2^k-wide pass costs 2^k multiplies per amplitude).  Symbolic gates,
   `Barrier` (listed wires; a qubit-less one fences everything), `Measure`, `Reset` and the
   branch markers are never fused and fence their wires; `GPhase` passes through on the global
-  wire.  Applied by `statevector`, `run`'s terminal fast path and the noise-free trajectory
-  prefix/suffix (`batch_run` inherits it); **not** applied by `unitary_matrix` (the oracle),
-  the adjoint gradient (`run_gradient*`, one gate at a time), the structured QPE paths, any
-  noise-active path (each source gate carries its own channel) or `CudaqSimulator`.  The knob
+  wire.  Applied by `statevector`, `run`'s terminal fast path, the noise-free trajectory
+  prefix/suffix (`batch_run` inherits it) and each `Gates` kernel of a structured program;
+  **not** applied by `unitary_matrix` (the oracle), the adjoint gradient (`run_gradient*`,
+  one gate at a time), any noise-active path (each source gate carries its own channel) or
+  `CudaqSimulator`.  The knob
   is `QarpSimulator.fusion_max_qubits`: `0` = raw per-gate dispatch, `1` = the single-qubit
   pass only (`fuse_single_qubit_gates`, which also fences a conditional gate at the `Measure`
   writing its cbit), `k ≥ 2` = dense blocks; the constructor default is
@@ -638,6 +646,36 @@ How circuits run.
   never reaches rebase totality (§16).  Amplitudes differ across widths only by floating-point
   reassociation, so a seeded run is bit-identical at every width on the pinned fixtures
   (`test_simulation_fusion.py`).
+- **Structured execution.**  `Block.statevector` and `QarpEngine`'s sampling paths (the
+  sample-once `run` path and `EXACT` readout, including `batch_run`'s per-set `EXACT`
+  evaluation) lower a block tree to a `qx.Program` of typed kernels where that is cheaper
+  than its gates (`qarp/_program.py`, `simulator/program.cpp`).  Kernels:
+  `Gates` (a verbatim slice of the gate stream, dispatched and fused as above),
+  `Permutation` (`|x⟩ → |table[x]⟩` on listed qubits, one gather; adjacent ones compose
+  into one table up to 26 qubits), `Dense` (a block's unitary on at most 8 touched qubits)
+  and `ControlledPowers` (`U^e_j` on the targets under control `j`).  Every subtree owns a
+  contiguous span of the gate stream, so remaps, pending ops and measurements match the gate
+  path by construction.  Per node the planner tries, in order: a declared
+  `classical_action` (§13); a `ControlledBlock` whose inner is a permutation, lifted by §6.1;
+  the span's permutation table — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
+  that `mcx` emits) evaluated on integers at any width, otherwise derived by restriction: the
+  qubits no command couples (controls, phase partners, or moved by classical gates among
+  themselves) are enumerated and tracked, every other command is sliced at their value, and
+  the at most 10 remaining qubits are simulated, accepted only when every column is a basis
+  state with amplitude 1, both within `1e-10` (phase included, EQ-2) — a span closer than
+  that to a permutation runs as the exact permutation; a `Dense` kernel; its children, where a run
+  of the same single-controlled `C-U` becomes one `ControlledPowers` kernel; else `Gates`.
+  A program with no structured kernel is never built — that circuit runs the unchanged
+  gate path bit for bit — and neither are registers under 12 qubits, spans of fewer than
+  three gates, or a program with a measurement or classical condition outside its last
+  `Gates` kernel.  **Not** applied by `unitary_matrix` (the oracle), amplitude-consuming
+  primitives, `batch_run`'s C++ sampled sweep, gradients, an engine with any `device`
+  (routed or not — a device means "simulate what the device runs", and carries the
+  noise model), or `CudaqEngine`.  The knob is `QarpEngine(structured=)` and
+  `Block.statevector(structured=)`; `None` follows `QARP_STRUCTURED` (read once per
+  process, default on; `0`/`false`/`off`/`no` turn it off).  A program samples through
+  `run`'s own sample-once code, so a program whose final state equals the gate path's
+  draws the same shots for the same seed.
 
 ## 15. Project & repository conventions
 

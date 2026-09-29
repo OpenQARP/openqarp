@@ -4,6 +4,7 @@
 #include "../device/noise_model.h"
 #include "dense_kernel.h"
 #include "pauli_expectation.h"
+#include "program.h"
 #include "sampling_result.h"
 
 #include <Eigen/Dense>
@@ -27,8 +28,6 @@ namespace qarpx {
 ///   auto sv     = sim.statevector(commands, n_qubits);        // full state
 ///   auto batch  = sim.batch_run(cmds, n_q, 1024, param_sets); // VQE sweep
 ///   auto U      = sim.unitary_matrix(cmds, n_qubits);         // full unitary
-///   auto sr     = sim.simulate_qpe_structured(...);           // fast QPE
-///   auto sr     = sim.simulate_dosqpe_structured(...);        // fast DOS-QPE
 class QarpSimulator {
 public:
     QarpSimulator();
@@ -58,8 +57,8 @@ public:
     /// only (`fuse_single_qubit_gates`), k ≥ 2 = dense blocks of up to k
     /// qubits, on registers of at least `fusion_min_qubits` qubits
     /// (narrower ones get the single-qubit pass when k ≥ 1).  Not applied by
-    /// `unitary_matrix` (the oracle), the adjoint gradient, the structured
-    /// QPE paths, or any noise-active path.  Constructor default:
+    /// `unitary_matrix` (the oracle), the adjoint gradient, or any
+    /// noise-active path.  Constructor default:
     /// `QARP_FUSION_MAX_QUBITS` if it parses to 0..kMaxFusionQubits (read
     /// once per process), else kDefaultFusionQubits.
     [[nodiscard]] std::size_t fusion_max_qubits() const { return fusion_max_qubits_; }
@@ -104,6 +103,29 @@ public:
         const std::optional<std::vector<std::complex<double>>>& initial_state
                                           = std::nullopt) const;
 
+    /// `statevector` for a structured program (§14 *Structured execution*):
+    /// gates kernels dispatch exactly as `statevector` dispatches its stream.
+    /// Throws std::invalid_argument when a kernel reaches past `n_qubits`
+    /// and std::runtime_error on a recorded measurement or active noise.
+    [[nodiscard]] std::vector<std::complex<double>> program_statevector(
+        const Program&               program,
+        int                          n_qubits,
+        const std::optional<std::vector<std::complex<double>>>& initial_state
+                                          = std::nullopt) const;
+
+    /// `run`'s terminal sample-once path for a structured program: the same
+    /// sampler and seed stream, so a program whose final state equals the
+    /// gate path's samples identically.  Measurements may appear only in the
+    /// last gates kernel and must be terminal there (std::invalid_argument
+    /// otherwise); active noise throws std::runtime_error.
+    [[nodiscard]] SamplingResult program_run(
+        const Program&               program,
+        int                          n_qubits,
+        int                          n_shots,
+        std::optional<uint32_t>      seed = std::nullopt,
+        const std::optional<std::vector<std::complex<double>>>& initial_state
+                                          = std::nullopt) const;
+
     /// ⟨ψ|H|ψ⟩ for ψ = circuit(initial_state or |0…0⟩), without handing the
     /// statevector back: one `statevector` call plus one `pauli_transition`
     /// sweep (grouped single-pass kernel, `pauli_expectation.h`).  Returns
@@ -140,58 +162,6 @@ public:
     [[nodiscard]] Eigen::MatrixXcd unitary_matrix(
         const std::vector<Command>& commands,
         int                          n_qubits) const;
-
-    /// Fast QPE simulation using matrix exponentiation.
-    ///
-    /// Replaces the O((2^n_ancilla − 1) × depth × 2^(n_ancilla+n_state)) cost
-    /// of the unrolled controlled-U circuit with:
-    ///   • one unitary-matrix extraction  O(depth × 4^n_state)
-    ///   • n_ancilla matrix squarings     O(n_ancilla × 8^n_state)
-    ///   • n_ancilla conditioned mat-vec  O(n_ancilla × 2^n_ancilla × 4^n_state)
-    ///   • IQFT + state-prep (small)
-    ///
-    /// Qubit layout of the internal statevector:
-    ///   [0 .. n_ancilla-1]               ancilla register
-    ///   [n_ancilla .. n_ancilla+n_s-1]   state register
-    ///
-    /// @param u_cmds        Compiled U commands (act on qubits 0..n_state-1).
-    /// @param state_prep    Compiled state-prep commands (qubits 0..n_state-1).
-    /// @param iqft_cmds     Compiled IQFT commands (qubits 0..n_ancilla-1).
-    /// @param n_state       State-register qubit count.
-    /// @param n_ancilla     Ancilla-register qubit count.
-    /// @param n_shots       Measurement shots.
-    /// @param seed          Optional RNG seed.
-    /// @returns             SamplingResult over the ancilla register only
-    ///                      (n_qubits == n_ancilla, keys are ancilla basis states).
-    [[nodiscard]] SamplingResult simulate_qpe_structured(
-        const std::vector<Command>& u_cmds,
-        const std::vector<Command>& state_prep,
-        const std::vector<Command>& iqft_cmds,
-        int                          n_state,
-        int                          n_ancilla,
-        int                          n_shots,
-        std::optional<uint32_t>      seed = std::nullopt) const;
-
-    /// Fast DOS-QPE simulation using matrix exponentiation.
-    ///
-    /// Identical to simulate_qpe_structured but includes a purification
-    /// register: total qubits = n_ancilla + 2*n_state.
-    ///
-    /// Qubit layout:
-    ///   [0 .. n_a-1]              ancilla
-    ///   [n_a .. n_a+n_s-1]        state
-    ///   [n_a+n_s .. n_a+2*n_s-1]  purification  (entangled via CNOT layer)
-    ///
-    /// The CNOT entanglement (state[i] → purif[i]) is applied internally.
-    /// @returns SamplingResult over the ancilla register only.
-    [[nodiscard]] SamplingResult simulate_dosqpe_structured(
-        const std::vector<Command>& u_cmds,
-        const std::vector<Command>& state_prep,
-        const std::vector<Command>& iqft_cmds,
-        int                          n_state,
-        int                          n_ancilla,
-        int                          n_shots,
-        std::optional<uint32_t>      seed = std::nullopt) const;
 
     /// Apply a single gate command to a pre-allocated state vector in-place.
     /// The caller owns the state buffer (length must be `dim` complex doubles).
@@ -302,6 +272,11 @@ private:
     /// `fusion_min_qubits_` select none / single-qubit / dense-block fusion.
     [[nodiscard]] std::vector<Command> fuse_for_dispatch(
         const std::vector<Command>& commands, int n_qubits) const;
+
+    /// Run every kernel of `program` on `state` (length 2^n_qubits).
+    void execute_program(const Program&                      program,
+                         int                                 n_qubits,
+                         std::vector<std::complex<double>>&  state) const;
 
     NoiseModel  noise_model_ {};
     std::size_t fusion_max_qubits_;
