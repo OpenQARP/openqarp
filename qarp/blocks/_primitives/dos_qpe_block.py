@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from ..._structure import Repeat
 from .._block import AnyBlock, CompositeBlockBase, ControlledBlock, SimpleBlock
 from .._primitives import QFTBlock
 from .hn_block import HnBlock
@@ -52,62 +53,62 @@ class DOSQPEBlock(CompositeBlockBase):
         self.n_ancilla = n_ancilla
         self.n_state = n_state
         self.measure_at_end = measure
+        self._parts: Optional[list] = None
         super().__init__(
             n_qubits=n_ancilla + 2 * n_state,
             target_qubits=target_qubits,
             name=name,
         )
 
-    def build_vanilla(self):
-        """Build the DOSQPE circuit as a qarpx CompositeBlock.
-
-        Returns:
-            qx.CompositeBlock: The assembled circuit.
-        """
-        # Build children — each is a real qx.Block (Python wrapper).
+    def structure(self) -> list:
+        """Hadamards on the ancillas, the probe preparation, the CNOT layer
+        that entangles it with the purification register, for ancilla ``i``
+        the controlled unitary repeated ``2**i`` times, the inverse QFT, and
+        the ancilla readout (§13).  Builds only its parts, once."""
+        if self._parts is not None:
+            return self._parts
         eigen_built = self.eigenstate.build()
         unit_built = self.unitary.build()
-
         n_q = self.n_qubits  # n_ancilla + 2 * n_state
         ancilla_qubits = list(range(self.n_ancilla))
         state_qubits = list(range(self.n_ancilla, self.n_ancilla + self.n_state))
         purification_qubits = list(range(self.n_ancilla + self.n_state, n_q))
 
-        # 1) Hadamard layer on ancilla (time/frequency) qubits
-        self.add_wired_child(HnBlock(self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaH"))
-
-        # 2) Eigenstate (probe) prep on state register
+        parts: list = [
+            HnBlock(self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaH").build()
+        ]
         eigen_built.target_qubits = state_qubits
-        self.add_child(eigen_built)
-
-        # 3) CNOT entanglement: state[i] → purification[i].  Tracing out the
-        #    purification register gives the desired mixed probe state.
+        parts.append(eigen_built)
+        # Tracing out the purification register gives the desired mixed probe.
         cnot_layer = SimpleBlock(2 * self.n_state, name="PurificationCNOT")
         for i in range(self.n_state):
             cnot_layer.cx(i, self.n_state + i)
         cnot_layer.target_qubits = state_qubits + purification_qubits
-        self.add_wired_child(cnot_layer)
-
-        # 4) Controlled-U^(2^i) ladder — phase kickback 2^i·φ on each ancilla qubit.
+        parts.append(cnot_layer.build())
+        # Phase kickback 2^i·φ on ancilla i.
         for i, ancilla_q in enumerate(ancilla_qubits):
-            for _ in range(2**i):
-                ctrl_u = ControlledBlock(
-                    unit_built,
-                    num_controls=1,
-                    ctrl_state=[True],
-                    name=f"C-U@a{ancilla_q}",
-                )
-                ctrl_u.build()
-                ctrl_u.target_qubits = [ancilla_q] + state_qubits
-                self.add_child(ctrl_u)
-
-        # 5) Inverse QFT on ancilla register
+            ctrl_u = ControlledBlock(
+                unit_built, num_controls=1, ctrl_state=[True], name=f"C-U@a{ancilla_q}"
+            )
+            ctrl_u.build()
+            ctrl_u.target_qubits = [ancilla_q] + state_qubits
+            parts.append(Repeat(ctrl_u, 2**i))
         iqft = QFTBlock(self.n_ancilla).dagger().build()
         iqft.target_qubits = ancilla_qubits
-        self.add_child(iqft)
-
-        # 6) Optional ancilla measurements — ancilla q reads into cbit q.
+        parts.append(iqft)
         if self.measure_at_end:
-            self.add_wired_child(
-                ReadoutBlock(self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaMeas")
+            parts.append(
+                ReadoutBlock(
+                    self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaMeas"
+                ).build()
             )
+        self._parts = parts
+        return parts
+
+    def build_vanilla(self) -> None:
+        for part in self.structure():
+            if isinstance(part, Repeat):
+                for _ in range(part.count):
+                    self.add_child(part.block)
+            else:
+                self.add_child(part)

@@ -35,21 +35,21 @@ def test_dosqpe_plot(scaled_h2_hamiltonian_jw):
 
 
 @pytest.mark.parametrize("n_shots", ["exact", 4000])
-def test_dosqpe_ladder_as_controlled_powers_matches_the_analytic_spectrum(monkeypatch, n_shots):
+def test_dosqpe_ladder_as_controlled_powers_matches_the_analytic_spectrum(n_shots):
     """U = P(2π·3/8) over the maximally mixed probe: half the weight at phase
-    0, half at 3/8, both exactly representable at n_ancilla=3 (analytic)."""
+    0, half at 3/8, both exactly representable at n_ancilla=3 (analytic),
+    through a structured run that never builds the block."""
     import qarp
-    from qarp import _program
     from qarp.blocks import SimpleBlock
     from qarp.engines import QarpEngine
 
-    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
     u = SimpleBlock(1, name="U")
     u.p(0, 2 * np.pi * 0.375)
     u.build()
     shots = qarp.EXACT if n_shots == "exact" else n_shots
     dos = DOSQPE(unitary=u, n_ancilla=3, engine=QarpEngine(seed=0, n_shots=shots)).build()
-    assert "controlled_powers" in dos.engine._programs[id(dos.primitive)][0].kinds()
+    assert dos.block is None
+    assert dos._structured_run._program.kinds().count("controlled_powers") == 1
     dist = dos.run()
     expected = {(0, 0, 0): 0.5, (1, 1, 0): 0.5}
     if n_shots == "exact":
@@ -189,13 +189,11 @@ def test_dosqpe_plot_against_spectrum_structural(monkeypatch):
     plt.close("all")
 
 
-def test_dosqpe_noisy_engine_keeps_the_gate_path(monkeypatch):
-    from qarp import _program
+def test_dosqpe_noisy_engine_keeps_the_gate_path():
     from qarp.blocks import SimpleBlock
     from qarp.devices import NoiseModel
     from qarp.engines import QarpEngine
 
-    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
     u = SimpleBlock(1, name="U")
     u.p(0, 2 * np.pi * 0.375)
     u.build()
@@ -204,6 +202,7 @@ def test_dosqpe_noisy_engine_keeps_the_gate_path(monkeypatch):
         n_ancilla=2,
         engine=QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
+    assert dosqpe._structured_run is None and dosqpe.block.is_built
     assert dosqpe.engine._programs[id(dosqpe.primitive)] == [None]
     dist = dosqpe.run()
     assert sum(dist.values()) == pytest.approx(1.0)

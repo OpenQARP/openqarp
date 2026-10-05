@@ -11,6 +11,7 @@ from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
+    StructuredRun,
     _exact_program_result,
     _exact_result,
     _reindex_exact,
@@ -289,6 +290,24 @@ class QarpEngine(Engine):
 
     # ── Engine API ──────────────────────────────────────────────────────────
 
+    def prepare_structured(self, block, primitive: Runnable) -> Optional[StructuredRun]:
+        # A device means "simulate what the device runs" (and is the only
+        # carrier of noise), so it keeps the gate path; amplitude primitives
+        # contract the gate-path statevector.
+        if not self._structured or self._device is not None:
+            return None
+        if primitive.consumes is not Consumes.COUNTS:
+            return None
+        self._validate_primitive(primitive)
+        n = block.n_qubits
+        found = _program.plan_structure(
+            block, n, fusion_width=_program.fusion_width_of(self._sim, n)
+        )
+        if found is None:
+            return None
+        program = found.program(compile_gates=self._transpiler.transpile_and_optimize)
+        return StructuredRun(self, program, n, primitive)
+
     # ── Template hooks (build()/run() live on the base Engine) ─────────────
 
     def _post_compile_check(self, prim: Runnable, compiled, layout: Optional[_Layout]) -> None:
@@ -320,7 +339,12 @@ class QarpEngine(Engine):
             return None
         if prim.consumes is not Consumes.COUNTS:
             return None
-        found = _program.plan(blk, blk.n_qubits, list(flat))
+        found = _program.plan(
+            blk,
+            blk.n_qubits,
+            list(flat),
+            fusion_width=_program.fusion_width_of(self._sim, blk.n_qubits),
+        )
         if found is None:
             return None
         return found.program(compile_gates=self._transpiler.transpile_and_optimize)

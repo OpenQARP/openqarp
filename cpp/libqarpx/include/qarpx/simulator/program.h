@@ -91,16 +91,9 @@ void apply_controlled_powers(const ControlledPowersKernel&        k,
                              std::vector<std::complex<double>>&   state);
 
 /// The permutation `commands` apply to basis states of `qubits`, exact
-/// including phase, or nullopt.  Classical gates (X, CX, CCX, SWAP, CSWAP,
-/// and the H·MCZ·H that `mcx` emits) evaluate on integers at any width.
-/// Otherwise the qubits no command changes (every command touching them is
-/// diagonal on them) are fixed per assignment, each command restricted to
-/// that assignment becomes a phase or a gate on the rest, and runs of
-/// commands that touch no fixed qubit are one precomputed matrix on the
-/// rest — when at most `max_rest` qubits change and the estimated work stays
-/// within 2^`max_work_log2` · |commands|.  Stops at the first column that is
-/// not a basis state with amplitude 1, both within 1e-10.  Parametric commands and commands
-/// outside `qubits` give nullopt.
+/// including phase (within 1e-10), or nullopt: classical gates evaluate on
+/// integers at any width; otherwise at most `max_rest` qubits may change and
+/// the work must stay within 2^`max_work_log2` · |commands|.
 [[nodiscard]] std::optional<std::vector<uint64_t>> permutation_table(
     const std::vector<Command>&  commands,
     const std::vector<uint32_t>& qubits,

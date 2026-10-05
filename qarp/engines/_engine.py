@@ -18,7 +18,7 @@ import numpy as np
 
 import qarpx as qx
 
-from .._sampling_distribution import pack_bits
+from .._sampling_distribution import SamplingDistribution, distribution_from_result, pack_bits
 from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._runnable import Runnable
@@ -169,6 +169,42 @@ def _coerce_params(params: Mapping) -> dict[str, float]:
     if not params:
         return {}
     return {str(k): float(v) for k, v in params.items()}
+
+
+class StructuredRun:
+    """A block's declared structure lowered to a program before the block is
+    built (§14 *Structured execution*), from :meth:`Engine.prepare_structured`.
+
+    Shots, ``initial_state`` and ``measured_qubits`` are read from the
+    primitive at ``sample()`` time, so a per-primitive override keeps winning
+    over the engine default as on the ordinary path.
+    """
+
+    def __init__(self, engine, program, n_qubits: int, primitive: Runnable):
+        self._engine = engine
+        self._program = program
+        self._n_qubits = n_qubits
+        self._primitive = primitive
+
+    def sample(self) -> SamplingDistribution:
+        """Sample the program, or evaluate it exactly under ``EXACT`` readout."""
+        engine, prim = self._engine, self._primitive
+        engine._pre_run()
+        engine._validate_primitive(prim)
+        shots = engine._resolve_shots(prim)
+        psi = prim.initial_state
+        if psi is not None:
+            psi = np.ascontiguousarray(psi, dtype=np.complex128)
+        if shots is Shots.EXACT:
+            sr = _exact_program_result(
+                engine._sim, self._program, self._n_qubits, initial_state=psi
+            )
+        else:
+            sr = engine._sim.program_run(
+                self._program, self._n_qubits, shots, engine._circuit_seed(0), initial_state=psi
+            )
+        measured = getattr(prim, "measured_qubits", None)
+        return distribution_from_result(sr, range(self._n_qubits) if measured is None else measured)
 
 
 class Engine(ABC):
@@ -329,6 +365,17 @@ class Engine(ABC):
     @property
     def provides_amplitudes(self) -> bool:
         return True
+
+    def prepare_structured(self, block, primitive: Runnable) -> Optional[StructuredRun]:
+        """Lower ``block``'s declared ``structure()`` to a runnable program
+        without building the block (§14 *Structured execution*).
+
+        ``block`` is constructed, not built.  Returns a :class:`StructuredRun`
+        when this engine can run the declaration, else None and the caller
+        builds the block and takes the ordinary ``build()``/``run()`` path.
+        The hook knows no algorithm and no block class; base default: None.
+        """
+        return None
 
     def resource_modeler(self) -> "Optional[ResourceModeler]":
         """Modeler for ``qarp.resources.ResourceEstimator``, or None.

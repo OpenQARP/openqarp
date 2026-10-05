@@ -340,6 +340,13 @@ class _BlockMixin:
         self._mark_cpp_built()
         self._finalize()
         self._built = True
+        # A declared classical_action is trusted for these gates only (§13):
+        # the planner derives the span instead once its local-frame digest
+        # differs.  flatten() is placed, so map it back through target_qubits.
+        if _program._declares_action(self):
+            self._action_digest = qx._local_commands_digest(
+                list(self._cpp_flatten()), list(self.target_qubits)
+            )
         # Structural validation hook (CompositeBlockBase defines one).  Looked
         # up on the concrete class, not the mixin: ``_attach_mixin`` copies
         # every mixin attribute onto each class and would shadow it.
@@ -970,7 +977,9 @@ class _BlockMixin:
             psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
         sim = qx.QarpSimulator()
         if _program.resolve(structured):
-            program = _program.cached_program(self, cmds, self.n_qubits)
+            program = _program.cached_program(
+                self, cmds, self.n_qubits, _program.fusion_width_of(sim, self.n_qubits)
+            )
             if program is not None:
                 return np.asarray(
                     sim.program_statevector(program, self.n_qubits, initial_state=psi)
@@ -991,6 +1000,20 @@ class _BlockMixin:
         return None
 
     classical_action._qarp_default = True  # type: ignore[attr-defined]
+
+    def structure(self) -> "list | None":
+        """This block as a sequence of parts, or ``None``.
+
+        A part is a block placed in this block's frame by its own
+        ``target_qubits``, or ``qarp.blocks.Repeat(block, count)``.
+        Overriding it promises that the parts in order are this block's gate
+        stream (§13), and that it works before ``build()``, building only
+        the parts: structured execution (§14) lowers the declaration without
+        the stream, and plans a built block from it in place of its children.
+        """
+        return None
+
+    structure._qarp_default = True  # type: ignore[attr-defined]
 
     def unitary_matrix(self) -> "np.ndarray":
         """Dense ``2^n × 2^n`` unitary of this block, global phase included.

@@ -26,10 +26,9 @@ namespace {
 // team only from QULACS_PARALLEL_NQUBIT_THRESHOLD.
 constexpr unsigned kParallelThreshold = 13;
 
-// A derived column counts as a basis state when its amplitude is within this
-// of 1 and every other entry within it of 0 (the initial-state norm tolerance
-// of §14): the kernel then applies the exact permutation, so a span that
-// deviates from one by less than this is snapped to it.
+// A derived column is a basis state when its amplitude is within this of 1
+// and every other entry within it of 0 (§14): the kernel then applies the
+// exact permutation, so a span closer than this to one is snapped to it.
 constexpr double kBasisTolerance = 1e-10;
 
 // Widest register a table may span: 2^26 entries is 512 MB of uint64.
@@ -188,13 +187,9 @@ uint64_t apply_classical(const Command& c, uint64_t v) {
     return v;
 }
 
-// Qubits no command couples to the others' amplitudes are "fixed": each is
-// only ever a control, a phase partner, or moved by classical gates among
-// fixed qubits alone.  Per assignment of the fixed qubits, their value is
-// tracked through those classical gates, every other command touching them
-// is sliced at their current value (a phase or a gate on the rest), and the
-// rest is simulated column by column.  nullopt at the first column that is
-// not a basis state with amplitude 1 (phase included).
+// "Fixed" qubits (only ever a control, a phase partner, or moved by classical
+// gates among themselves) are enumerated and tracked; every other command is
+// sliced at their value and the rest simulated column by column.
 std::optional<std::vector<uint64_t>> restricted_table(
     const std::vector<Command>& local, std::size_t k,
     uint32_t max_rest, uint32_t max_work_log2) {
@@ -660,24 +655,30 @@ void apply_controlled_powers(const ControlledPowersKernel& k, std::vector<cd>& s
     std::vector<uint64_t> offset(d);
     for (uint64_t l = 0; l < d; ++l) offset[l] = deposit_bits(l, k.targets.data(), m);
 
-    // Distinct powers by square-and-multiply; the ladder's exponents repeat.
-    std::unordered_map<uint64_t, Eigen::MatrixXcd> powers;
+    // squares[b] = matrix^(2^b), one chain shared by every exponent; an
+    // exponent with several set bits multiplies its squares once.
+    uint64_t all = 0;
+    for (auto e : k.exponents) all |= e;
+    const int n_squares = std::bit_width(all);
+    std::vector<Eigen::MatrixXcd> squares;
+    squares.reserve(static_cast<std::size_t>(n_squares));
+    if (n_squares > 0) squares.push_back(k.matrix);
+    for (int b = 1; b < n_squares; ++b) squares.push_back(squares.back() * squares.back());
+    std::unordered_map<uint64_t, Eigen::MatrixXcd> products;
     for (auto e : k.exponents) {
-        if (powers.count(e)) continue;
-        Eigen::MatrixXcd result = Eigen::MatrixXcd::Identity(static_cast<Eigen::Index>(d),
-                                                             static_cast<Eigen::Index>(d));
-        Eigen::MatrixXcd base = k.matrix;
-        for (uint64_t x = e; x > 0; x >>= 1) {
-            if (x & 1) result = result * base;
-            if (x > 1) base = base * base;
-        }
-        powers.emplace(e, std::move(result));
+        if (std::popcount(e) < 2 || products.count(e)) continue;
+        Eigen::MatrixXcd result = squares[static_cast<std::size_t>(std::countr_zero(e))];
+        for (uint64_t x = e & (e - 1); x != 0; x &= x - 1)
+            result = result * squares[static_cast<std::size_t>(std::countr_zero(x))];
+        products.emplace(e, std::move(result));
     }
 
     const int64_t outer = static_cast<int64_t>(dim >> m);
     for (std::size_t j = 0; j < k.controls.size(); ++j) {
-        if (k.exponents[j] == 0) continue;
-        const Eigen::MatrixXcd& P    = powers.at(k.exponents[j]);
+        const uint64_t e = k.exponents[j];
+        if (e == 0) continue;
+        const Eigen::MatrixXcd& P    = std::has_single_bit(e)
+            ? squares[static_cast<std::size_t>(std::countr_zero(e))] : products.at(e);
         const uint64_t          cbit = uint64_t{1} << k.controls[j];
         cd*                     sv   = state.data();
 #ifdef _OPENMP

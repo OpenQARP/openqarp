@@ -11,7 +11,15 @@ import qarp
 import qarpx as qx
 from qarp import _program
 from qarp.algorithms import PauliAveraging, Sampler, StateVector
-from qarp.blocks import CompositeBlock, ControlledBlock, ModularMultiplicationBlock, SimpleBlock
+from qarp.blocks import (
+    CompositeBlock,
+    ConditionalBlock,
+    ControlledBlock,
+    ModularMultiplicationBlock,
+    OrderFindingBlock,
+    ResetBlock,
+    SimpleBlock,
+)
 from qarp.devices import Device
 from qarp.engines import QarpEngine
 from qarp.operators import QubitOperator
@@ -126,6 +134,39 @@ def test_a_mid_circuit_measurement_keeps_the_gate_path(monkeypatch):
     monkeypatch.setattr(_program, "MIN_QUBITS", 0)
     block = CompositeBlock([_Increment(4), _MeasureThenFlip(4), _Increment(4)], n_qubits=4).build()
     assert _program.plan(block, 4) is None
+
+
+def _measure_then_condition(n: int) -> CompositeBlock:
+    """A recorded measurement feeding a conditioned X on the same qubit."""
+    prelude = SimpleBlock(1, target_qubits=[0])
+    prelude.measure(0, 0)
+    body = SimpleBlock(1, target_qubits=[0])
+    body.x(0)
+    cond = ConditionalBlock(cbits=[0], values=[True], then_body=body.build())
+    cond.build()
+    cond.target_cbits = [0]
+    return CompositeBlock(
+        [_Increment(5, target_qubits=[0, 1, 2, 3, 4])] * 2 + [prelude, cond], n_qubits=n
+    )
+
+
+@pytest.mark.parametrize("tail", ["reset", "condition"])
+def test_a_reset_or_a_classical_condition_keeps_the_gate_path(tail):
+    # Both need per-shot trajectories, which only the gate path runs; the
+    # permutation before them must not be planned around them.
+    n = 12
+    if tail == "reset":
+        ket = CompositeBlock(
+            [_Increment(5, target_qubits=[0, 1, 2, 3, 4])] * 2 + [ResetBlock(0)], n_qubits=n
+        )
+    else:
+        ket = _measure_then_condition(n)
+    assert _program.plan(ket.build(), n) is None
+    engine = QarpEngine(seed=5, n_shots=100, structured=True)
+    sampler = Sampler(ket)
+    engine.build([sampler])
+    assert _programs(engine, sampler) == [None]
+    assert sum(engine.run()[0].probabilities) == pytest.approx(1.0)
 
 
 def test_structured_default_follows_the_environment(monkeypatch):
@@ -324,6 +365,65 @@ def test_collision_sites_run_as_shared_dense_kernels(monkeypatch):
     )
 
 
+def test_fusion_width_follows_the_simulator():
+    # §14 Simulation fusion: blocks of fusion_max_qubits from fusion_min_qubits
+    # qubits, the single-qubit pass below that, nothing when off.
+    sim = qx.QarpSimulator()
+    sim.fusion_max_qubits = 3
+    sim.fusion_min_qubits = 12
+    assert _program.fusion_width_of(sim, 12) == 3
+    assert _program.fusion_width_of(sim, 11) == 1
+    sim.fusion_max_qubits = 1
+    assert _program.fusion_width_of(sim, 12) == 1
+    sim.fusion_max_qubits = 0
+    assert _program.fusion_width_of(sim, 12) == 0
+
+
+def _two_qubit_terms(n: int) -> CompositeBlock:
+    return CompositeBlock([_Mix(2, target_qubits=[q, q + 1]) for q in range(n - 1)], n_qubits=n)
+
+
+def test_a_dense_kernel_narrower_than_the_fusion_width_stays_gates():
+    # Fusion merges neighbouring 2-qubit terms into 3-qubit blocks; a dense
+    # kernel per term would fence them off.
+    n = 12
+    terms = _two_qubit_terms(n).build()
+    assert _program.plan(terms, n, fusion_width=3) is None
+    assert set(_program.plan(terms, n, fusion_width=2).kinds()) == {"dense"}
+    sites = CompositeBlock(
+        [_Collide(3, target_qubits=[q, q + 1, q + 2]) for q in range(0, n, 3)], n_qubits=n
+    ).build()
+    assert _program.plan(sites, n, fusion_width=3).kinds() == ["dense"] * 4
+    psi = _random_state(n, 9)
+    np.testing.assert_array_equal(
+        terms.statevector(psi, structured=True), terms.statevector(psi, structured=False)
+    )
+
+
+def test_the_engine_plans_at_its_simulator_fusion_width():
+    n = 12
+    engine = QarpEngine(structured=True)
+    sampler = Sampler(_two_qubit_terms(n), n_shots=qarp.EXACT)
+    engine.build([sampler])
+    assert _programs(engine, sampler) == [None]
+    engine._sim.fusion_max_qubits = 2
+    engine.build([sampler])
+    assert set(_programs(engine, sampler)[0].kinds()) == {"dense"}
+
+
+def test_order_finding_reads_its_order_through_permutation_kernels():
+    # a = 2 mod 15 has order 4, which divides the counting register's 2^8, so
+    # the counting marginal is exactly 1/4 at 0, 64, 128 and 192 (analytic).
+    block = OrderFindingBlock(2, 15).build()
+    n = block.n_qubits
+    assert n == 12 and "permutation" in _program.plan(block, n).program().kinds()
+    probs = np.abs(block.statevector(structured=True)) ** 2
+    counting = probs.reshape(1 << block.n_work_qubits, 1 << block.n_counting_qubits).sum(axis=0)
+    expected = np.zeros(1 << block.n_counting_qubits)
+    expected[[0, 64, 128, 192]] = 0.25
+    np.testing.assert_allclose(counting, expected, atol=1e-12)
+
+
 class _MeasureAndReuse(SimpleBlock):
     def build_vanilla(self):
         self.measure(0, 0)
@@ -344,6 +444,29 @@ def test_a_measurement_reused_in_the_last_kernel_keeps_the_gate_path():
     engine.build([sampler])
     assert _programs(engine, sampler) == [None]
     assert sum(engine.run()[0].probabilities) == pytest.approx(1.0)
+
+
+def _mix_then_increment(n: int, unrecorded_measure: bool) -> CompositeBlock:
+    mix = SimpleBlock(2, target_qubits=[n - 2, n - 1])
+    mix.h(0).cx(0, 1).ry(1, 0.3).rz(0, 0.2)
+    if unrecorded_measure:
+        mix.set_commands([*mix.commands(), qx.Command(qx.GateType.Measure, 0)])
+    return CompositeBlock([mix, _Increment(5, target_qubits=[0, 1, 2, 3, 4])], n_qubits=n).build()
+
+
+def test_an_unrecorded_measurement_keeps_its_span_as_gates(monkeypatch):
+    # A Measure without a cbit leaves the state alone, so the oracle is the
+    # unitary of the same tree without it.
+    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
+    n = 8
+    block = _mix_then_increment(n, unrecorded_measure=True)
+    assert _program.plan(block, n).program().kinds() == ["gates", "permutation"]
+    psi = _random_state(n, 8)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(_mix_then_increment(n, unrecorded_measure=False).unitary_matrix()) @ psi,
+        atol=1e-12,
+    )
 
 
 def test_a_planned_block_deep_copies_without_its_program():
@@ -479,6 +602,20 @@ def test_ladders_on_different_targets_do_not_merge(plan_small_registers):
     steps = [(0, [6, 3, 5])] * 6 + [(0, [3, 6, 5])] * 6
     kinds = _assert_matches_the_unitary(_ladder(steps, lambda: _Asym(3)), "controlled_powers")
     assert kinds.count("controlled_powers") == 2
+
+
+def test_a_ladder_too_short_to_pay_for_its_kernel_stays_gates(plan_small_registers):
+    # One controlled phase per step: three steps on three controls are three
+    # gates against six passes, seven steps are seven against six.
+    def phase():
+        u = SimpleBlock(1)
+        u.p(0, 0.7)
+        return u
+
+    short = _ladder([(0, [6]), (1, [6]), (2, [6])], phase).build()
+    assert _program.plan(short, short.n_qubits) is None
+    long = _ladder([(0, [6])] + [(1, [6])] * 2 + [(2, [6])] * 4, phase)
+    assert _assert_matches_the_unitary(long, "controlled_powers").count("controlled_powers") == 1
 
 
 def test_a_ladder_controlled_on_zero_matches_the_unitary(plan_small_registers):

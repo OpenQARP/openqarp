@@ -19,6 +19,8 @@ import numpy as np
 
 import qarpx as qx
 
+from ._structure import Repeat
+
 # Derivation fixes the qubits a span never changes and simulates the rest
 # column by column; at most this many qubits may change (early exit on the
 # first non-basis column).
@@ -60,6 +62,16 @@ def structured_default() -> bool:
 def resolve(flag: Optional[bool]) -> bool:
     """A per-call ``structured=`` flag, ``None`` following the process default."""
     return structured_default() if flag is None else bool(flag)
+
+
+def fusion_width_of(sim, n_qubits: int) -> int:
+    """Widest block ``sim``'s fusion builds on an ``n_qubits`` register (§14
+    *Simulation fusion*): below ``fusion_min_qubits`` only the single-qubit
+    pass runs."""
+    width = int(sim.fusion_max_qubits)
+    if width >= 2 and n_qubits < int(sim.fusion_min_qubits):
+        return 1
+    return width
 
 
 # ── Kernel records ──────────────────────────────────────────────────────────
@@ -145,6 +157,14 @@ def _needs_trajectory(cmd) -> bool:
     return cmd.gate == qx.GateType.Measure and len(cmd.cbits) > 0
 
 
+def _has_unitary(cmd) -> bool:
+    """What ``qx._local_unitary`` accepts: it raises on any ``Measure``,
+    recorded or not, where ``_needs_trajectory`` passes an unrecorded one."""
+    if cmd.gate in _TRAJECTORY or cmd.gate == qx.GateType.Measure:
+        return False
+    return len(cmd.cbits) == 0 and len(cmd.condition_bits) == 0 and not cmd.is_parametric()
+
+
 def _measurements_terminal(cmds) -> bool:
     """``run``'s sample-once condition: no reset, condition or branch, and no
     command acts on a qubit after its recorded measurement."""
@@ -181,19 +201,38 @@ def _declares_action(node) -> bool:
     return action is not None and not getattr(action, "_qarp_default", False)
 
 
+def _action_holds(node, span: list, placement: list[int]) -> bool:
+    """The declaring block's gates are the ones it was built with: ``span``
+    (placed by ``placement``) digests like its command buffer at build."""
+    digest = getattr(node, "_action_digest", None)
+    return (
+        digest is not None and qx._local_commands_digest(span, placement[: node.n_qubits]) == digest
+    )
+
+
+def _declares_structure(node) -> bool:
+    method = getattr(type(node), "structure", None)
+    return method is not None and not getattr(method, "_qarp_default", False)
+
+
+def _physical_gates(cmds) -> int:
+    return sum(1 for c in cmds if _is_physical(c))
+
+
 class _Planner:
-    def __init__(self, commands: list, n_qubits: int):
+    def __init__(self, commands: list, n_qubits: int, fusion_width: int):
         self.commands = commands
         self.n_qubits = n_qubits
+        self.fusion_width = fusion_width
         self.max_work_log2 = n_qubits + DERIVE_HEADROOM_LOG2
         self.kernels: list[Kernel] = []
         self._tables: dict = {}
         self._matrices: dict = {}
 
-    def _declared(self, node, qmap: list[int]) -> Optional[Permutation]:
+    def _declared(self, node, span: list, qmap: list[int]) -> Optional[Permutation]:
         if not _declares_action(node) or _has_pending_ops(node):
             return None
-        if node.n_qubits > MAX_COMPOSE_QUBITS:
+        if node.n_qubits > MAX_COMPOSE_QUBITS or not _action_holds(node, span, qmap):
             return None
         image = node.classical_action(np.arange(1 << node.n_qubits, dtype=np.int64))
         if image is None:
@@ -204,12 +243,13 @@ class _Planner:
         """``(qubits in inner's frame, table)`` for a controlled block's inner."""
         if _has_pending_ops(inner) or inner.n_qubits > MAX_COMPOSE_QUBITS:
             return None
-        if _declares_action(inner):
+        commands = list(inner.flatten())
+        if _declares_action(inner) and _action_holds(inner, commands, _placement(inner)):
             image = inner.classical_action(np.arange(1 << inner.n_qubits, dtype=np.int64))
             if image is not None:
                 return _placement(inner), np.ascontiguousarray(image, np.int64)
         local = list(range(inner.n_qubits))
-        found = self._table(list(inner.flatten()), local)
+        found = self._table(commands, local)
         return None if found is None else (local, found.table)
 
     def _controlled(self, node, qmap: list[int]) -> Optional[Permutation]:
@@ -245,10 +285,14 @@ class _Planner:
         return None if table is None else Permutation(tuple(touched), table)
 
     def _dense(self, span: list, touched: list[int], n_gates: int) -> Optional[Dense]:
-        # One 2^k-wide pass costs ~2^k multiply-adds per amplitude.
-        if not touched or len(touched) > K_DENSE or 2 * n_gates < (1 << len(touched)):
+        # A span narrower than the fusion width merges with its neighbours on
+        # the gate path; a kernel would fence it off.
+        if not touched or len(touched) > K_DENSE or len(touched) < self.fusion_width:
             return None
-        if any(c.is_parametric() or _needs_trajectory(c) for c in span):
+        # One 2^k-wide pass costs ~2^k multiply-adds per amplitude.
+        if 2 * n_gates < (1 << len(touched)):
+            return None
+        if not all(_has_unitary(c) for c in span):
             return None
         # Keyed in the span's own frame: a block repeated per site derives once.
         key = (qx._local_commands_digest(span, touched), len(touched))
@@ -257,6 +301,7 @@ class _Planner:
         return Dense(tuple(touched), self._matrices[key])
 
     def _children(self, node, start: int, end: int, qmap: list[int]):
+        """``(kid, start, end, kid_map, count)`` per child, or None."""
         if _has_pending_ops(node) or not isinstance(node, qx.CompositeBlock):
             return None
         kids = list(node.children())
@@ -265,17 +310,39 @@ class _Planner:
             return None
         out = []
         for kid, length in zip(kids, lengths, strict=True):
-            out.append((kid, start, start + length, [qmap[t] for t in _placement(kid)]))
+            out.append((kid, start, start + length, [qmap[t] for t in _placement(kid)], 1))
             start += length
         return out
 
+    def _parts(self, node, start: int, end: int, qmap: list[int]):
+        """``(kid, start, end, kid_map, count)`` per declared part, or None when
+        nothing is declared or the parts do not add up to the span."""
+        if not _declares_structure(node) or _has_pending_ops(node):
+            return None
+        parts = node.structure()
+        if parts is None:
+            return None
+        out = []
+        for part in parts:
+            kid, count = (part.block, part.count) if isinstance(part, Repeat) else (part, 1)
+            length = len(kid.flatten()) * count
+            out.append((kid, start, start + length, [qmap[t] for t in _placement(kid)], count))
+            start += length
+        return out if start == end else None
+
     def walk(self, node, start: int, end: int, qmap: list[int]) -> None:
         span = self.commands[start:end]
-        n_gates = sum(1 for c in span if _is_physical(c))
+        n_gates = _physical_gates(span)
         if n_gates < MIN_SPAN_GATES:
             self._emit(Gates(start, end))
             return
-        declared = self._declared(node, qmap) or self._controlled(node, qmap)
+        declared = self._declared(node, span, qmap)
+        if declared is None:
+            parts = self._parts(node, start, end, qmap)
+            if parts is not None:
+                self._walk_entries(parts)
+                return
+            declared = self._controlled(node, qmap)
         if declared is not None:
             self._emit(declared)
             return
@@ -290,15 +357,22 @@ class _Planner:
         if children is None:
             self._emit(Gates(start, end))
             return
+        self._walk_entries(children)
+
+    def _walk_entries(self, entries) -> None:
+        """Plan children or declared parts in order; a repeated entry is
+        walked once per copy of its span."""
         i = 0
-        while i < len(children):
-            ladder = self._ladder(children, i)
+        while i < len(entries):
+            ladder = self._ladder(entries, i)
             if ladder is not None:
                 kernel, i = ladder
                 self._emit(kernel)
                 continue
-            kid, s, e, kid_map = children[i]
-            self.walk(kid, s, e, kid_map)
+            kid, s, e, kid_map, count = entries[i]
+            step = (e - s) // count
+            for c in range(count):
+                self.walk(kid, s + c * step, s + (c + 1) * step, kid_map)
             i += 1
 
     def _ladder_step(self, kid, kid_map: list[int]):
@@ -316,31 +390,31 @@ class _Planner:
         if inner.n_qubits > K_POWERS or _has_pending_ops(inner):
             return None
         commands = list(inner.flatten())
-        if any(c.is_parametric() or _needs_trajectory(c) for c in commands):
+        if not all(_has_unitary(c) for c in commands):
             return None
         targets = tuple(kid_map[1 + b] for b in range(inner.n_qubits))
         return (qx._commands_digest(commands), targets), kid_map[0], commands
 
-    def _ladder(self, children, i: int):
-        """A run of the same ``C-U`` from child ``i`` as one ``ControlledPowers``
-        kernel and the index after the run, or None."""
-        first = self._ladder_step(children[i][0], children[i][3])
+    def _ladder(self, entries, i: int):
+        """A run of the same ``C-U`` from entry ``i`` as one ``ControlledPowers``
+        kernel and the index after the run, or None.  A repeated entry counts
+        as ``count`` applications."""
+        first = self._ladder_step(entries[i][0], entries[i][3])
         if first is None:
             return None
         key, _, commands = first
         counts: dict[int, int] = {}
         gates = 0
         j = i
-        while j < len(children):
-            step = self._ladder_step(children[j][0], children[j][3])
+        while j < len(entries):
+            kid, _, _, kid_map, count = entries[j]
+            step = self._ladder_step(kid, kid_map)
             if step is None or step[0] != key:
                 break
-            counts[step[1]] = counts.get(step[1], 0) + 1
-            gates += sum(
-                1 for c in self.commands[children[j][1] : children[j][2]] if _is_physical(c)
-            )
+            counts[step[1]] = counts.get(step[1], 0) + count
+            gates += count * _physical_gates(kid.flatten())
             j += 1
-        if j - i < 2:
+        if sum(counts.values()) < 2:
             return None
         m = len(key[1])
         # A permutation U composes into one gather through the per-child walk.
@@ -363,22 +437,37 @@ class _Planner:
         self.kernels.append(kernel)
 
 
-def plan(block, n_qubits: int, commands: Optional[list] = None) -> Optional[Plan]:
+def plan(
+    block,
+    n_qubits: int,
+    commands: Optional[list] = None,
+    *,
+    fusion_width: Optional[int] = None,
+) -> Optional[Plan]:
     """The block's structured plan, or None when the gate path should run.
 
     ``commands`` is the stream the gate path would run (``block.flatten()``,
-    possibly with parameters substituted); spans are taken from it.  None is
-    returned below ``MIN_QUBITS``, when no structured kernel was found, and
-    when a measurement or classical condition sits anywhere but the last
-    gates kernel.
+    possibly with parameters substituted); spans are taken from it.
+    ``fusion_width`` is ``fusion_width_of`` the simulator that will run the
+    program (None = a default-constructed one).  None is returned below
+    ``MIN_QUBITS``, when no structured kernel was found, and when a
+    measurement or classical condition sits anywhere but the last gates
+    kernel.
     """
     if n_qubits < MIN_QUBITS:
         return None
+    if fusion_width is None:
+        fusion_width = fusion_width_of(qx.QarpSimulator(), n_qubits)
     cmds = list(block.flatten()) if commands is None else list(commands)
-    planner = _Planner(cmds, n_qubits)
+    planner = _Planner(cmds, n_qubits, fusion_width)
     tq = getattr(block, "target_qubits", None)
     planner.walk(block, 0, len(cmds), list(tq) if tq is not None else list(range(n_qubits)))
-    kernels = planner.kernels
+    return _finish(planner.kernels, cmds)
+
+
+def _finish(kernels: list, cmds: list) -> Optional[Plan]:
+    """The plan, or None without a structured kernel or with a measurement or
+    classical condition anywhere but the last gates kernel."""
     if all(isinstance(k, Gates) for k in kernels):
         return None
     for i, k in enumerate(kernels):
@@ -393,30 +482,88 @@ def plan(block, n_qubits: int, commands: Optional[list] = None) -> Optional[Plan
     return Plan(kernels, cmds)
 
 
+def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) -> Optional[Plan]:
+    """A plan from ``block.structure()`` without the block's gate stream, so
+    the block is never built (§14).
+
+    The planned stream holds the plain parts only; every ``Repeat`` must be a
+    ladder step (one control on |1⟩, a concrete ``U`` within ``K_POWERS``) and
+    join a ``ControlledPowers`` kernel, no part may be parametric, and only
+    the last part may record a measurement.  No register minimum applies.
+    None when any of that fails, or without a structured kernel.
+    """
+    if not _declares_structure(block) or _has_pending_ops(block):
+        return None
+    parts = block.structure()
+    if parts is None:
+        return None
+    tq = getattr(block, "target_qubits", None)
+    if tq is not None and list(tq) != list(range(block.n_qubits)):
+        return None
+    if fusion_width is None:
+        fusion_width = fusion_width_of(qx.QarpSimulator(), n_qubits)
+    cmds: list = []
+    planner = _Planner(cmds, n_qubits, fusion_width)
+    entries: list = []
+    repeated: set[int] = set()
+    for part in parts:
+        if isinstance(part, Repeat):
+            repeated.add(len(entries))
+            entries.append((part.block, len(cmds), len(cmds), _placement(part.block), part.count))
+            continue
+        kid_cmds = list(part.flatten())
+        if any(c.is_parametric() for c in kid_cmds):
+            return None
+        start = len(cmds)
+        cmds.extend(kid_cmds)
+        entries.append((part, start, len(cmds), _placement(part), 1))
+    for _, s, e, _, _ in entries[:-1]:
+        if any(_needs_trajectory(c) for c in cmds[s:e]):
+            return None
+    i = 0
+    while i < len(entries):
+        ladder = planner._ladder(entries, i)
+        if ladder is not None:
+            kernel, i = ladder
+            planner._emit(kernel)
+            continue
+        if i in repeated:
+            return None
+        kid, s, e, kid_map, _ = entries[i]
+        if n_qubits >= MIN_QUBITS:
+            planner.walk(kid, s, e, kid_map)
+        else:
+            planner._emit(Gates(s, e))
+        i += 1
+    return _finish(planner.kernels, cmds)
+
+
 class _ProgramCache:
     """A block's cached program; a deep copy of the block starts without one."""
 
-    __slots__ = ("digest", "n_qubits", "program")
+    __slots__ = ("key", "program")
 
-    def __init__(self, digest: int, n_qubits: int, program: "Optional[qx.Program]"):
-        self.digest = digest
-        self.n_qubits = n_qubits
+    def __init__(self, key: tuple, program: "Optional[qx.Program]"):
+        self.key = key
         self.program = program
 
     def __deepcopy__(self, memo) -> None:
         return None
 
 
-def cached_program(block, commands: list, n_qubits: int) -> Optional["qx.Program"]:
-    """``plan(...).program()`` cached on ``block``, keyed by the stream's digest."""
-    digest = qx._commands_digest(commands)
+def cached_program(
+    block, commands: list, n_qubits: int, fusion_width: int
+) -> Optional["qx.Program"]:
+    """``plan(...).program()`` cached on ``block``, keyed by the stream's
+    digest, the register width and the fusion width."""
+    key = (qx._commands_digest(commands), n_qubits, fusion_width)
     cache = getattr(block, "_structured_program", None)
-    if cache is not None and cache.digest == digest and cache.n_qubits == n_qubits:
+    if cache is not None and cache.key == key:
         return cache.program
-    found = plan(block, n_qubits, commands)
+    found = plan(block, n_qubits, commands, fusion_width=fusion_width)
     program = found.program() if found is not None else None
     try:
-        block._structured_program = _ProgramCache(digest, n_qubits, program)
+        block._structured_program = _ProgramCache(key, program)
     except AttributeError:
         pass  # a raw qarpx block without a __dict__: plan again next time
     return program

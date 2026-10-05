@@ -93,22 +93,67 @@ def _programs(qpe):
     return qpe.engine._programs[id(qpe.primitive)]
 
 
+def _structured_kinds(qpe):
+    """The kernels of the structured run; the block was never built."""
+    assert qpe.block is None
+    return qpe._structured_run._program.kinds()
+
+
+def _block_path(qpe):
+    """The structured run was refused and the block built."""
+    return qpe._structured_run is None and qpe.block is not None and qpe.block.is_built
+
+
+@pytest.mark.parametrize("n_ancilla", [3, 11])
 @pytest.mark.parametrize("n_shots", ["exact", 500])
-def test_qpe_ladder_runs_as_one_controlled_powers_kernel(n_shots):
-    """Eleven ancillas over P(2π·φ): the 2047-step controlled-U ladder is one
-    kernel, and φ = 3/8 is read exactly (analytic: all weight on one bin)."""
+def test_qpe_ladder_runs_as_one_controlled_powers_kernel(n_shots, n_ancilla):
+    """P(2π·φ) from |1⟩: the controlled-U ladder is one kernel of a structured
+    run, below and above the planner's register minimum, and φ = 3/8 is read
+    exactly (analytic: all weight on one bin)."""
     import qarp
 
     shots = qarp.EXACT if n_shots == "exact" else n_shots
     qpe = QPE(
         state=ComputationalBasisStateBlock([1]),
         unitary=_phase_u(),
-        n_ancilla=11,
+        n_ancilla=n_ancilla,
         engine=QarpEngine(seed=0, n_shots=shots),
     ).build()
-    assert "controlled_powers" in _programs(qpe)[0].kinds()
+    assert _structured_kinds(qpe).count("controlled_powers") == 1
     assert qpe.run() == pytest.approx(0.375, abs=1e-12)
     assert qpe.result_probability == pytest.approx(1.0, abs=1e-10)
+
+
+def test_qpe_at_twenty_ancillas_builds_without_its_ladder():
+    """2^20 − 1 applications of U would take minutes to build as gates; the
+    structured run never builds them and reads φ = 3/8 exactly (analytic)."""
+    import qarp
+
+    qpe = QPE(
+        state=ComputationalBasisStateBlock([1]),
+        unitary=_phase_u(),
+        n_ancilla=20,
+        engine=QarpEngine(n_shots=qarp.EXACT),
+    ).build()
+    assert qpe.block is None
+    assert qpe.run() == pytest.approx(0.375, abs=1e-12)
+    assert qpe.result_probability == pytest.approx(1.0, abs=1e-8)
+
+
+@pytest.mark.parametrize("refusal", ["powers cap", "structured off"])
+def test_qpe_builds_the_block_when_the_structured_run_is_refused(monkeypatch, refusal):
+    from qarp import _program
+
+    if refusal == "powers cap":
+        monkeypatch.setattr(_program, "K_POWERS", 0)
+        engine = QarpEngine(n_shots=500, seed=0)
+    else:
+        engine = QarpEngine(n_shots=500, seed=0, structured=False)
+    qpe = QPE(
+        state=ComputationalBasisStateBlock([1]), unitary=_phase_u(), n_ancilla=3, engine=engine
+    ).build()
+    assert _block_path(qpe)
+    assert qpe.run() == pytest.approx(0.375, abs=1e-12)
 
 
 def test_qpe_primitive_exact_readout_recovers_the_phase():
@@ -134,7 +179,7 @@ def test_qpe_noisy_engine_keeps_the_gate_path():
         n_ancilla=11,
         engine=QarpEngine(n_qubits=12, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
-    assert _programs(qpe) == [None]
+    assert _block_path(qpe) and _programs(qpe) == [None]
     qpe.run()
     assert sum(qpe.distribution.values()) == pytest.approx(1.0)
 
@@ -149,6 +194,9 @@ def test_qpe_parametric_unitary_is_not_a_controlled_powers_kernel(monkeypatch):
     u = SimpleBlock(1, name="U")
     u.p(0, Symbol("theta"))
     u.build()
+    qpe = QPE(state=ComputationalBasisStateBlock([1]), unitary=u, n_ancilla=3, engine=QarpEngine())
+    qpe.build()
+    assert _block_path(qpe)
     block = QPEBlock(ComputationalBasisStateBlock([1]), u, 3, 1).build()
     plan = _program.plan(block, block.n_qubits)
     assert plan is None or "controlled_powers" not in plan.kinds()
@@ -169,7 +217,7 @@ def test_qpe_routed_engine_keeps_the_gate_path():
     )
     qpe.primitive.n_shots = 100
     qpe.build()
-    assert _programs(qpe) == [None]
+    assert _block_path(qpe) and _programs(qpe) == [None]
 
 
 def test_qpe_seeded_primitive_reads_the_seeded_eigenstate():
@@ -186,7 +234,7 @@ def test_qpe_seeded_primitive_reads_the_seeded_eigenstate():
         primitive=Sampler(n_shots=500, initial_state=psi),
         engine=QarpEngine(seed=0),
     ).build()
-    assert "controlled_powers" in _programs(qpe)[0].kinds()
+    assert "controlled_powers" in _structured_kinds(qpe)
     assert qpe.run() == pytest.approx(phi)
 
 
@@ -314,8 +362,8 @@ def test_qpe_with_synthesized_unitary_recovers_eigenphase():
 
 
 def test_qpe_ladder_kernel_is_phase_exact_over_a_synthesized_unitary():
-    """The same pin through the controlled-powers kernel: ten ancillas put the
-    ladder on twelve qubits, and U's global phase sits under every control."""
+    """The same pin through the controlled-powers kernel of a structured run:
+    U's global phase sits under every control."""
     import qarp
     from qarp.blocks import SynthesizedStateBlock, SynthesizedUnitaryBlock
 
@@ -333,7 +381,7 @@ def test_qpe_ladder_kernel_is_phase_exact_over_a_synthesized_unitary():
         n_ancilla=10,
         engine=QarpEngine(n_shots=qarp.EXACT),
     ).build()
-    assert "controlled_powers" in _programs(qpe)[0].kinds()
+    assert "controlled_powers" in _structured_kinds(qpe)
     assert qpe.run() == pytest.approx(307 / 1024, abs=1e-12)
     assert qpe.result_probability == pytest.approx(1.0, abs=1e-8)
 

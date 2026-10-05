@@ -178,6 +178,26 @@ TEST(ProgramKernels, ControlledPowersApplyEachExponentUnderItsControl) {
     EXPECT_LT(max_diff(QarpSimulator().program_statevector(p, n, psi), expected), 1e-10);
 }
 
+TEST(ProgramKernels, ControlledPowersShareSquaresAcrossExponents) {
+    // Powers of two, sums of them, a repeat and a zero: every control must
+    // apply exactly its own power.
+    const int n = 10;
+    const auto psi = random_state(n, 30);
+    const std::vector<uint32_t> targets = {7, 2};
+    const std::vector<uint32_t> controls = {0, 1, 3, 4, 5, 6, 8, 9};
+    const std::vector<uint64_t> exponents = {1, 8, 6, 0, 13, 6, 4, 2};
+    const Mat V = random_unitary(2, 31);
+    Program p;
+    p.add_controlled_powers(controls, exponents, targets, V);
+    auto expected = psi;
+    for (std::size_t j = 0; j < controls.size(); ++j) {
+        Mat power = Mat::Identity(4, 4);
+        for (uint64_t i = 0; i < exponents[j]; ++i) power = power * V;
+        expected = applied(expected, power, targets, uint64_t{1} << controls[j]);
+    }
+    EXPECT_LT(max_diff(QarpSimulator().program_statevector(p, n, psi), expected), 1e-10);
+}
+
 TEST(ProgramKernels, InvalidKernelsAreRejectedOnInsertion) {
     Program p;
     EXPECT_THROW(p.add_permutation({0, 1}, {0, 0, 1, 2}), std::invalid_argument);

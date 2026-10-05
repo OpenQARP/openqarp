@@ -9,19 +9,21 @@
 **Green-lit:** e7caac0 (2026-09-28), plan blob 3b5881309fee6fff3dfcd6dad65ad76e71b3b95c
 **Scope:**
 - `qarp/_program.py` (new: kernel descriptors, the planner, the per-block cache)
-- `qarp/engines/_engine.py`, `qarp/engines/_qarp_engine.py` (exact and sampled paths run the program; `StructuredQPEPlan` and `prepare_structured_qpe` removed)
+- `qarp/_structure.py` (new: the `Repeat` record), `qarp/blocks/__init__.py` (exports it)
+- `qarp/engines/_engine.py`, `qarp/engines/_qarp_engine.py` (exact and sampled paths run the program; `StructuredQPEPlan` and `prepare_structured_qpe` removed; `prepare_structured` and `StructuredRun`)
 - `qarp/engines/_cudaq_engine.py` (the `_dispatch_one` signature only)
-- `qarp/blocks/_block.py` (`classical_action` protocol, `Block.statevector` runs the program)
+- `qarp/blocks/_block.py` (`classical_action` and `structure` protocols, `Block.statevector` runs the program)
 - `qarp/blocks/_primitives/modular_multiplication_block.py` (declares its action)
-- `qarp/algorithms/_composite/qpe.py`, `qarp/algorithms/_composite/dos_qpe.py` (drop the structured-plan branch)
+- `qarp/blocks/_primitives/qpe_block.py`, `qarp/blocks/_primitives/dos_qpe_block.py` (declare their structure; children built from it)
+- `qarp/algorithms/_composite/qpe.py`, `qarp/algorithms/_composite/dos_qpe.py` (ask the engine for a structured run before building the block)
 - `qarp/errors.py` (docstring of the removed structured-plan refusal)
 - `qarp/_abi.py`, `cpp/libqarpx/python/bindings.cpp` (program binding, ABI 11 → 12; `simulate_{qpe,dosqpe}_structured` bindings removed)
 - `cpp/libqarpx/include/qarpx/simulator/program.h`, `cpp/libqarpx/src/simulator/program.cpp` (new: program executor and kernels)
 - `cpp/libqarpx/include/qarpx/simulator/qarp_simulator.h`, `cpp/libqarpx/src/simulator/qarp_simulator.cpp` (structured QPE entry points removed; their squaring/matvec code moves to `program.cpp`)
 - `cpp/libqarpx/CMakeLists.txt`, `cpp/libqarpx/tests/cpp/CMakeLists.txt`, `cpp/libqarpx/tests/cpp/test_program_kernels.cpp` (new)
-- `tests/test_engines/test_structured_execution.py` (new), `tests/test_blocks/test_classical_action.py` (new)
-- `tests/test_algorithms/test_composite/test_qpe.py`, `tests/test_algorithms/test_composite/test_dos_qpe.py` (eligibility tests rewritten for the planner)
-- `docs/contracts/qarp_conventions.md` (§14: new *Structured execution* bullet; §13: `classical_action`)
+- `tests/test_engines/test_structured_execution.py` (new), `tests/test_blocks/test_classical_action.py` (new), `tests/test_blocks/test_structure.py` (new)
+- `tests/test_algorithms/test_composite/test_qpe.py`, `tests/test_algorithms/test_composite/test_dos_qpe.py` (eligibility tests rewritten for the planner and the structured run)
+- `docs/contracts/qarp_conventions.md` (§14: new *Structured execution* bullet; §13: `classical_action`, `structure`)
 - `docs/source/errors.rst` (removed structured-plan row), `docs/source/configuration.rst` (the knob)
 - `examples/engines/mwe_structured_execution.ipynb` (new)
 - `docs/contributions/README.md` (index row)
@@ -77,8 +79,13 @@ lowering inside the simulator path, never visible in the IR.
   node, top-down, in this order:
   1. a declared `classical_action(indices)` (public protocol, §13 edit below) →
      `Permutation`;
-  2. a `ControlledBlock` whose inner is a permutation → that permutation lifted by §6.1;
-  3. the span's permutation table: classical gates (`X, CX, CCX, SWAP, CSWAP`, `MCZ` inside
+  2. a declared `structure()` (public protocol, §13 edit below): its parts are planned in
+     order in place of the node's own span and children — a block part recursively, a
+     `Repeat(block, count)` as `count` applications, joining the run of step 6 when the block
+     is a single-controlled `C-U`.  A declaration whose parts do not add up to the node's span
+     is ignored;
+  3. a `ControlledBlock` whose inner is a permutation → that permutation lifted by §6.1;
+  4. the span's permutation table: classical gates (`X, CX, CCX, SWAP, CSWAP`, `MCZ` inside
      the `H·MCZ·H` that `mcx` emits) evaluated on integers at any width; otherwise exact
      derivation by restriction — the qubits no command couples (only ever controls, phase
      partners, or moved by classical gates among themselves) are fixed per assignment and
@@ -86,14 +93,29 @@ lowering inside the simulator path, never visible in the IR.
      value, and the rest (at most `k_derive` qubits) is simulated for all its columns at once;
      accepted iff every column is a basis state with amplitude 1, both within `1e-10`
      (phase included, EQ-2), cached by the span's local-frame digest;
-  4. a `Dense` kernel for a span of at most `k_dense` touched qubits, cached the same way;
-  5. otherwise its children, where a run of the same single-controlled `C-U` (same `U`, same
+  5. a `Dense` kernel for a span of at most `k_dense` touched qubits, cached the same way;
+  6. otherwise its children, where a run of the same single-controlled `C-U` (same `U`, same
      targets) becomes one `ControlledPowers` kernel with one exponent per control; a leaf with
      nothing better is `Gates`.
   Adjacent permutations compose into one table inside `qx.Program.add_permutation`.
+- **Declared structure, read before the block is built.**  `structure()` returns the block as
+  a sequence of parts, each a block placed in the declaring block's frame or a
+  `Repeat(block, count)`, and works on an unbuilt block: it builds only its parts (for
+  `QPEBlock`, one controlled-`U` per ancilla).  The planner turns the parts into a program
+  without the declaring block's gate stream: plain parts are flattened and planned as above,
+  a run of `Repeat`s over the same `C-U` is one `ControlledPowers` kernel.  It refuses, and the
+  caller builds the block, when a `Repeat` is not such a ladder step (a parametric,
+  multi-controlled or wider-than-12-qubit `U`, a control on |0⟩), when any part is parametric,
+  when a part other than the last records a measurement, or when the declaring block is
+  itself placed on a non-identity `target_qubits`.  No register minimum applies:
+  the kernel replaces a ladder that is never built.  `QPEBlock` and `DOSQPEBlock` declare
+  theirs and build their children from the same declaration, so the gate stream cannot drift
+  from it.
 - **Cost model.**  Registers under 12 qubits and spans of fewer than three gates keep the gate
   path; derivation work may exceed one gate-path application of its span by `2^3` (a derived
-  table is reused across repeats and steps); a dense kernel needs `2·gates ≥ 2^k`; a
+  table is reused across repeats and steps); a dense kernel needs `2·gates ≥ 2^k` and a span
+  no narrower than the fusion width in force (§14 *Simulation fusion*: a narrower span merges
+  with its neighbours on the gate path, and a kernel would fence it off); a
   controlled-powers kernel needs its run's gates to exceed one `2^m` pass per control plus
   building `U`.  A program with no structured kernel is never built, so that circuit runs the
   unchanged gate path bit for bit (the no-structure invariant).
@@ -103,13 +125,23 @@ lowering inside the simulator path, never visible in the IR.
   falls back to the gate path, never raises, and is re-checked per run (§14 *Capability checks
   re-validate at run time*).
 - **The old QPE fast path is removed (hard break, no shim).**  `Engine.prepare_structured_qpe`,
-  `StructuredQPEPlan` and the `simulate_{qpe,dosqpe}_structured` bindings go; `QPE`/`DOSQPE` run
-  the ordinary engine path and the planner finds `ControlledPowers` in their blocks.  As a result
-  `EXACT` readout, `initial_state` and seeded primitives stop falling back; noise and routing
-  still fall back to gates.
-- **Trust.**  Declared `classical_action` is trusted at run time; a contract
+  `StructuredQPEPlan` and the `simulate_{qpe,dosqpe}_structured` bindings go.  In their place
+  `QPE`/`DOSQPE` hand the engine their block before building it:
+  `Engine.prepare_structured(block, primitive)` returns a `StructuredRun` when the engine can
+  run the block's declared structure (`QarpEngine`: structured on, no device, a `COUNTS`
+  primitive, the planner accepts the parts), else `None` and the algorithm builds the block
+  and takes the ordinary engine path, where the planner finds the ladder after build.  The
+  hook knows no algorithm and no block class.  `StructuredRun.sample()` resolves shots per
+  call and runs the program through `program_run` or the `EXACT` evaluation, so `EXACT`
+  readout, `initial_state` and seeded primitives are served on both paths; noise and routing
+  fall back to gates.
+- **Trust.**  Declared `classical_action` and `structure` are trusted at run time; a contract
   test checks every declaring class against `unitary_matrix()` on small instances, with a
-  completeness guard like the §17 FACTORIES table.
+  completeness guard like the §17 FACTORIES table.  A `classical_action` is trusted for the
+  gates the block was built with: the block digests its own commands at `build()`, and the
+  planner derives the span instead when its local-frame digest differs (a declared block
+  edited after build).  A `structure` needs no such guard — a built composite cannot be
+  edited, and parts that do not add up to the span are ignored.
 - **Knob.**  `QarpEngine(structured=True)` and the process default `QARP_STRUCTURED` (read once,
   like `QARP_FUSION_MAX_QUBITS`); `False` restores today's path exactly.
 
@@ -118,7 +150,10 @@ lowering inside the simulator path, never visible in the IR.
   planner order, where it runs and does not, EQ-2 exactness, and the no-structure invariant; the
   structured-QPE wording is removed.
 - §13: `classical_action` is the declared permutation protocol; a declaration must be exact
-  including phase, since a block declaring it can sit under `ControlledBlock`.
+  including phase, since a block declaring it can sit under `ControlledBlock`.  `structure` is
+  the declared composition protocol: the parts in order are the block's gate stream.
+- §14: the *Structured execution* bullet also states the planner's use of `structure()` and
+  `Engine.prepare_structured`, which lowers a declared structure before the block is built.
 
 **Sit-down decisions (resolving the open items):**
 - Thresholds: `k_derive = 10`, `k_dense = 8` (the `apply_dense_block` cap), full-register
@@ -131,6 +166,12 @@ lowering inside the simulator path, never visible in the IR.
   evaluation; `batch_run`'s C++ sampled sweep and amplitude-consuming primitives keep the gate
   path.  Measurements are allowed only in a program's last `Gates` kernel, and only when
   terminal there; anything else keeps the gate path.
+- QPE and DOS-QPE build time: the ladder is not built when the engine can run the block's
+  declared structure.  The declaration lives on the block (`structure()`), the engine hook is
+  generic (`prepare_structured`), and the same declaration serves the planner when the block
+  is built and used directly.
+- Names: `Block.structure()`, `qarp.blocks.Repeat`, `Engine.prepare_structured(block,
+  primitive)`, `StructuredRun.sample()`; an algorithm on that path has `block is None`.
 
 ## API sketch
 
@@ -143,7 +184,26 @@ def classical_action(self, indices: np.ndarray) -> np.ndarray | None:
     """
     return None
 
+def structure(self) -> list[AnyBlock | Repeat] | None:
+    """This block as a sequence of parts, or None.  Works before build().
+
+    Declaring it promises the parts in order are the block's gate stream.
+    """
+    return None
+
 def statevector(self, initial_state=None, *, structured: bool | None = None) -> np.ndarray: ...
+
+# qarp/_structure.py, exported as qarp.blocks.Repeat
+@dataclass(frozen=True)
+class Repeat:
+    block: AnyBlock              # placed in the declaring block's frame
+    count: int                   # applications in sequence, >= 1
+
+# qarp/blocks/_primitives/qpe_block.py (DOSQPEBlock alike, with its CNOT layer)
+def structure(self):
+    return [hadamards, state_prep,
+            *(Repeat(controlled_u_on(a), 2**i) for i, a in enumerate(ancillas)),
+            inverse_qft, *([readout] if self.measure_at_end else [])]
 
 # qarp/_program.py (private; imported by blocks and engines alike)
 @dataclass(frozen=True)
@@ -168,16 +228,35 @@ class ControlledPowers:
     targets: tuple[int, ...]
     matrix: np.ndarray
 
-def plan(block, n_qubits: int, commands: list | None = None) -> Plan | None: ...
-def cached_program(block, commands: list, n_qubits: int) -> qx.Program | None: ...
+def fusion_width_of(sim, n_qubits: int) -> int: ...   # widest block sim's fusion builds at this width
+def plan(block, n_qubits: int, commands: list | None = None, *,
+         fusion_width: int | None = None) -> Plan | None: ...          # None -> the process default
+def cached_program(block, commands: list, n_qubits: int, fusion_width: int) -> qx.Program | None: ...
+def plan_structure(block, n_qubits: int, *,
+                   fusion_width: int | None = None) -> Plan | None: ...  # from block.structure(), block unbuilt
 
 # qarp/engines/_engine.py — template hooks
 def _plan_one(self, prim, blk, flat) -> qx.Program | None: ...           # base: None
 def _dispatch_one(self, prim, substituted, l2p_list, ordinal, params): ...
 
+# qarp/engines/_engine.py — public
+def prepare_structured(self, block, primitive) -> StructuredRun | None: ...   # base: None
+
+class StructuredRun:
+    def sample(self) -> SamplingDistribution: ...   # shots, EXACT, initial_state, measured_qubits from the primitive
+
 # qarp/engines/_qarp_engine.py
 class QarpEngine(Engine):
     def __init__(self, ..., structured: bool | None = None): ...   # None -> QARP_STRUCTURED
+    def prepare_structured(self, block, primitive): ...            # None with a device, structured off, or a refused plan
+
+# qarp/algorithms/_composite/qpe.py (dos_qpe.py alike)
+def build(self):
+    block = QPEBlock(self.state, self.unitary, self.n_ancilla, self.unitary.n_qubits)
+    self._structured_run = self.engine.prepare_structured(block, self.primitive)
+    if self._structured_run is None:
+        self.block = block.build()
+        self.engine.build([self.primitive])
 
 # removed: Engine.prepare_structured_qpe, StructuredQPEPlan
 ```
@@ -218,7 +297,7 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 |---|---|---|
 | Gather kernel moves every amplitude to its table image: a qubit subset and the whole register, below and above the 16-qubit OpenMP threshold; adjacent tables compose | explicit index arithmetic (C++), numpy indexing (bindings) | `cpp/libqarpx/tests/cpp/test_program_kernels.cpp`, `tests/test_engines/test_structured_execution.py` |
 | `Dense` kernel on a non-contiguous qubit subset, below and above the threshold | matrix products on gathered sub-vectors | same |
-| `ControlledPowers` applies `U^(e_j)` under control `j`, below and above the threshold | repeated matrix products / `numpy.linalg.matrix_power` on gathered sub-vectors | same |
+| `ControlledPowers` applies `U^(e_j)` under control `j`, below and above the threshold; exponents sharing squares, a repeat and a zero | repeated matrix products / `numpy.linalg.matrix_power` on gathered sub-vectors | same |
 | Invalid kernels are refused on insertion and at the binding; a kernel past the register is refused | the refusal is the assertion | same |
 | Classical gates and the `mcx` pattern give their permutation; the pattern needs its closing `H` on the target | `reference_unitary()` (analytic gate definitions, no csim code); analytic bit maps | `cpp/libqarpx/tests/cpp/test_program_kernels.cpp`, `tests/test_blocks/test_classical_action.py` |
 | Derivation by restriction: QFT adders, controlled adders, `MCZ` under fixed controls, fixed qubits tracked through classical gates, a classical gate driven by a changing qubit, `GPhase`, and 200 random circuits give exactly their permutation, or nothing when the reference is not one | `reference_unitary()` | `cpp/libqarpx/tests/cpp/test_program_kernels.cpp` |
@@ -227,6 +306,7 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | `ModularMultiplicationBlock.classical_action` is `x → a·x mod N` (identity for `x ≥ N`) | analytic | `tests/test_blocks/test_classical_action.py` |
 | Every class declaring `classical_action` matches its unitary on small instances; the completeness guard fails on an unregistered one | `unitary_matrix()` (§14 oracle path) | same |
 | `ControlledBlock`, dagger (also of a declared block) and `** k` compose permutations | analytic `σ` composition, `σ⁻¹` and `σ^k` | same |
+| A declared block edited after build is planned from its gates, alone and under a control | `unitary_matrix() @ ψ` | same |
 | Placement: a declared child under its parent, two placed composite levels, a controlled permutation with a placed inner block (derived and declared) | `unitary_matrix() @ ψ` | `tests/test_blocks/test_classical_action.py`, `tests/test_engines/test_structured_execution.py` |
 | Program statevector on a tree mixing permutation and dense kernels | `unitary_matrix() @ ψ` | `tests/test_engines/test_structured_execution.py` |
 | Ladders: asymmetric 3-qubit `U` with a global phase, scrambled targets, interleaved controls, a placed inner block, two target orders, control on 0 | `unitary_matrix() @ ψ` | same |
@@ -235,9 +315,22 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | Engine: sampled and `EXACT` readout, parameters bound into gates kernels, `batch_run` `EXACT` sweeps with and without rebuild | analytic images; Born probabilities from `unitary_matrix()` | same |
 | Gradients through a planned circuit (parameter shift, finite differences) | analytic `−sin φ` | same |
 | A device, an amplitude primitive, `unitary_matrix` and the adjoint gradient keep the gate path; a measurement that is not terminal keeps it | the refusal is the assertion | same |
-| QPE on `P(2πφ)` returns `φ` with sampled and `EXACT` readout and with `initial_state`, its ladder one `ControlledPowers` kernel; the same over a synthesized 2-qubit `U` | analytic eigenphase | `tests/test_algorithms/test_composite/test_qpe.py` |
+| A span holding an unrecorded measurement stays gates and the rest is planned | `unitary_matrix() @ ψ` of the tree without the measurement | same |
+| A reset or a classical condition after a permutation keeps the gate path, in the planner and the engine | the refusal is the assertion | same |
+| A ladder too short to pay for its kernel stays gates (three controlled phases on three controls), seven become one kernel | analytic program shape; `unitary_matrix() @ ψ` | same |
+| Order finding of `a = 2 mod 15` through permutation kernels: the counting marginal is `1/4` at `0, 64, 128, 192` | analytic (order 4 divides `2^8`) | same |
+| The fusion width in force: `fusion_max_qubits` from `fusion_min_qubits` qubits, the single-qubit pass below, none when off | the §14 *Simulation fusion* rule | same |
+| A dense kernel narrower than the fusion width stays gates: 2-qubit terms at width 3 plan nothing and run bit-identically to `structured=False`, plan dense at width 2; 3-qubit sites stay dense | analytic program shape; the unchanged path | same |
+| QPE on `P(2πφ)` returns `φ` with sampled and `EXACT` readout and with `initial_state`, below and above 12 qubits, through a structured run (`block is None`, one `ControlledPowers` kernel); the same over a synthesized 2-qubit `U` | analytic eigenphase | `tests/test_algorithms/test_composite/test_qpe.py` |
+| QPE at 20 ancillas builds without its ladder and reads `φ` | analytic eigenphase | same |
+| A device, noise, a parametric `U`, a `U` past the powers cap and `structured=False` build the block; the built block still plans its ladder as one kernel | the refusal is the assertion; analytic eigenphase | same |
 | QPE built noise-free runs noisy once noise is enabled | analytic noiseless probability 1 | same |
-| DOS-QPE spectral density of `P(2π·3/8)` over the mixed probe | analytic eigenvalue histogram | `tests/test_algorithms/test_composite/test_dos_qpe.py` |
+| DOS-QPE spectral density of `P(2π·3/8)` over the mixed probe, sampled and `EXACT`, through a structured run | analytic eigenvalue histogram | `tests/test_algorithms/test_composite/test_dos_qpe.py` |
+| Every class declaring `structure` — unbuilt, lowered by `plan_structure` — matches its unitary on small instances, and the block stays unbuilt; the completeness guard fails on an unregistered one | `unitary_matrix()` (§14 oracle path) | `tests/test_blocks/test_structure.py` |
+| The parts of a declared structure, expanded, are the built block's gate stream | the block's own `flatten()` (contract check, not the oracle) | same |
+| A built declaring block plans from its declaration, with the same kernels as the unbuilt one and no ladder detection; a declaration whose parts do not add up to the gate stream is ignored | analytic program shape; `unitary_matrix() @ ψ` | same |
+| `Repeat` refuses a count below one; a `Repeat` that is not a ladder step, a parametric part and an early measurement refuse the unbuilt plan | the refusal is the assertion | same |
+| The base `Engine` and an engine with a device offer no structured run | the refusal is the assertion | `tests/test_engines/test_structured_execution.py` |
 | Collision: permutations plus per-site dense blocks sharing one matrix | `unitary_matrix() @ ψ` | `tests/test_engines/test_structured_execution.py` |
 
 ## Phases
@@ -268,6 +361,14 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 - [x] Per-site `Dense` kernels between permutation segments (repeated identical blocks share one cached matrix) *(2026-09-28)*
 - [x] `examples/engines/mwe_structured_execution.ipynb`: a permutation-heavy block, a declared action and QPE, gate path vs program *(2026-09-28)*
 
+### Phase 5 — Declared structure and the structured run
+
+- [x] §13/§14 convention edits for `structure` and `prepare_structured` *(2026-10-05)*
+- [x] `Repeat`; `structure` protocol on blocks; `QPEBlock` and `DOSQPEBlock` declare it and build their children from it (one shared controlled-`U` per ancilla) *(2026-10-05)*
+- [x] Planner: a built block's declaration replaces its span and children; `plan_structure` lowers an unbuilt block's declaration *(2026-10-05)*
+- [x] `Engine.prepare_structured`, `StructuredRun`; `QPE` and `DOSQPE` ask for it before building the block *(2026-10-05)*
+- [x] Tests for the structure rows; the notebook's QPE section shows the declaration *(2026-10-05)*
+
 ## Deviations log
 
 - Any configured `Device` keeps the gate path, not only a routed one (sit-down decision; the
@@ -280,8 +381,8 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   work bound is `2^(n+3)` times the span's gates (user decision after the first qlbm
   measurement, where adders touching 11–17 qubits never derived).
 - `ControlledPowers` takes one exponent per control, and runs of the same single-controlled
-  block are detected generically; the private `_structure()` hook, and `QPEBlock` /
-  `DOSQPEBlock` changes, are dropped (user decision).
+  block are detected generically, so a tree that declares nothing still has its ladder found
+  (user decision).
 - A `ControlledBlock` whose inner is a permutation is lifted by §6.1 as its own source (the
   green-lit text folded it into recursion).
 - Adjacent permutations compose inside `qx.Program.add_permutation` rather than in the planner;
@@ -300,6 +401,36 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   uses it, and blocks do not import engines.
 - Derivation accepts a column within `1e-10` of a basis state (the green-lit text said "equal
   to 1"); §14 states the tolerance.
+- A dense kernel is refused on a span narrower than the fusion width in force
+  (`fusion_max_qubits` on registers of at least `fusion_min_qubits` qubits, the single-qubit
+  pass below that): fusion merges such a span with its neighbours and a kernel fences it off.
+  Trotter steps of 2-qubit terms ran 15–55 % slower structured than fused at 16–24 qubits,
+  3-qubit terms tied (user decision after that measurement).  `plan` and `cached_program`
+  take the width; `plan`'s `None` reads the process default.
+- The removal of the QPE fast path as "hard break, no shim" is reversed in part.  Sending QPE
+  down the ordinary engine path built, flattened, transpiled and planned the whole ladder
+  before collapsing it: over a synthesized 3-qubit `U`, build went from under 1 ms to 0.36 s,
+  1.6 s and 6.4 s at 10, 12 and 14 ancillas, and registers under 12 qubits ran gate by gate.
+  `Engine.prepare_structured(block, primitive)` and `StructuredRun` restore a path that never
+  builds the ladder (0.5 ms at every ancilla count in a prototype of the same kernels).  The
+  hook is generic and the dedicated C++ entry points stay removed (user decision after that
+  measurement).
+- The green-lit private `_structure()` hook is the public `structure()` protocol with a
+  `Repeat` record, declared by `QPEBlock` and `DOSQPEBlock`.  It is read before build by
+  `plan_structure` and after build by the planner.  The green-lit hook was read after build
+  only, which saves the planner's share of the build (35–38 %) and nothing else (user
+  decision).
+- `QPEBlock` and `DOSQPEBlock` add one shared controlled-`U` child per ancilla, repeated,
+  instead of a new one per application; the gate stream is unchanged.
+- A `classical_action` declaration is trusted only for the gates the block was built with
+  (digest at `build()`, compared by the planner in the span's local frame): a declared
+  `SimpleBlock` can still be edited after build, and the review showed that gave wrong
+  amplitudes silently (user decision).
+- A built composite cannot be changed (`add_child` un-builds it), so the planned test of a
+  declaring block edited after build became a block whose declaration does not add up to its
+  gates; `QarpEngine.prepare_structured` validates the primitive as `build()` would, so a
+  capability error raises there instead of silently choosing the block path.
 - Known limits, not addressed here: a gather needs a second state buffer and tables up to the
   26-qubit cap are held by the planner and the program; the controlled-powers cost rule does
-  not count the matrix squarings.
+  not count the matrix squarings; a `QPEBlock` handed to a primitive directly still builds,
+  flattens and transpiles its ladder, which a lazy repeat block would remove.

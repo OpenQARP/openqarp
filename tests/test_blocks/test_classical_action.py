@@ -220,3 +220,28 @@ def test_a_daggered_declared_block_plans_to_the_inverse():
     block = ModularMultiplicationBlock(7, 15).build().dagger()
     expected = [13 * v % 15 if v < 15 else v for v in range(16)]
     np.testing.assert_array_equal(_only_permutation(block), expected)
+
+
+class _Rotations(SimpleBlock):
+    def build_vanilla(self):
+        for q in range(self.n_qubits):
+            self.ry(q, 0.1 + 0.2 * q)
+
+
+@pytest.mark.parametrize("under_control", [False, True])
+def test_a_declared_block_edited_after_build_is_planned_from_its_gates(under_control):
+    # The declaration is trusted for the gates the block was built with; a Z
+    # appended afterwards is not in it, so the planner must derive the span.
+    edited = ModularMultiplicationBlock(7, 15, target_qubits=[0, 1, 2, 3]).build()
+    edited.z(0)
+    if under_control:
+        edited = ControlledBlock(edited, num_controls=1, target_qubits=[9, 0, 1, 2, 3])
+    block = CompositeBlock([_Rotations(10), edited], n_qubits=10).build()
+    rng = np.random.default_rng(1)
+    psi = rng.standard_normal(1 << 10) + 1j * rng.standard_normal(1 << 10)
+    psi /= np.linalg.norm(psi)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(block.unitary_matrix()) @ psi,
+        atol=1e-12,
+    )

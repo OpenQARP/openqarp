@@ -546,9 +546,20 @@ above.
   `classical_action(indices)` to return the images of its local basis indices (int64, LSB)
   under its unitary.  The override promises `U|x⟩ = |f(x)⟩` exactly, global phase included —
   the block may sit under `ControlledBlock` — and structured execution (§14) trusts it at run
-  time.  Every overriding class is registered in `tests/test_blocks/test_classical_action.py`,
+  time for the gates the block was built with: a declaring block edited after `build()` is
+  planned from its gates.  Every overriding class is registered in `tests/test_blocks/test_classical_action.py`,
   whose completeness guard fails on an unregistered one, and is checked there against its
   `unitary_matrix()`.
+- **`structure` declares a composition.** A block may override `structure()` to return itself
+  as a sequence of parts — a block placed in the declaring block's frame by its own
+  `target_qubits`, or `qarp.blocks.Repeat(block, count)` — and must do so before `build()`,
+  building only the parts.  The override promises that the parts in order are the block's
+  gate stream; `QPEBlock` and `DOSQPEBlock` declare theirs and add their children from the
+  same list.  Structured execution (§14) lowers a declaration without the block's gate stream
+  and plans a built block from it in place of its children; a declaration whose parts do not
+  add up to the block's stream is ignored.  Every overriding class is registered in
+  `tests/test_blocks/test_structure.py`, whose completeness guard fails on an unregistered
+  one, and is checked there against its `unitary_matrix()`.
 
 ## 14. Engine, device & execution conventions
 
@@ -652,11 +663,15 @@ How circuits run.
   than its gates (`qarp/_program.py`, `simulator/program.cpp`).  Kernels:
   `Gates` (a verbatim slice of the gate stream, dispatched and fused as above),
   `Permutation` (`|x⟩ → |table[x]⟩` on listed qubits, one gather; adjacent ones compose
-  into one table up to 26 qubits), `Dense` (a block's unitary on at most 8 touched qubits)
+  into one table up to 26 qubits), `Dense` (a block's unitary on at most 8 touched qubits,
+  and no fewer than the fusion width in force — a narrower span merges with its neighbours
+  as fused gates, and a kernel would fence it off)
   and `ControlledPowers` (`U^e_j` on the targets under control `j`).  Every subtree owns a
   contiguous span of the gate stream, so remaps, pending ops and measurements match the gate
   path by construction.  Per node the planner tries, in order: a declared
-  `classical_action` (§13); a `ControlledBlock` whose inner is a permutation, lifted by §6.1;
+  `classical_action` (§13); a declared `structure()` (§13), whose parts are planned in order
+  in place of the node's span and children, a `Repeat` counting as that many applications;
+  a `ControlledBlock` whose inner is a permutation, lifted by §6.1;
   the span's permutation table — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
   that `mcx` emits) evaluated on integers at any width, otherwise derived by restriction: the
   qubits no command couples (controls, phase partners, or moved by classical gates among
@@ -675,7 +690,16 @@ How circuits run.
   `Block.statevector(structured=)`; `None` follows `QARP_STRUCTURED` (read once per
   process, default on; `0`/`false`/`off`/`no` turn it off).  A program samples through
   `run`'s own sample-once code, so a program whose final state equals the gate path's
-  draws the same shots for the same seed.
+  draws the same shots for the same seed.  A declared structure is also lowered **before
+  the block is built**: `Engine.prepare_structured(block, primitive)` returns a
+  `StructuredRun` (`sample()` resolves shots, `EXACT`, `initial_state` and
+  `measured_qubits` from the primitive per call) when the engine can run it — `QarpEngine`
+  with structured on, no device, a sampling primitive, every `Repeat` a ladder step of one
+  control on |1⟩ over a concrete `U` of at most 12 qubits, no parametric part, a recorded
+  measurement only in the last part — and None otherwise, with no register minimum.  The
+  hook knows no algorithm and no block class.  `QPE` and `DOSQPE` offer their block this way
+  and build it only when refused, so their build cost no longer grows with the ancilla
+  count; on that path the algorithm's `block` is None.
 
 ## 15. Project & repository conventions
 

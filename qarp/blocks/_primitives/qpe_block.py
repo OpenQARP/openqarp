@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from ..._structure import Repeat
 from .._block import AnyBlock, CompositeBlockBase, ControlledBlock
 from .._primitives import QFTBlock
 from .hn_block import HnBlock
@@ -39,6 +40,7 @@ class QPEBlock(CompositeBlockBase):
         self.n_ancilla = n_ancilla
         self.n_state = n_state
         self.measure_at_end = measure
+        self._parts: Optional[list] = None
 
         super().__init__(
             n_qubits=n_ancilla + n_state,
@@ -46,46 +48,48 @@ class QPEBlock(CompositeBlockBase):
             name=name,
         )
 
-    def build_vanilla(self) -> None:
-        # Build children: each `built` is a real qx.Block (Python wrapper).
+    def structure(self) -> list:
+        """Hadamards on the ancillas, the eigenstate preparation, for ancilla
+        ``i`` the controlled unitary repeated ``2**i`` times, the inverse QFT,
+        and the ancilla readout (§13).  Builds only its parts, once."""
+        if self._parts is not None:
+            return self._parts
         eigen_built = self.eigenstate.build()
         unit_built = self.unitary.build()
-
-        n_q = self.n_qubits  # n_ancilla + n_state
         ancilla_qubits = list(range(self.n_ancilla))
-        state_qubits = list(range(self.n_ancilla, n_q))
+        state_qubits = list(range(self.n_ancilla, self.n_qubits))
 
-        # 1) Hadamard layer on ancillas
-        self.add_wired_child(HnBlock(self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaH"))
-
-        # 2) Eigenstate prep on state register — remap onto state qubits.
+        parts: list = [
+            HnBlock(self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaH").build()
+        ]
         eigen_built.target_qubits = state_qubits
-        self.add_child(eigen_built)
-
-        # 3) Controlled-U^(2^i) ladder.  Ancilla i gets 2^i applications of
-        #    the controlled unitary → phase kickback 2^i·φ, so the ancilla
-        #    register encodes the phase as an integer (qubit 0 = LSB).
-        #    After the inverse QFT the raw outcome equals 2^n_ancilla · φ,
-        #    which qpe.py reads via ``int("".join(bitstring), 2)`` (MSB-first).
+        parts.append(eigen_built)
+        # Ancilla i gets 2^i applications of the controlled unitary → phase
+        # kickback 2^i·φ, so the ancilla register encodes the phase as an
+        # integer (qubit 0 = LSB).
         for i, ancilla_q in enumerate(ancilla_qubits):
-            for _ in range(2**i):
-                ctrl_u = ControlledBlock(
-                    unit_built,
-                    num_controls=1,
-                    ctrl_state=[True],
-                    name=f"C-U@a{ancilla_q}",
-                )
-                ctrl_u.build()
-                ctrl_u.target_qubits = [ancilla_q] + state_qubits
-                self.add_child(ctrl_u)
-
-        # 4) Inverse QFT on ancilla register
+            ctrl_u = ControlledBlock(
+                unit_built, num_controls=1, ctrl_state=[True], name=f"C-U@a{ancilla_q}"
+            )
+            ctrl_u.build()
+            ctrl_u.target_qubits = [ancilla_q] + state_qubits
+            parts.append(Repeat(ctrl_u, 2**i))
         iqft = QFTBlock(self.n_ancilla).dagger().build()
         iqft.target_qubits = ancilla_qubits
-        self.add_child(iqft)
-
-        # 5) Optional ancilla measurements — ancilla q reads into cbit q.
+        parts.append(iqft)
         if self.measure_at_end:
-            self.add_wired_child(
-                ReadoutBlock(self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaMeas")
+            parts.append(
+                ReadoutBlock(
+                    self.n_ancilla, target_qubits=ancilla_qubits, name="AncillaMeas"
+                ).build()
             )
+        self._parts = parts
+        return parts
+
+    def build_vanilla(self) -> None:
+        for part in self.structure():
+            if isinstance(part, Repeat):
+                for _ in range(part.count):
+                    self.add_child(part.block)
+            else:
+                self.add_child(part)
