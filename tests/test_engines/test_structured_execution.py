@@ -383,21 +383,24 @@ def _two_qubit_terms(n: int) -> CompositeBlock:
     return CompositeBlock([_Mix(2, target_qubits=[q, q + 1]) for q in range(n - 1)], n_qubits=n)
 
 
-def test_a_dense_kernel_narrower_than_the_fusion_width_stays_gates():
-    # Fusion merges neighbouring 2-qubit terms into 3-qubit blocks; a dense
-    # kernel per term would fence them off.
+def test_a_dense_kernel_no_wider_than_the_fusion_width_stays_gates():
+    # Fusion covers a span of its own width or less, merging it with its
+    # neighbours and with its repeats; a dense kernel would fence it off.
     n = 12
     terms = _two_qubit_terms(n).build()
     assert _program.plan(terms, n, fusion_width=3) is None
-    assert set(_program.plan(terms, n, fusion_width=2).kinds()) == {"dense"}
+    assert _program.plan(terms, n, fusion_width=2) is None
+    assert set(_program.plan(terms, n, fusion_width=1).kinds()) == {"dense"}
     sites = CompositeBlock(
-        [_Collide(3, target_qubits=[q, q + 1, q + 2]) for q in range(0, n, 3)], n_qubits=n
+        [_Collide(3, target_qubits=[q, q + 1, q + 2]) for q in range(0, n, 3)] * 5, n_qubits=n
     ).build()
-    assert _program.plan(sites, n, fusion_width=3).kinds() == ["dense"] * 4
+    assert _program.plan(sites, n, fusion_width=3) is None
+    assert _program.plan(sites, n, fusion_width=2).kinds() == ["dense"] * 20
     psi = _random_state(n, 9)
-    np.testing.assert_array_equal(
-        terms.statevector(psi, structured=True), terms.statevector(psi, structured=False)
-    )
+    for block in (terms, sites):
+        np.testing.assert_array_equal(
+            block.statevector(psi, structured=True), block.statevector(psi, structured=False)
+        )
 
 
 def test_the_engine_plans_at_its_simulator_fusion_width():
@@ -406,7 +409,7 @@ def test_the_engine_plans_at_its_simulator_fusion_width():
     sampler = Sampler(_two_qubit_terms(n), n_shots=qarp.EXACT)
     engine.build([sampler])
     assert _programs(engine, sampler) == [None]
-    engine._sim.fusion_max_qubits = 2
+    engine._sim.fusion_max_qubits = 1
     engine.build([sampler])
     assert set(_programs(engine, sampler)[0].kinds()) == {"dense"}
 

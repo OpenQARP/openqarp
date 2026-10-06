@@ -114,8 +114,9 @@ lowering inside the simulator path, never visible in the IR.
 - **Cost model.**  Registers under 12 qubits and spans of fewer than three gates keep the gate
   path; derivation work may exceed one gate-path application of its span by `2^3` (a derived
   table is reused across repeats and steps); a dense kernel needs `2·gates ≥ 2^k` and a span
-  no narrower than the fusion width in force (§14 *Simulation fusion*: a narrower span merges
-  with its neighbours on the gate path, and a kernel would fence it off); a
+  wider than the fusion width in force (§14 *Simulation fusion*: a span fusion can cover
+  merges with its neighbours and with its own repeats on the gate path, and a kernel would
+  fence it off); a
   controlled-powers kernel needs its run's gates to exceed one `2^m` pass per control plus
   building `U`.  A program with no structured kernel is never built, so that circuit runs the
   unchanged gate path bit for bit (the no-structure invariant).
@@ -320,7 +321,7 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | A ladder too short to pay for its kernel stays gates (three controlled phases on three controls), seven become one kernel | analytic program shape; `unitary_matrix() @ ψ` | same |
 | Order finding of `a = 2 mod 15` through permutation kernels: the counting marginal is `1/4` at `0, 64, 128, 192` | analytic (order 4 divides `2^8`) | same |
 | The fusion width in force: `fusion_max_qubits` from `fusion_min_qubits` qubits, the single-qubit pass below, none when off | the §14 *Simulation fusion* rule | same |
-| A dense kernel narrower than the fusion width stays gates: 2-qubit terms at width 3 plan nothing and run bit-identically to `structured=False`, plan dense at width 2; 3-qubit sites stay dense | analytic program shape; the unchanged path | same |
+| A dense kernel no wider than the fusion width stays gates: 2-qubit terms plan nothing at widths 2 and 3 and dense at width 1; repeated 3-qubit sites plan nothing at width 3 and dense at width 2; both run bit-identically to `structured=False` at the default width | analytic program shape; the unchanged path | same |
 | QPE on `P(2πφ)` returns `φ` with sampled and `EXACT` readout and with `initial_state`, below and above 12 qubits, through a structured run (`block is None`, one `ControlledPowers` kernel); the same over a synthesized 2-qubit `U` | analytic eigenphase | `tests/test_algorithms/test_composite/test_qpe.py` |
 | QPE at 20 ancillas builds without its ladder and reads `φ` | analytic eigenphase | same |
 | A device, noise, a parametric `U`, a `U` past the powers cap and `structured=False` build the block; the built block still plans its ladder as one kernel | the refusal is the assertion; analytic eigenphase | same |
@@ -401,12 +402,14 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   uses it, and blocks do not import engines.
 - Derivation accepts a column within `1e-10` of a basis state (the green-lit text said "equal
   to 1"); §14 states the tolerance.
-- A dense kernel is refused on a span narrower than the fusion width in force
+- A dense kernel is refused on a span no wider than the fusion width in force
   (`fusion_max_qubits` on registers of at least `fusion_min_qubits` qubits, the single-qubit
-  pass below that): fusion merges such a span with its neighbours and a kernel fences it off.
-  Trotter steps of 2-qubit terms ran 15–55 % slower structured than fused at 16–24 qubits,
-  3-qubit terms tied (user decision after that measurement).  `plan` and `cached_program`
-  take the width; `plan`'s `None` reads the process default.
+  pass below that): fusion merges such a span with its neighbours and with its own repeats,
+  and a kernel fences it off.  Trotter steps of 2-qubit terms ran 15–55 % slower structured
+  than fused at 16–24 qubits; disjoint 3-qubit sites ran 2.5× slower at 5 layers and 5.8× at
+  20, while 4- to 6-qubit sites ran 1.3–2.2× faster at every layer count (user decisions
+  after those measurements).  `plan` and `cached_program` take the width; `plan`'s `None`
+  reads the process default.
 - The removal of the QPE fast path as "hard break, no shim" is reversed in part.  Sending QPE
   down the ordinary engine path built, flattened, transpiled and planned the whole ladder
   before collapsing it: over a synthesized 3-qubit `U`, build went from under 1 ms to 0.36 s,

@@ -664,8 +664,8 @@ How circuits run.
   `Gates` (a verbatim slice of the gate stream, dispatched and fused as above),
   `Permutation` (`|x⟩ → |table[x]⟩` on listed qubits, one gather; adjacent ones compose
   into one table up to 26 qubits), `Dense` (a block's unitary on at most 8 touched qubits,
-  and no fewer than the fusion width in force — a narrower span merges with its neighbours
-  as fused gates, and a kernel would fence it off)
+  and more than the fusion width in force — fusion covers any other span itself, merging it
+  with its neighbours and its own repeats, and a kernel would fence it off)
   and `ControlledPowers` (`U^e_j` on the targets under control `j`).  Every subtree owns a
   contiguous span of the gate stream, so remaps, pending ops and measurements match the gate
   path by construction.  Per node the planner tries, in order: a declared

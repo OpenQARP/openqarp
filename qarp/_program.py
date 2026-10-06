@@ -285,9 +285,10 @@ class _Planner:
         return None if table is None else Permutation(tuple(touched), table)
 
     def _dense(self, span: list, touched: list[int], n_gates: int) -> Optional[Dense]:
-        # A span narrower than the fusion width merges with its neighbours on
-        # the gate path; a kernel would fence it off.
-        if not touched or len(touched) > K_DENSE or len(touched) < self.fusion_width:
+        # Fusion covers a span of its own width or less, merging it with its
+        # neighbours and its repeats on the gate path; a kernel would fence
+        # it off.
+        if not touched or len(touched) > K_DENSE or len(touched) <= self.fusion_width:
             return None
         # One 2^k-wide pass costs ~2^k multiply-adds per amplitude.
         if 2 * n_gates < (1 << len(touched)):
