@@ -970,13 +970,22 @@ class _BlockMixin:
                 ``False`` runs the gate stream as-is.  ``None`` follows
                 ``QARP_STRUCTURED`` (default on).
         """
-        cmds = self._simulable_commands("statevector")
         _blas_threads.install()
         psi = None
         if initial_state is not None:
             psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
         sim = qx.QarpSimulator()
-        if _program.resolve(structured):
+        run_structured = _program.resolve(structured)
+        if run_structured and self._built and not _program._has_pending_ops(self):
+            # The cached program is checked by a C++ digest of the stream: a
+            # hit never materialises the commands in Python.  Pending ops are
+            # applied by the Python flatten() only, so they take the full path.
+            width = _program.fusion_width_of(sim, self.n_qubits)
+            hit = _program.cached_lookup(self, (qx._flatten_digest(self), self.n_qubits, width))
+            if hit is not _program._MISS and hit is not None:
+                return np.asarray(sim.program_statevector(hit, self.n_qubits, initial_state=psi))
+        cmds = self._simulable_commands("statevector")
+        if run_structured:
             program = _program.cached_program(
                 self, cmds, self.n_qubits, _program.fusion_width_of(sim, self.n_qubits)
             )

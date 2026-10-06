@@ -466,9 +466,57 @@ def plan(
     return _finish(planner.kernels, cmds)
 
 
+def _touched(kernel: Kernel, cmds: list) -> Optional[frozenset]:
+    """The qubits a kernel acts on, or None when nothing may move across it
+    (a gates kernel with a qubit-less barrier, a measurement, a reset or a
+    condition)."""
+    if isinstance(kernel, Gates):
+        qubits: set[int] = set()
+        for c in cmds[kernel.start : kernel.end]:
+            if c.gate in _TRAJECTORY or c.gate == qx.GateType.Measure or len(c.condition_bits) > 0:
+                return None
+            if c.gate == qx.GateType.Barrier and len(c.qubits) == 0:
+                return None
+            qubits.update(c.qubits)
+        return frozenset(qubits)
+    if isinstance(kernel, ControlledPowers):
+        return frozenset(kernel.controls + kernel.targets)
+    return frozenset(kernel.qubits)
+
+
+def merged(kernels: list, cmds: list) -> list:
+    """Kernels with every dense or permutation kernel folded into the latest
+    one on the same qubit tuple, when no kernel in between touches those
+    qubits: unitaries on disjoint qubits commute, so the two are adjacent."""
+    out: list = []
+    for kernel in kernels:
+        if isinstance(kernel, (Dense, Permutation)):
+            qubits = set(kernel.qubits)
+            j = len(out) - 1
+            while j >= 0:
+                earlier = out[j]
+                if type(earlier) is type(kernel) and earlier.qubits == kernel.qubits:
+                    break
+                touched = _touched(earlier, cmds)
+                if touched is None or touched & qubits:
+                    j = -1
+                    break
+                j -= 1
+            if j >= 0:
+                earlier = out[j]
+                if isinstance(kernel, Dense):
+                    out[j] = Dense(kernel.qubits, kernel.matrix @ earlier.matrix)
+                else:
+                    out[j] = Permutation(kernel.qubits, kernel.table[earlier.table])
+                continue
+        out.append(kernel)
+    return out
+
+
 def _finish(kernels: list, cmds: list) -> Optional[Plan]:
     """The plan, or None without a structured kernel or with a measurement or
     classical condition anywhere but the last gates kernel."""
+    kernels = merged(kernels, cmds)
     if all(isinstance(k, Gates) for k in kernels):
         return None
     for i, k in enumerate(kernels):
@@ -552,15 +600,25 @@ class _ProgramCache:
         return None
 
 
+_MISS = object()
+
+
+def cached_lookup(block, key: tuple):
+    """The program cached on ``block`` under ``key`` (None for a planned block
+    with no structure), or ``_MISS``."""
+    cache = getattr(block, "_structured_program", None)
+    return cache.program if cache is not None and cache.key == key else _MISS
+
+
 def cached_program(
     block, commands: list, n_qubits: int, fusion_width: int
 ) -> Optional["qx.Program"]:
     """``plan(...).program()`` cached on ``block``, keyed by the stream's
     digest, the register width and the fusion width."""
     key = (qx._commands_digest(commands), n_qubits, fusion_width)
-    cache = getattr(block, "_structured_program", None)
-    if cache is not None and cache.key == key:
-        return cache.program
+    hit = cached_lookup(block, key)
+    if hit is not _MISS:
+        return hit
     found = plan(block, n_qubits, commands, fusion_width=fusion_width)
     program = found.program() if found is not None else None
     try:

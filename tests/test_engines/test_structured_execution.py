@@ -395,7 +395,9 @@ def test_a_dense_kernel_no_wider_than_the_fusion_width_stays_gates():
         [_Collide(3, target_qubits=[q, q + 1, q + 2]) for q in range(0, n, 3)] * 5, n_qubits=n
     ).build()
     assert _program.plan(sites, n, fusion_width=3) is None
-    assert _program.plan(sites, n, fusion_width=2).kinds() == ["dense"] * 20
+    assert (
+        _program.plan(sites, n, fusion_width=2).kinds() == ["dense"] * 4
+    )  # one per site, 5 layers merged
     psi = _random_state(n, 9)
     for block in (terms, sites):
         np.testing.assert_array_equal(
@@ -733,3 +735,127 @@ def test_invalid_kernels_are_refused_at_the_binding():
     program.add_permutation([5], np.array([1, 0], dtype=np.int64))
     with pytest.raises(ValueError, match="qubit 5"):
         qx.QarpSimulator().program_statevector(program, 3)
+
+
+# ── The cached program is checked without the gate stream ───────────────────
+
+
+def test_a_second_statevector_on_an_unchanged_block_flattens_nothing(monkeypatch):
+    n = 12
+    block = CompositeBlock([_Increment(5, target_qubits=[0, 1, 2, 3, 4])] * 2, n_qubits=n).build()
+    psi = _random_state(n, 11)
+    first = block.statevector(psi)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("the gate stream was materialised on a cache hit")
+
+    monkeypatch.setattr(type(block), "flatten", refuse)
+    monkeypatch.setattr(type(block), "free_symbols", refuse)
+    np.testing.assert_array_equal(block.statevector(psi), first)
+
+
+def test_a_block_or_a_child_changed_after_planning_is_planned_again(monkeypatch):
+    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
+    n = 9
+    child = SimpleBlock(4, target_qubits=[0, 1, 2, 3])
+    for t in reversed(range(1, 4)):
+        child.mcx(*range(t), t)
+    child.x(0)
+    block = CompositeBlock(
+        [child.build(), _Increment(5, target_qubits=[4, 5, 6, 7, 8])], n_qubits=n
+    )
+    block.build()
+    psi = _random_state(n, 12)
+    block.statevector(psi)
+    child.swap(1, 2)  # the parent's stream changes through its child
+    np.testing.assert_allclose(
+        block.statevector(psi), np.asarray(block.unitary_matrix()) @ psi, atol=1e-12
+    )
+    adjoint = block.dagger()  # a pending op: the full path, never the C++ digest
+    np.testing.assert_allclose(
+        adjoint.statevector(psi), np.asarray(block.unitary_matrix()).conj().T @ psi, atol=1e-12
+    )
+
+
+def test_the_cpp_digest_equals_the_python_digest():
+    inner = CompositeBlock(
+        [_Increment(3, target_qubits=[2, 0, 1]), _Mix(2, target_qubits=[3, 1])], n_qubits=4
+    )
+    inner.target_qubits = [5, 2, 7, 0]
+    block = CompositeBlock([_Rotations(8), inner], n_qubits=8).build()
+    assert qx._flatten_digest(block) == qx._commands_digest(list(block.flatten()))
+
+
+# ── Same-qubit kernels merge across kernels on other qubits ─────────────────
+
+
+def _site(k: int, seed: int, qubits: list[int]) -> SimpleBlock:
+    rng = np.random.default_rng(seed)
+    block = SimpleBlock(k, target_qubits=qubits)
+    for _ in range(3 * k):
+        block.ry(int(rng.integers(0, k)), float(rng.uniform(0, 3)))
+        a, b = (int(q) for q in rng.choice(k, 2, replace=False))
+        block.cx(a, b)
+    return block
+
+
+def _layers(parts, reps: int, n: int) -> CompositeBlock:
+    return CompositeBlock(parts * reps, n_qubits=n).build()
+
+
+def test_repeated_sites_merge_into_one_dense_kernel_each(plan_small_registers):
+    # Nine qubits touched, so the root is too wide for one dense kernel and
+    # the sites are planned one by one.
+    n = 9
+    sites = [_site(4, 1, [0, 1, 2, 3]), _site(5, 2, [4, 5, 6, 7, 8])]
+    block = _layers(sites, 5, n)
+    plan = _program.plan(block, n, fusion_width=3)
+    assert plan.kinds() == ["dense", "dense"]
+    psi = _random_state(n, 13)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(block.unitary_matrix()) @ psi,
+        atol=1e-11,
+    )
+
+
+@pytest.mark.parametrize("fence", ["gate on a site qubit", "qubit-less barrier"])
+def test_a_kernel_on_a_shared_qubit_or_a_fence_blocks_the_merge(plan_small_registers, fence):
+    n = 9
+    sites = [_site(4, 1, [0, 1, 2, 3]), _site(5, 2, [4, 5, 6, 7, 8])]
+    between = SimpleBlock(1, target_qubits=[2])
+    if fence == "gate on a site qubit":
+        between.ry(0, 0.4)
+    else:
+        between.set_commands([qx.Command()])  # a Barrier on no qubits fences everything
+    block = CompositeBlock(sites + [between] + sites, n_qubits=n).build()
+    kinds = _program.plan(block, n, fusion_width=3).kinds()
+    assert kinds.count("dense") == (3 if fence == "gate on a site qubit" else 4)
+    psi = _random_state(n, 14)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(block.unitary_matrix()) @ psi,
+        atol=1e-11,
+    )
+
+
+def test_permutations_on_the_same_qubits_merge_across_a_dense_kernel(plan_small_registers):
+    n = 8
+    block = CompositeBlock(
+        [
+            _Increment(4, target_qubits=[0, 1, 2, 3]),
+            _site(4, 3, [4, 5, 6, 7]),
+            _Increment(4, target_qubits=[0, 1, 2, 3]),
+        ],
+        n_qubits=n,
+    ).build()
+    plan = _program.plan(block, n, fusion_width=3)
+    assert sorted(plan.kinds()) == ["dense", "permutation"]
+    x = 0b10110101
+    psi = np.zeros(1 << n, dtype=complex)
+    psi[x] = 1.0
+    out = block.statevector(psi, structured=True)
+    image = _increment_image(_increment_image(x, [0, 1, 2, 3]), [0, 1, 2, 3])
+    dense_part = np.abs(out).reshape(16, 16)  # qubits 4..7 index the rows
+    assert np.count_nonzero(dense_part.sum(axis=0) > 1e-12) == 1
+    assert dense_part.sum(axis=0).argmax() == image & 0b1111

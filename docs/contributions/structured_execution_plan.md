@@ -17,7 +17,7 @@
 - `qarp/blocks/_primitives/qpe_block.py`, `qarp/blocks/_primitives/dos_qpe_block.py` (declare their structure; children built from it)
 - `qarp/algorithms/_composite/qpe.py`, `qarp/algorithms/_composite/dos_qpe.py` (ask the engine for a structured run before building the block)
 - `qarp/errors.py` (docstring of the removed structured-plan refusal)
-- `qarp/_abi.py`, `cpp/libqarpx/python/bindings.cpp` (program binding, ABI 11 → 12; `simulate_{qpe,dosqpe}_structured` bindings removed)
+- `qarp/_abi.py`, `cpp/libqarpx/python/bindings.cpp` (program binding, ABI 11 → 12; `simulate_{qpe,dosqpe}_structured` bindings removed; `_flatten_digest`, ABI 12 → 13)
 - `cpp/libqarpx/include/qarpx/simulator/program.h`, `cpp/libqarpx/src/simulator/program.cpp` (new: program executor and kernels)
 - `cpp/libqarpx/include/qarpx/simulator/qarp_simulator.h`, `cpp/libqarpx/src/simulator/qarp_simulator.cpp` (structured QPE entry points removed; their squaring/matvec code moves to `program.cpp`)
 - `cpp/libqarpx/CMakeLists.txt`, `cpp/libqarpx/tests/cpp/CMakeLists.txt`, `cpp/libqarpx/tests/cpp/test_program_kernels.cpp` (new)
@@ -111,6 +111,25 @@ lowering inside the simulator path, never visible in the IR.
   the kernel replaces a ladder that is never built.  `QPEBlock` and `DOSQPEBlock` declare
   theirs and build their children from the same declaration, so the gate stream cannot drift
   from it.
+- **A cached program is checked without the gate stream.**  `Block.statevector` keys its
+  cached program by the digest of the block's commands.  Computing that digest through
+  Python means flattening the block into Python command objects and scanning them for
+  free symbols on every call, which costs more than the kernels on a cached step
+  (MS 8x8 in qlbm: 7.1 ms per step, 0.06 ms of it kernels).  A built block with no pending
+  Python-level op (no dagger, substitution or replacement queued) gets its digest from
+  `qx._flatten_digest(block)`, which flattens and hashes in C++ without crossing into
+  Python; the value is the same `commands_digest` as before.  A hit runs the cached program
+  at once; a miss takes today's path (flatten, the built and free-symbol guards, plan,
+  cache under the same key).  A block with a pending op always takes today's path, as the
+  C++ flatten does not see pending ops.
+- **Kernels on the same qubits merge.**  The gate path's fusion merges a repeated small block
+  into one dense block whenever only gates on other qubits sit between the repeats; the
+  planner emitted one kernel per occurrence.  After planning, a `Dense` kernel merges into
+  the latest `Dense` kernel on the same qubit tuple, and a `Permutation` into the latest
+  `Permutation` on the same tuple, when every kernel in between touches none of those
+  qubits (a `Gates` kernel touches the qubits of its commands; one holding a qubit-less
+  barrier, a measurement or a reset touches every qubit).  Unitaries on disjoint qubits
+  commute, so the merged kernel is the product of the two in sequence.
 - **Cost model.**  Registers under 12 qubits and spans of fewer than three gates keep the gate
   path; derivation work may exceed one gate-path application of its span by `2^3` (a derived
   table is reused across repeats and steps); a dense kernel needs `2·gates ≥ 2^k` and a span
@@ -235,6 +254,8 @@ def plan(block, n_qubits: int, commands: list | None = None, *,
 def cached_program(block, commands: list, n_qubits: int, fusion_width: int) -> qx.Program | None: ...
 def plan_structure(block, n_qubits: int, *,
                    fusion_width: int | None = None) -> Plan | None: ...  # from block.structure(), block unbuilt
+def merged(kernels: list, commands: list) -> list: ...   # same-qubit Dense/Permutation kernels across disjoint ones
+def cached_lookup(block, key: tuple) -> qx.Program | None | _MISS: ...   # the hit path of cached_program
 
 # qarp/engines/_engine.py — template hooks
 def _plan_one(self, prim, blk, flat) -> qx.Program | None: ...           # base: None
@@ -287,7 +308,8 @@ SamplingResult program_run(const Program&, int n_qubits, int n_shots, std::optio
                            const std::optional<std::vector<std::complex<double>>>& initial_state);
 
 // derivation helpers, bound privately as qx._permutation_table / _local_unitary /
-// _commands_digest / _local_commands_digest
+// _commands_digest / _local_commands_digest / _flatten_digest (commands_digest of
+// block.flatten(), computed in C++)
 std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command>&, const std::vector<uint32_t>&,
                                                        uint32_t max_rest, uint32_t max_work_log2);
 ```
@@ -332,6 +354,9 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | A built declaring block plans from its declaration, with the same kernels as the unbuilt one and no ladder detection; a declaration whose parts do not add up to the gate stream is ignored | analytic program shape; `unitary_matrix() @ ψ` | same |
 | `Repeat` refuses a count below one; a `Repeat` that is not a ladder step, a parametric part and an early measurement refuse the unbuilt plan | the refusal is the assertion | same |
 | The base `Engine` and an engine with a device offer no structured run | the refusal is the assertion | `tests/test_engines/test_structured_execution.py` |
+| A second `statevector()` on an unchanged block flattens nothing and scans no symbols; a block changed afterwards, a child changed afterwards, and a block with a pending dagger re-plan or take the full path | the refusal is the assertion (spies on `flatten` and `free_symbols`); `unitary_matrix() @ ψ` | same |
+| `_flatten_digest` equals `_commands_digest` of the Python `flatten()` on a composite with placed children | the two digests, same function | same |
+| Repeated 4-qubit sites merge into one dense kernel per site; a gates kernel on a site's qubit between repeats, a qubit-less barrier and a measurement block the merge; permutations on the same qubits merge across a disjoint dense kernel | analytic kernel counts; `unitary_matrix() @ ψ` | same |
 | Collision: permutations plus per-site dense blocks sharing one matrix | `unitary_matrix() @ ψ` | `tests/test_engines/test_structured_execution.py` |
 
 ## Phases
@@ -369,6 +394,16 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 - [x] Planner: a built block's declaration replaces its span and children; `plan_structure` lowers an unbuilt block's declaration *(2026-10-05)*
 - [x] `Engine.prepare_structured`, `StructuredRun`; `QPE` and `DOSQPE` ask for it before building the block *(2026-10-05)*
 - [x] Tests for the structure rows; the notebook's QPE section shows the declaration *(2026-10-05)*
+
+### Phase 6 — The cached program checked without the gate stream
+
+- [x] `qx._flatten_digest`, ABI 13; `Block.statevector` hit path without `flatten()` or `free_symbols()` *(2026-10-06)*
+- [x] Tests for the two rows above *(2026-10-06)*
+
+### Phase 7 — Same-qubit kernels merge
+
+- [x] `merged()` post-pass in `_finish`; `Dense`–`Dense` and `Permutation`–`Permutation` across disjoint kernels *(2026-10-06)*
+- [x] Tests for the merge row; §14 sentence *(2026-10-06)*
 
 ## Deviations log
 
@@ -433,6 +468,13 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   declaring block edited after build became a block whose declaration does not add up to its
   gates; `QarpEngine.prepare_structured` validates the primitive as `build()` would, so a
   capability error raises there instead of silently choosing the block path.
+- Two phases beyond the green-lit text (user decision after the measurements of 2026-10-02
+  and 2026-10-06): the cached program is validated by a C++ digest instead of a Python
+  flatten (a cached qlbm step was 7 ms of overhead around 0.06 ms of kernels; 2.8 ms after,
+  the rest being the C++ flatten itself), and same-qubit dense and permutation kernels merge
+  across kernels on other qubits (repeated 4-qubit sites ran one kernel per occurrence where
+  fusion runs one per site; 20 layers of them went from 54 ms to 4 ms against 108 ms as
+  gates).
 - Known limits, not addressed here: a gather needs a second state buffer and tables up to the
   26-qubit cap are held by the planner and the program; the controlled-powers cost rule does
   not count the matrix squarings; a `QPEBlock` handed to a primitive directly still builds,

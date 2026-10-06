@@ -663,7 +663,8 @@ How circuits run.
   than its gates (`qarp/_program.py`, `simulator/program.cpp`).  Kernels:
   `Gates` (a verbatim slice of the gate stream, dispatched and fused as above),
   `Permutation` (`|x⟩ → |table[x]⟩` on listed qubits, one gather; adjacent ones compose
-  into one table up to 26 qubits), `Dense` (a block's unitary on at most 8 touched qubits,
+  into one table up to 26 qubits, and two on the same qubits merge across kernels on other
+  qubits, as do two `Dense` kernels), `Dense` (a block's unitary on at most 8 touched qubits,
   and more than the fusion width in force — fusion covers any other span itself, merging it
   with its neighbours and its own repeats, and a kernel would fence it off)
   and `ControlledPowers` (`U^e_j` on the targets under control `j`).  Every subtree owns a
@@ -688,7 +689,10 @@ How circuits run.
   (routed or not — a device means "simulate what the device runs", and carries the
   noise model), or `CudaqEngine`.  The knob is `QarpEngine(structured=)` and
   `Block.statevector(structured=)`; `None` follows `QARP_STRUCTURED` (read once per
-  process, default on; `0`/`false`/`off`/`no` turn it off).  A program samples through
+  process, default on; `0`/`false`/`off`/`no` turn it off).  `Block.statevector` keeps its
+  program on the block and checks it by a C++ digest of the stream (`qx._flatten_digest`),
+  so a cached call materialises no commands in Python; a block with a pending dagger,
+  substitution or replacement always flattens.  A program samples through
   `run`'s own sample-once code, so a program whose final state equals the gate path's
   draws the same shots for the same seed.  A declared structure is also lowered **before
   the block is built**: `Engine.prepare_structured(block, primitive)` returns a

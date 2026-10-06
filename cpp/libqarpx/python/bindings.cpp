@@ -162,7 +162,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 12
+#define QARPX_ABI_VERSION 13
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -1133,6 +1133,12 @@ NB_MODULE(qarpx, m) {
           "Internal: the 2^k x 2^k unitary commands apply to qubits (k <= 12).");
     m.def("_commands_digest", &commands_digest, "commands"_a,
           "Internal: 64-bit digest of a command stream (a cache key).");
+    m.def("_flatten_digest", [](const Block& block) {
+              nb::gil_scoped_release nogil;
+              return commands_digest(block.flatten());
+          }, "block"_a,
+          "Internal: _commands_digest of block.flatten(), computed without "
+          "materialising the commands in Python.");
     m.def("_local_commands_digest", &local_commands_digest, "commands"_a, "qubits"_a,
           "Internal: digest of commands remapped onto range(len(qubits)).");
 
