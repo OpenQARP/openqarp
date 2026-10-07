@@ -1121,3 +1121,67 @@ def test_kernels_lists_what_statevector_runs_and_caches_the_program(monkeypatch)
     assert block.optimize(level=1).kernels() is None
     with pytest.raises(RuntimeError, match="built"):
         _Cancels(9).kernels()
+
+
+def test_a_daggered_child_wired_into_a_parent_is_walked_through_its_source(monkeypatch):
+    n = 12
+    inner = CompositeBlock(
+        [
+            _DeclaredIncrement(5, target_qubits=[0, 1, 2, 3, 4]),
+            _DeclaredIncrement(4, target_qubits=[5, 6, 7, 8]),
+        ],
+        n_qubits=9,
+    ).build()
+    parent = CompositeBlock(
+        [_Cancels(9, target_qubits=list(range(3, n))), inner.dagger()], n_qubits=n
+    ).build()
+    shadow = list(parent.children())[1]
+    assert type(shadow).__name__ == "SimpleBlock" and shadow._materialised_from._is_dagger
+    spans = _derived_spans(monkeypatch)
+    assert _program.plan(parent, n).program().kinds() == ["gates", "permutation"]
+    assert spans == [len(list(parent.children())[0].flatten())]
+    psi = _random_state(n, 19)
+    np.testing.assert_allclose(
+        parent.statevector(psi, structured=True),
+        np.asarray(parent.unitary_matrix()) @ psi,
+        atol=1e-12,
+    )
+
+
+def test_a_controlled_daggered_declaring_inner_lifts_the_inverse_table(monkeypatch):
+    n = 12
+    cu = ControlledBlock(_DeclaredIncrement(5).build().dagger(), num_controls=1, ctrl_state=[True])
+    cu.build()
+    cu.target_qubits = [11, 0, 1, 2, 3, 4]
+    parent = CompositeBlock([_Cancels(9, target_qubits=list(range(2, 11))), cu], n_qubits=n)
+    parent.build()
+    spans = _derived_spans(monkeypatch)
+    assert _program.plan(parent, n).program().kinds() == ["gates", "permutation"]
+    assert spans == [len(list(parent.children())[0].flatten())]
+    psi = _random_state(n, 20)
+    np.testing.assert_allclose(
+        parent.statevector(psi, structured=True),
+        np.asarray(parent.unitary_matrix()) @ psi,
+        atol=1e-12,
+    )
+
+
+def test_a_child_with_a_pending_substitution_stays_an_opaque_span():
+    from sympy import Symbol
+
+    n = 12
+    theta = Symbol("theta")
+    turn = SimpleBlock(2, target_qubits=[10, 11])
+    turn.rz(0, theta).cx(0, 1).ry(1, 0.4)
+    bound = turn.set_symbols({theta: 0.3})
+    parent = CompositeBlock(
+        [_DeclaredIncrement(5, target_qubits=[0, 1, 2, 3, 4]), bound], n_qubits=n
+    ).build()
+    wired = list(parent.children())[1]
+    assert _program._source(wired) is wired
+    psi = _random_state(n, 21)
+    np.testing.assert_allclose(
+        parent.statevector(psi, structured=True),
+        np.asarray(parent.unitary_matrix()) @ psi,
+        atol=1e-12,
+    )

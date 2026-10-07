@@ -86,8 +86,9 @@ lowering inside the simulator path, never visible in the IR.
      block is a permutation by steps 1, 3 or 4 (Phase 8).  A declaration whose parts do not
      add up to the node's span is ignored;
   3. a `ControlledBlock` whose inner is a permutation → that permutation lifted by §6.1;
-  4. the span's permutation table — skipped when a descendant declares `classical_action` or
-     `structure()`, so the node is walked into its children instead (Phase 10): classical gates (`X, CX, CCX, SWAP, CSWAP`, `MCZ` inside
+  4. the span's permutation table — skipped, with step 5, when a descendant declares
+     `classical_action` or `structure()`, so the node is walked into its children instead
+     (Phase 10): classical gates (`X, CX, CCX, SWAP, CSWAP`, `MCZ` inside
      the `H·MCZ·H` that `mcx` emits) evaluated on integers at any width; otherwise exact
      derivation by restriction — the qubits no command couples (only ever controls, phase
      partners, or moved by classical gates among themselves) are fixed per assignment and
@@ -374,6 +375,7 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | A tree flattened by `Block.optimize(1)` plans nothing where `statevector(optimization_level=1)` on the tree keeps its kernels, with equal results | `unitary_matrix() @ ψ` | same |
 | A node whose descendant declares is walked into its children without a derivation attempt on its own span; a declaring leaf under a non-permutation parent still becomes one table | planner call spy; `unitary_matrix() @ ψ` | `tests/test_engines/test_structured_execution.py` |
 | A daggered composite over declared permutations plans the inverse tables in reverse order; a daggered QPE ladder plans `ControlledPowers` over `U†`; a daggered order-finding block plans permutations; a double dagger plans as the forward block | `unitary_matrix().conj().T @ ψ` | same |
+| A daggered composite wired as a child is a flat shadow in `children()` yet is walked through its source with inverse tables and no derivation of its span; a controlled daggered declaring inner lifts the inverse table; a child with a pending substitution stays an opaque span | `unitary_matrix() @ ψ`; planner call spy | same |
 | `Block.kernels()` lists the kernels `statevector` would run, None on the gate path or with `structured=False`, raises unbuilt, and leaves the program cached for the next `statevector` | the program's own kinds; planner call spy | same |
 | The base `Engine` and an engine with a device offer no structured run | the refusal is the assertion | `tests/test_engines/test_structured_execution.py` |
 | A second `statevector()` on an unchanged block flattens nothing and scans no symbols; a block changed afterwards, a child changed afterwards, and a block with a pending dagger re-plan or take the full path | the refusal is the assertion (spies on `flatten` and `free_symbols`); `unitary_matrix() @ ψ` | same |
@@ -444,6 +446,7 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 - [x] A node with a declaring descendant skips its own derivation and walks its children *(2026-10-07)*
 - [x] The walk carries a dagger flag: children in reverse, declared and lifted tables inverted, ladders over the daggered inner; `structure()` not read under a dagger *(2026-10-07)*
 - [x] Tests for the two rows; §14 sentences; the derivation budget's one-off cost documented *(2026-10-07)*
+- [x] A daggered child is materialised into a flat block when wired into its parent; the shadow keeps the block it came from and the walk reads that block with the dagger flag *(2026-10-07)*
 
 ### Phase 11 — `Block.kernels()`
 
@@ -556,7 +559,12 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   derivation ran before descent, so a declared leaf under a non-permutation parent cost a
   refused derivation of the parent's span first (131 ms in a qlbm step); a daggered block was
   an opaque span, so the inverse of a declared operator ran as gates; and the kernel kinds a
-  block would run were readable only through the private planner.
+  block would run were readable only through the private planner.  The dagger walk first
+  reached a daggered root only: a daggered child is folded into a flat `SimpleBlock` when it
+  is wired into its parent (the C++ parent reads the child's raw buffer), so inside a tree
+  the walk never met one (qlbm: a daggered streaming operator derived in 125 ms instead of
+  10 ms).  The shadow now keeps the block it came from and the walk reads that block with
+  the dagger flag; the C++ stream is unchanged.
 - Known limits, not addressed here: a gather needs a second state buffer; the derivation
   budget is paid once per distinct program and never amortises for a one-off run of a block
   that is not a permutation (`structured=False` skips it) and tables up to the

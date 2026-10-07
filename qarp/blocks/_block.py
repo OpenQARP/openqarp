@@ -1470,6 +1470,8 @@ def _materialise_pending_ops(block: "AnyBlock") -> "AnyBlock":
     fresh.target_qubits = saved_target
     fresh.n_cbits = saved_cbits
     fresh._publish_symbols()
+    # The planner reads the block's structure through the shadow (§14).
+    fresh._materialised_from = block
     return fresh
 
 

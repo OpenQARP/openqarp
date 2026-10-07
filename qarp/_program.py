@@ -217,6 +217,15 @@ def _inverse(table: np.ndarray) -> np.ndarray:
     return out
 
 
+def _source(node):
+    """The block a wired child was materialised from when only a dagger was
+    pending on it (its stream is that block's, daggered), else the child."""
+    src = getattr(node, "_materialised_from", None)
+    if src is None or _has_pending_subs(src):
+        return node
+    return src
+
+
 def _placement(node) -> list[int]:
     tq = getattr(node, "target_qubits", None)
     return list(tq) if tq is not None else list(range(node.n_qubits))
@@ -318,6 +327,7 @@ class _Planner:
         """``(qubits in inner's frame, table)`` for a controlled block's inner."""
         if _has_pending_subs(inner) or inner.n_qubits > MAX_COMPOSE_QUBITS:
             return None
+        inner = _source(inner)
         commands = list(inner.flatten())
         declared = self._declared(inner, commands, _placement(inner), _is_daggered(inner))
         if declared is not None:
@@ -389,8 +399,9 @@ class _Planner:
             kids.reverse()
             lengths.reverse()
         out = []
-        for kid, length in zip(kids, lengths, strict=True):
-            kid_map = [qmap[t] for t in _placement(kid)]
+        for wired, length in zip(kids, lengths, strict=True):
+            kid_map = [qmap[t] for t in _placement(wired)]
+            kid = _source(wired)
             out.append((kid, start, start + length, kid_map, 1, dagger ^ _is_daggered(kid)))
             start += length
         return out
@@ -401,8 +412,13 @@ class _Planner:
         key = id(node)
         if key not in self._below:
             found = False
+            below: list = []
             if isinstance(node, qx.CompositeBlock) and not _has_pending_subs(node):
-                for kid in node.children():
+                below = list(node.children())
+            elif isinstance(node, qx.ControlledBlock) and not _has_pending_subs(node):
+                below = [node.inner()]
+            if below:
+                for kid in map(_source, below):
                     if (
                         _declares_action(kid)
                         or _declares_structure(kid)
@@ -461,10 +477,12 @@ class _Planner:
             return
         touched = sorted({q for c in span for q in c.qubits})
         found: Optional[Kernel] = None
+        # A declaring descendant is reached by descent, not by deriving or
+        # densifying the span above it.
         if touched and not self._declares_below(node):
             found = self._table(span, touched)
-        if found is None:
-            found = self._dense(span, touched, n_gates)
+            if found is None:
+                found = self._dense(span, touched, n_gates)
         if found is not None:
             self._emit(found)
             return
@@ -530,7 +548,7 @@ class _Planner:
             state = kid.ctrl_state() if callable(kid.ctrl_state) else kid.ctrl_state
         if n_ctrl != 1 or not state[0]:
             return None
-        inner = kid.inner()
+        inner = _source(kid.inner())
         if inner.n_qubits > K_POWERS or _has_pending_subs(inner):
             return None
         commands = list(inner.flatten())

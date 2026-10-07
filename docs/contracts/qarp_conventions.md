@@ -677,7 +677,7 @@ How circuits run.
   or as one table raised to the count when its block is a permutation;
   a `ControlledBlock` whose inner is a permutation, lifted by §6.1;
   the span's permutation table, unless a descendant declares (the node is then walked into
-  its children without a derivation attempt) — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
+  its children, with neither a derivation attempt nor a dense kernel above them) — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
   that `mcx` emits) evaluated on integers at any width, otherwise derived by restriction: the
   qubits no command couples (controls, phase partners, or moved by classical gates among
   themselves) are enumerated and tracked, every other command is sliced at their value, and
@@ -688,6 +688,8 @@ How circuits run.
   A daggered node is walked as its children in reverse with each span daggered: a declared
   `classical_action` and a lifted controlled inner give their inverse tables, a ladder's `U`
   is the daggered inner stream, and a `structure()` declaration is not read under a dagger.
+  A daggered child is folded into a flat block when wired into its parent; the planner walks
+  the block it came from, so the rule holds inside a tree as at the root.
   `Block.kernels()` lists the kernels `statevector` would run on a built block, in order, or
   None when the gate path runs; it takes `structured` and `optimization_level` as
   `statevector` does and leaves the program cached.  The derivation budget is paid once per
