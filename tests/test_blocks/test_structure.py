@@ -15,7 +15,8 @@ import qarp
 import qarp.blocks as qb
 import qarpx as qx
 from qarp import _program
-from qarp.algorithms import Sampler, StateVector
+from qarp._types import Consumes
+from qarp.algorithms import PauliAveraging, Sampler, StateVector
 from qarp.blocks import (
     ComputationalBasisStateBlock,
     ControlledBlock,
@@ -226,6 +227,21 @@ def test_a_declaration_naming_an_unbuilt_part_is_ignored(monkeypatch):
     )
 
 
+@pytest.mark.parametrize("cls", [QPEBlock, DOSQPEBlock])
+def test_a_shared_eigenstate_block_is_placed_as_a_copy(cls):
+    # Two blocks over one state block: the caller's object keeps its placement
+    # and the first block's unitary is the one built from an unshared state.
+    shared = ComputationalBasisStateBlock([1])
+    alone = cls(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1, measure=False).build()
+    first = cls(shared, _phase_u(), 3, 1, measure=False).build()
+    second = cls(shared, _phase_u(), 4, 1, measure=False).build()
+    assert shared.target_qubits is None or list(shared.target_qubits) == [0]
+    np.testing.assert_allclose(
+        np.asarray(first.unitary_matrix()), np.asarray(alone.unitary_matrix()), atol=1e-12
+    )
+    assert second.n_qubits == alone.n_qubits + 1
+
+
 def test_repeat_refuses_a_count_below_one():
     with pytest.raises(ValueError, match="count"):
         Repeat(_phase_u().build(), 0)
@@ -282,7 +298,21 @@ def test_engines_without_the_path_offer_no_structured_run():
     assert QarpEngine(structured=False).prepare_structured(block, Sampler()) is None
     amplitudes = StateVector(operator=QubitOperator("Z0"), ket=block)
     assert QarpEngine().prepare_structured(block, amplitudes) is None
+    # Counts, but of derived circuits: the run would hand it the bare block.
+    averaging = PauliAveraging(operator=QubitOperator("X0"), n_shots=qarp.EXACT)
+    assert averaging.consumes is Consumes.COUNTS
+    assert QarpEngine().prepare_structured(block, averaging) is None
+    assert QarpEngine().prepare_structured(block, _CountsWithoutTheFlag()) is None
     assert not block.is_built
+
+
+class _CountsWithoutTheFlag:
+    """A runnable from before ``samples_block``: counts, no declaration."""
+
+    consumes = Consumes.COUNTS
+    n_shots = None
+    initial_state = None
+    supports_exact = True
 
 
 def test_a_structured_run_samples_the_declared_block():
@@ -294,6 +324,13 @@ def test_a_structured_run_samples_the_declared_block():
     assert run is not None and not block.is_built
     dist = run.sample()
     assert dict(dist) == pytest.approx({(1, 1, 0): 1.0}, abs=1e-10)
+    assert sampler.result is dist
+
+    # The primitive marginalises as on the ordinary path: no measured_qubits
+    # on an unbuilt sampler reads the whole register.
+    whole = Sampler(n_shots=qarp.EXACT)
+    dist = QarpEngine().prepare_structured(block, whole).sample()
+    assert dict(dist) == pytest.approx({(1, 1, 0, 1): 1.0}, abs=1e-10)
 
 
 def test_a_built_declaring_block_through_a_primitive_plans_its_ladder():

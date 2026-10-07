@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import List, Optional
 
 from ..._structure import Repeat
@@ -54,7 +55,9 @@ class QPEBlock(CompositeBlockBase):
         and the ancilla readout (§13).  Builds only its parts, once."""
         if self._parts is not None:
             return self._parts
-        eigen_built = self.eigenstate.build()
+        # The parts are placed in this block's frame; the caller's block is
+        # never moved, so it can serve another block unchanged.
+        eigen_built = deepcopy(self.eigenstate.build())
         unit_built = self.unitary.build()
         ancilla_qubits = list(range(self.n_ancilla))
         state_qubits = list(range(self.n_ancilla, self.n_qubits))

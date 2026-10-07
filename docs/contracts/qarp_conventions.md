@@ -698,9 +698,10 @@ How circuits run.
   `run`'s own sample-once code, so a program whose final state equals the gate path's
   draws the same shots for the same seed.  A declared structure is also lowered **before
   the block is built**: `Engine.prepare_structured(block, primitive)` returns a
-  `StructuredRun` (`sample()` resolves shots, `EXACT`, `initial_state` and
-  `measured_qubits` from the primitive per call) when the engine can run it — `QarpEngine`
-  with structured on, no device, a sampling primitive, every `Repeat` a ladder step of one
+  `StructuredRun` (`sample()` resolves shots, `EXACT` and `initial_state` from the
+  primitive per call and hands the block's counts to the primitive's `run()`) when the
+  engine can run it — `QarpEngine` with structured on, no device, a primitive that samples
+  the block as given (`samples_block`, set by `Sampler` alone), every `Repeat` a ladder step of one
   control on |1⟩ over a concrete `U` of at most 12 qubits, no parametric part, a recorded
   measurement only in the last part — and None otherwise, with no register minimum.  The
   hook knows no algorithm and no block class.  `QPE` and `DOSQPE` offer their block this way

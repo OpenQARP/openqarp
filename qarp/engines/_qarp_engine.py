@@ -296,7 +296,11 @@ class QarpEngine(Engine):
         # contract the gate-path statevector.
         if not self._structured or self._device is not None:
             return None
-        if primitive.consumes is not Consumes.COUNTS:
+        # The run hands the block's own counts to the primitive, which only
+        # one that samples the block as given can read.
+        if primitive.consumes is not Consumes.COUNTS or not getattr(
+            primitive, "samples_block", False
+        ):
             return None
         self._validate_primitive(primitive)
         n = block.n_qubits

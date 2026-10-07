@@ -486,6 +486,17 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   about 0.3 s to the 1.2 s plan of a built 14-ancilla `QPEBlock` over a 3-qubit synthesized
   `U` (2.2 M commands, after a 1.6 s build).  `plan_structure` has no stream to check and
   stays trusted (user decision).
+- `prepare_structured` serves only a primitive that samples the block as given
+  (`samples_block`, a `PrimitiveAlgorithm` flag that `Sampler` alone sets; engines see it
+  through `Runnable`), and `StructuredRun.sample()` hands the block's counts to the
+  primitive's own `run()`.  The `Consumes.COUNTS` check alone let `PauliAveraging` take a
+  structured run of the bare block and return a distribution where `engine.run()` returns
+  the expectation (review probe); an engine cannot name `Sampler` without importing
+  `qarp.algorithms` (user decision).
+- `QPEBlock` and `DOSQPEBlock` place a deep copy of the eigenstate block, not the caller's
+  object: the `target_qubits` write that placed it on the state register predates this branch
+  and let a state block shared by two QPE blocks corrupt the first (review probe:
+  `IndexError` at flatten).  The unitary and the other parts are constructed per block.
 - Known limits, not addressed here: a gather needs a second state buffer and tables up to the
   26-qubit cap are held by the planner and the program; the controlled-powers cost rule does
   not count the matrix squarings; a `QPEBlock` handed to a primitive directly still builds,

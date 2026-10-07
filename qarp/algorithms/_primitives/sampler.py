@@ -34,6 +34,7 @@ class Sampler(PrimitiveAlgorithm):
 
     supported_targets = frozenset({Target.SAMPLING})
     accepts_initial_state = True
+    samples_block = True
 
     def __init__(
         self,

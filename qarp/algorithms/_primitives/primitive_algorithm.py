@@ -67,6 +67,10 @@ class PrimitiveAlgorithm(ABC):
       already returns ``|⟨bra|ket⟩|²`` rather than the amplitude ``⟨bra|ket⟩``.
       Consumers that need the squared overlap (VQD/ADAPT-VQD deflation) must not
       square such a value again.  Default ``False`` (amplitude-returning).
+    - ``samples_block``: ``True`` iff the primitive's only circuit is its block as
+      given and ``run()`` returns the distribution of that block's recorded
+      measurements.  Only such a primitive can take a structured run
+      (``Engine.prepare_structured``, §14).  Default ``False``; ``Sampler`` sets it.
     """
 
     supported_targets: frozenset[Target] = frozenset()
@@ -76,6 +80,7 @@ class PrimitiveAlgorithm(ABC):
     gradient_kind: str = "none"
     requires_noiseless: bool = False
     returns_probability: bool = False
+    samples_block: bool = False
     # Ket-seeding amplitudes — class-level None so engines can read the field
     # on every primitive.  ``accepts_initial_state`` is the enforcement point
     # (checked in ``Engine._validate_primitive``): estimator primitives with

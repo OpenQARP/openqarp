@@ -18,7 +18,7 @@ import numpy as np
 
 import qarpx as qx
 
-from .._sampling_distribution import SamplingDistribution, distribution_from_result, pack_bits
+from .._sampling_distribution import SamplingDistribution, pack_bits
 from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._runnable import Runnable
@@ -175,9 +175,10 @@ class StructuredRun:
     """A block's declared structure lowered to a program before the block is
     built (§14 *Structured execution*), from :meth:`Engine.prepare_structured`.
 
-    Shots, ``initial_state`` and ``measured_qubits`` are read from the
-    primitive at ``sample()`` time, so a per-primitive override keeps winning
-    over the engine default as on the ordinary path.
+    Shots and ``initial_state`` are read from the primitive at ``sample()``
+    time, so a per-primitive override keeps winning over the engine default as
+    on the ordinary path, and the result is the primitive's own ``run()`` of
+    the block's counts.
     """
 
     def __init__(self, engine, program, n_qubits: int, primitive: Runnable):
@@ -203,8 +204,7 @@ class StructuredRun:
             sr = engine._sim.program_run(
                 self._program, self._n_qubits, shots, engine._circuit_seed(0), initial_state=psi
             )
-        measured = getattr(prim, "measured_qubits", None)
-        return distribution_from_result(sr, range(self._n_qubits) if measured is None else measured)
+        return prim.run([sr])
 
 
 class Engine(ABC):
