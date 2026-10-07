@@ -13,6 +13,7 @@ from __future__ import annotations
 import functools
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable, Optional, Union
 
 import numpy as np
@@ -217,6 +218,33 @@ def _declares_structure(node) -> bool:
 
 def _physical_gates(cmds) -> int:
     return sum(1 for c in cmds if _is_physical(c))
+
+
+_OPT_LEVELS = {0: qx.OptLevel.O0, 1: qx.OptLevel.O1, 2: qx.OptLevel.O2}
+
+
+def opt_level(level) -> "Optional[qx.OptLevel]":
+    """``qx.OptLevel`` for 0, 1 or 2; None for None; ``ValueError`` otherwise."""
+    if level is None:
+        return None
+    if isinstance(level, bool) or level not in _OPT_LEVELS:
+        raise ValueError(f"optimization_level must be 0, 1 or 2, got {level!r}")
+    return _OPT_LEVELS[level]
+
+
+@lru_cache(maxsize=None)
+def _native_transpiler() -> "qx.Transpiler":
+    return qx.Transpiler(qx.native_gateset())
+
+
+def optimized(commands, level: int) -> list:
+    """``commands`` through the native-gateset transpiler at ``level``."""
+    return list(_native_transpiler().transpile_and_optimize(list(commands), opt_level(level)))
+
+
+def compile_gates_at(level: Optional[int]) -> Optional[Callable[[list], list]]:
+    """The ``compile_gates`` hook for ``level``, or None to keep the slices."""
+    return None if level is None else (lambda cmds: optimized(cmds, level))
 
 
 def _power(table: np.ndarray, count: int) -> np.ndarray:
@@ -668,16 +696,22 @@ def cached_lookup(block, key: tuple):
 
 
 def cached_program(
-    block, commands: list, n_qubits: int, fusion_width: int
+    block,
+    commands: list,
+    n_qubits: int,
+    fusion_width: int,
+    *,
+    optimization_level: Optional[int] = None,
 ) -> Optional["qx.Program"]:
     """``plan(...).program()`` cached on ``block``, keyed by the stream's
-    digest, the register width and the fusion width."""
-    key = (qx._commands_digest(commands), n_qubits, fusion_width)
+    digest, the register width, the fusion width and the level the gate
+    slices are optimized at."""
+    key = (qx._commands_digest(commands), n_qubits, fusion_width, optimization_level)
     hit = cached_lookup(block, key)
     if hit is not _MISS:
         return hit
     found = plan(block, n_qubits, commands, fusion_width=fusion_width)
-    program = found.program() if found is not None else None
+    program = found.program(compile_gates_at(optimization_level)) if found is not None else None
     try:
         block._structured_program = _ProgramCache(key, program)
     except AttributeError:

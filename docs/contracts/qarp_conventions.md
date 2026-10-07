@@ -692,7 +692,13 @@ How circuits run.
   (routed or not — a device means "simulate what the device runs", and carries the
   noise model), or `CudaqEngine`.  The knob is `QarpEngine(structured=)` and
   `Block.statevector(structured=)`; `None` follows `QARP_STRUCTURED` (read once per
-  process, default on; `0`/`false`/`off`/`no` turn it off).  `Block.statevector` keeps its
+  process, default on; `0`/`false`/`off`/`no` turn it off).  A gate-level optimizer runs
+  **after** planning, on the gate slices only: `Block.statevector(optimization_level=)` (0, 1
+  or 2 as `Block.optimize`; `None` runs the slices as they are; the whole stream on the gate
+  path; part of the program cache key) and `QarpEngine(optimization_level=)` (its standalone
+  transpiler's level for compiled circuits and gate slices, default 1; a device compiles its
+  own pipeline and refuses a level).  `Block.optimize` flattens the tree the planner reads,
+  so it is not the way to combine the two.  `Block.statevector` keeps its
   program on the block and checks it by a C++ digest of the stream (`qx._flatten_digest`),
   so a cached call materialises no commands in Python; a block with a pending dagger,
   substitution or replacement always flattens.  A program samples through

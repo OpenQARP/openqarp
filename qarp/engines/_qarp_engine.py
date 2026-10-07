@@ -167,6 +167,7 @@ class QarpEngine(Engine):
         n_shots: Union[int, Shots] = 10_000,
         seed: Optional[int] = None,
         structured: Optional[bool] = None,
+        optimization_level: Optional[int] = None,
     ):
         # BLAS starts sharing the machine with the simulator from here; a
         # no-op once numpy and scipy are both examined.
@@ -200,6 +201,16 @@ class QarpEngine(Engine):
             else None
         )
         self._transpiler = qx.Transpiler(device_gateset or qx.native_gateset())
+        # A device compiles its own pipeline (rebase, route, rebase) and takes
+        # no level; the standalone transpiler runs at 1 unless told otherwise.
+        if optimization_level is not None and self._device is not None:
+            raise ValueError(
+                "optimization_level applies to the standalone transpiler; "
+                "a device compiles its own pipeline"
+            )
+        self._opt_level = _program.opt_level(
+            1 if optimization_level is None else optimization_level
+        )
 
         if n_shots is Shots.EXACT and not self.provides_amplitudes:
             raise CapabilityError(
@@ -278,8 +289,12 @@ class QarpEngine(Engine):
             layout = None if initial is None and final is None else _Layout(initial, final)
             return compiled.commands, sim_n, layout
 
-        compiled = self._transpiler.transpile_and_optimize(flat_cmds)
+        compiled = self._transpiler.transpile_and_optimize(flat_cmds, self._opt_level)
         return compiled, block_n_qubits, None
+
+    def _compile_gates(self, cmds: list) -> list:
+        """The gate slices of a structured program, at the engine's level."""
+        return self._transpiler.transpile_and_optimize(cmds, self._opt_level)
 
     def _maybe_reindex(self, sr, layout: Optional[_Layout]):
         if layout is None or layout.final is None:
@@ -309,7 +324,7 @@ class QarpEngine(Engine):
         )
         if found is None:
             return None
-        program = found.program(compile_gates=self._transpiler.transpile_and_optimize)
+        program = found.program(compile_gates=self._compile_gates)
         return StructuredRun(self, program, n, primitive)
 
     # ── Template hooks (build()/run() live on the base Engine) ─────────────
@@ -351,7 +366,7 @@ class QarpEngine(Engine):
         )
         if found is None:
             return None
-        return found.program(compile_gates=self._transpiler.transpile_and_optimize)
+        return found.program(compile_gates=self._compile_gates)
 
     def _programs_for(self, prim: Runnable, params) -> list:
         programs = self._programs.get(id(prim)) or [None] * len(prim.compiled_circuits)

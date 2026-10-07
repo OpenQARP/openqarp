@@ -214,7 +214,11 @@ def structure(self) -> list[AnyBlock | Repeat] | None:
     """
     return None
 
-def statevector(self, initial_state=None, *, structured: bool | None = None) -> np.ndarray: ...
+def statevector(self, initial_state=None, *, structured: bool | None = None,
+                optimization_level: int | None = None) -> np.ndarray: ...
+# optimization_level (Phase 9): 0, 1 or 2 runs the gates at that transpiler level — the gate
+# slices of a structured program, or the whole stream on the gate path — keeping the tree the
+# planner reads; None runs them as they are.  Part of the program cache key.
 
 # qarp/_structure.py, exported as qarp.blocks.Repeat
 @dataclass(frozen=True)
@@ -272,7 +276,9 @@ class StructuredRun:
 
 # qarp/engines/_qarp_engine.py
 class QarpEngine(Engine):
-    def __init__(self, ..., structured: bool | None = None): ...   # None -> QARP_STRUCTURED
+    def __init__(self, ..., structured: bool | None = None,       # None -> QARP_STRUCTURED
+                 optimization_level: int | None = None): ...       # Phase 9: standalone transpiler level, default 1;
+                                                                   # ValueError with a device, whose pipeline takes none
     def prepare_structured(self, block, primitive): ...            # None with a device, structured off, or a refused plan
 
 # qarp/algorithms/_composite/qpe.py (dos_qpe.py alike)
@@ -358,6 +364,9 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | `Repeat` refuses a count below one; a `Repeat` that is not a ladder step, a parametric part and an early measurement refuse the unbuilt plan | the refusal is the assertion | same |
 | A `Repeat` of a controlled permutation is one table raised to the count on both paths: order finding for `a = 2 mod 15` declared with one `C-M(2)` repeated `2^i` times reads its order unbuilt through `plan_structure` and built, with no `ControlledPowers` kernel; the planner lifts the repeated block once per entry, not once per copy; a `Repeat` naming an unbuilt block refuses the unbuilt plan | analytic counting marginal (1/4 at 0, 64, 128, 192); planner call count; the refusal is the assertion | `tests/test_blocks/test_structure.py` |
 | The table power equals the table composed with itself that many times | the composition loop | same |
+| `Block.statevector(optimization_level=k)`, k in 0, 1, 2, keeps the planned kernels of a mixed block, matches the gate path, and the optimized gate slices never grow with k (level 1 below level 0); a refused plan optimizes the whole stream; a level change re-plans (cache key) | `unitary_matrix() @ ψ`; gate counts through the transpiler | `tests/test_engines/test_structured_execution.py` |
+| `QarpEngine(optimization_level=k)` samples the same distribution at every level and passes the level to its transpiler for the gate slices and the gate path; a level outside 0–2, or any level with a device, raises | `unitary_matrix()` Born probabilities; the raise is the assertion | same |
+| A tree flattened by `Block.optimize(1)` plans nothing where `statevector(optimization_level=1)` on the tree keeps its kernels, with equal results | `unitary_matrix() @ ψ` | same |
 | The base `Engine` and an engine with a device offer no structured run | the refusal is the assertion | `tests/test_engines/test_structured_execution.py` |
 | A second `statevector()` on an unchanged block flattens nothing and scans no symbols; a block changed afterwards, a child changed afterwards, and a block with a pending dagger re-plan or take the full path | the refusal is the assertion (spies on `flatten` and `free_symbols`); `unitary_matrix() @ ψ` | same |
 | `_flatten_digest` equals `_commands_digest` of the Python `flatten()` on a composite with placed children | the two digests, same function | same |
@@ -415,6 +424,12 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 - [x] `_power` (table raised to a count by squaring); the planner lowers a `Repeat` of a permutation block to one `Permutation` on both paths *(2026-10-07)*
 - [x] `plan_structure` refuses a `Repeat` naming an unbuilt block instead of raising *(2026-10-07)*
 - [x] Tests for the two rows; §14 sentences *(2026-10-07)*
+
+### Phase 9 — An optimization level that keeps the structure
+
+- [x] `Block.statevector(optimization_level=)`: the gate slices of a structured program, or the whole stream on the gate path, through the native-gateset transpiler at that level; part of the program cache key *(2026-10-07)*
+- [x] `QarpEngine(optimization_level=)`: the standalone transpiler's level for compiled circuits and the gate slices of its programs (default 1); refused with a device *(2026-10-07)*
+- [x] Tests for the three rows; §14 sentences *(2026-10-07)*
 
 ## Deviations log
 
@@ -513,6 +528,11 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   at `a = 12`: 459 ms build, 615 ms plan in the review probe), where one table raised to the
   count by squaring costs `log2(count)` compositions and lifts the ladder's 12-qubit cap to
   the 26-qubit table cap (the same probe after: unbuilt plan 10 ms, built plan 0.5 s).
+- Phase 9 beyond the green-lit text (user decision after a qlbm measurement): a gate-level
+  optimizer run before execution (`Block.optimize(level)`) returns one flat `SimpleBlock`, so
+  on this branch its level 0 planned a qlbm step in 1.6 ms and levels 1 and 2 ran the gates
+  in 65 ms.  The level now reaches the gate slices after planning, on `Block.statevector`
+  and on `QarpEngine`, whose transpiler was pinned at level 1 with no knob.
 - Known limits, not addressed here: a gather needs a second state buffer and tables up to the
   26-qubit cap are held by the planner and the program; the controlled-powers cost rule does
   not count the matrix squarings; a `QPEBlock` handed to a primitive directly still builds,

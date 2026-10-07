@@ -866,3 +866,134 @@ def test_permutations_on_the_same_qubits_merge_across_a_dense_kernel(plan_small_
     dense_part = np.abs(out).reshape(16, 16)  # qubits 4..7 index the rows
     assert np.count_nonzero(dense_part.sum(axis=0) > 1e-12) == 1
     assert dense_part.sum(axis=0).argmax() == image & 0b1111
+
+
+# ── An optimization level that keeps the structure ─────────────────────────
+
+
+class _Cancels(SimpleBlock):
+    """Rotations with pairs the optimizer removes or merges, then a CX chain."""
+
+    def build_vanilla(self):
+        for q in range(self.n_qubits):
+            self.h(q)
+            self.h(q)
+            self.rz(q, 0.3)
+            self.rz(q, 0.4)
+            self.ry(q, 0.1 * (q + 1))
+        for q in range(self.n_qubits - 1):
+            self.cx(q, q + 1)
+
+
+def _tree_with_a_gate_slice(n: int = 12) -> CompositeBlock:
+    """Permutation, a nine-qubit gate slice (too wide for a dense kernel), permutation."""
+    low = [0, 1, 2, 3, 4]
+    return CompositeBlock(
+        [
+            _Increment(5, target_qubits=low),
+            _Cancels(9, target_qubits=list(range(3, n))),
+            _Increment(5, target_qubits=low),
+        ],
+        n_qubits=n,
+    ).build()
+
+
+def test_an_optimization_level_keeps_the_kernels_and_shrinks_the_gate_slices(monkeypatch):
+    n = 12
+    block = _tree_with_a_gate_slice(n)
+    psi = _random_state(n, 11)
+    oracle = np.asarray(block.unitary_matrix()) @ psi
+    sizes: dict = {}
+    real = _program.optimized
+
+    def spy(cmds, level):
+        out = real(cmds, level)
+        sizes[level] = sizes.get(level, 0) + len(out)
+        return out
+
+    monkeypatch.setattr(_program, "optimized", spy)
+    for level in (None, 0, 1, 2):
+        out = block.statevector(psi, structured=True, optimization_level=level)
+        np.testing.assert_allclose(out, oracle, atol=1e-12)
+        assert block._structured_program.program.kinds() == ["permutation", "gates", "permutation"]
+    assert sizes[1] < sizes[0] and sizes[2] <= sizes[1]
+
+
+def test_a_level_on_the_gate_path_optimizes_the_whole_stream(monkeypatch):
+    n = 12
+    block = _tree_with_a_gate_slice(n)
+    calls = []
+    real = _program.optimized
+
+    def spy(cmds, level):
+        calls.append((len(cmds), level))
+        return real(cmds, level)
+
+    monkeypatch.setattr(_program, "optimized", spy)
+    psi = _random_state(n, 12)
+    out = block.statevector(psi, structured=False, optimization_level=2)
+    np.testing.assert_allclose(out, np.asarray(block.unitary_matrix()) @ psi, atol=1e-12)
+    assert calls == [(len(block.flatten()), 2)]
+
+
+def test_a_level_change_replans(monkeypatch):
+    block = _tree_with_a_gate_slice(12)
+    plans = []
+    real = _program.plan
+
+    def counted(*args, **kwargs):
+        plans.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_program, "plan", counted)
+    block.statevector(structured=True, optimization_level=0)
+    block.statevector(structured=True, optimization_level=0)
+    assert len(plans) == 1
+    block.statevector(structured=True, optimization_level=2)
+    assert len(plans) == 2
+
+
+@pytest.mark.parametrize("level", [0, 1, 2])
+def test_the_engine_runs_its_gate_slices_at_its_optimization_level(level):
+    n = 12
+    block = _tree_with_a_gate_slice(n)
+    engine = QarpEngine(n_shots=qarp.EXACT, structured=True, optimization_level=level)
+    seen = []
+    inner = engine._transpiler
+
+    class _Spy:
+        def transpile_and_optimize(self, cmds, lvl):
+            seen.append(lvl)
+            return inner.transpile_and_optimize(cmds, lvl)
+
+    engine._transpiler = _Spy()
+    sampler = Sampler(block)
+    engine.build([sampler])
+    assert set(_programs(engine, sampler)[0].kinds()) == {"permutation", "gates"}
+    assert seen and all(lvl == _program.opt_level(level) for lvl in seen)
+    got = np.zeros(1 << n)
+    for bits, p in engine.run()[0].items():
+        got[sum(b << i for i, b in enumerate(bits))] = p
+    born = np.abs(np.asarray(block.unitary_matrix())[:, 0]) ** 2
+    np.testing.assert_allclose(got, born, atol=1e-10)
+
+
+def test_a_level_outside_the_transpiler_or_with_a_device_is_refused():
+    with pytest.raises(ValueError, match="optimization_level"):
+        QarpEngine(optimization_level=3)
+    with pytest.raises(ValueError, match="optimization_level"):
+        QarpEngine(device=Device(4), optimization_level=1)
+    with pytest.raises(ValueError, match="optimization_level"):
+        _tree_with_a_gate_slice(12).statevector(optimization_level=True)
+
+
+def test_a_flattened_tree_plans_nothing_where_the_level_on_the_tree_keeps_its_kernels():
+    n = 12
+    block = _tree_with_a_gate_slice(n)
+    flat = block.optimize(level=1)
+    assert _program.plan(flat, n) is None
+    assert _program.plan(block, n).program().kinds() == ["permutation", "gates", "permutation"]
+    psi = _random_state(n, 13)
+    np.testing.assert_allclose(
+        block.statevector(psi, optimization_level=1), flat.statevector(psi), atol=1e-12
+    )

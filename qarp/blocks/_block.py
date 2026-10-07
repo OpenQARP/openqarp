@@ -948,6 +948,7 @@ class _BlockMixin:
         initial_state: "np.ndarray | None" = None,
         *,
         structured: Optional[bool] = None,
+        optimization_level: Optional[int] = None,
     ) -> "np.ndarray":
         """Exact statevector of this block applied to ``initial_state``
         (default ``|0…0⟩``).
@@ -969,8 +970,14 @@ class _BlockMixin:
                 *Structured execution*) where it is cheaper than its gates;
                 ``False`` runs the gate stream as-is.  ``None`` follows
                 ``QARP_STRUCTURED`` (default on).
+            optimization_level: ``0``, ``1`` or ``2`` runs the gates at that
+                transpiler level (as ``optimize``) — the gate slices of a
+                structured program, or the whole stream on the gate path —
+                keeping the structure the planner reads.  ``None`` runs them
+                as they are.
         """
         _blas_threads.install()
+        _program.opt_level(optimization_level)
         psi = None
         if initial_state is not None:
             psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
@@ -981,18 +988,25 @@ class _BlockMixin:
             # hit never materialises the commands in Python.  Pending ops are
             # applied by the Python flatten() only, so they take the full path.
             width = _program.fusion_width_of(sim, self.n_qubits)
-            hit = _program.cached_lookup(self, (qx._flatten_digest(self), self.n_qubits, width))
+            key = (qx._flatten_digest(self), self.n_qubits, width, optimization_level)
+            hit = _program.cached_lookup(self, key)
             if hit is not _program._MISS and hit is not None:
                 return np.asarray(sim.program_statevector(hit, self.n_qubits, initial_state=psi))
         cmds = self._simulable_commands("statevector")
         if run_structured:
             program = _program.cached_program(
-                self, cmds, self.n_qubits, _program.fusion_width_of(sim, self.n_qubits)
+                self,
+                cmds,
+                self.n_qubits,
+                _program.fusion_width_of(sim, self.n_qubits),
+                optimization_level=optimization_level,
             )
             if program is not None:
                 return np.asarray(
                     sim.program_statevector(program, self.n_qubits, initial_state=psi)
                 )
+        if optimization_level is not None:
+            cmds = _program.optimized(cmds, optimization_level)
         if psi is None:
             return np.asarray(sim.statevector(cmds, self.n_qubits))
         return np.asarray(sim.statevector(cmds, self.n_qubits, initial_state=psi))
