@@ -82,8 +82,9 @@ lowering inside the simulator path, never visible in the IR.
   2. a declared `structure()` (public protocol, §13 edit below): its parts are planned in
      order in place of the node's own span and children — a block part recursively, a
      `Repeat(block, count)` as `count` applications, joining the run of step 6 when the block
-     is a single-controlled `C-U`.  A declaration whose parts do not add up to the node's span
-     is ignored;
+     is a single-controlled `C-U`, or as one table raised to `count` by squaring when the
+     block is a permutation by steps 1, 3 or 4 (Phase 8).  A declaration whose parts do not
+     add up to the node's span is ignored;
   3. a `ControlledBlock` whose inner is a permutation → that permutation lifted by §6.1;
   4. the span's permutation table: classical gates (`X, CX, CCX, SWAP, CSWAP`, `MCZ` inside
      the `H·MCZ·H` that `mcx` emits) evaluated on integers at any width; otherwise exact
@@ -103,9 +104,11 @@ lowering inside the simulator path, never visible in the IR.
   `Repeat(block, count)`, and works on an unbuilt block: it builds only its parts (for
   `QPEBlock`, one controlled-`U` per ancilla).  The planner turns the parts into a program
   without the declaring block's gate stream: plain parts are flattened and planned as above,
-  a run of `Repeat`s over the same `C-U` is one `ControlledPowers` kernel.  It refuses, and the
-  caller builds the block, when a `Repeat` is not such a ladder step (a parametric,
-  multi-controlled or wider-than-12-qubit `U`, a control on |0⟩), when any part is parametric,
+  a run of `Repeat`s over the same `C-U` is one `ControlledPowers` kernel, and a `Repeat` of a
+  permutation block is one table raised to the count (Phase 8).  It refuses, and the
+  caller builds the block, when a `Repeat` is neither such a ladder step (a parametric,
+  multi-controlled or wider-than-12-qubit `U`, a control on |0⟩) nor a permutation, or
+  names an unbuilt block, when any part is parametric,
   when a part other than the last records a measurement, or when the declaring block is
   itself placed on a non-identity `target_qubits`.  No register minimum applies:
   the kernel replaces a ladder that is never built.  `QPEBlock` and `DOSQPEBlock` declare
@@ -353,6 +356,8 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | The parts of a declared structure, expanded, are the built block's gate stream | the block's own `flatten()` (contract check, not the oracle) | same |
 | A built declaring block plans from its declaration, with the same kernels as the unbuilt one and no ladder detection; a declaration whose parts do not add up to the gate stream is ignored | analytic program shape; `unitary_matrix() @ ψ` | same |
 | `Repeat` refuses a count below one; a `Repeat` that is not a ladder step, a parametric part and an early measurement refuse the unbuilt plan | the refusal is the assertion | same |
+| A `Repeat` of a controlled permutation is one table raised to the count on both paths: order finding for `a = 2 mod 15` declared with one `C-M(2)` repeated `2^i` times reads its order unbuilt through `plan_structure` and built, with no `ControlledPowers` kernel; the planner lifts the repeated block once per entry, not once per copy; a `Repeat` naming an unbuilt block refuses the unbuilt plan | analytic counting marginal (1/4 at 0, 64, 128, 192); planner call count; the refusal is the assertion | `tests/test_blocks/test_structure.py` |
+| The table power equals the table composed with itself that many times | the composition loop | same |
 | The base `Engine` and an engine with a device offer no structured run | the refusal is the assertion | `tests/test_engines/test_structured_execution.py` |
 | A second `statevector()` on an unchanged block flattens nothing and scans no symbols; a block changed afterwards, a child changed afterwards, and a block with a pending dagger re-plan or take the full path | the refusal is the assertion (spies on `flatten` and `free_symbols`); `unitary_matrix() @ ψ` | same |
 | `_flatten_digest` equals `_commands_digest` of the Python `flatten()` on a composite with placed children | the two digests, same function | same |
@@ -404,6 +409,12 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 
 - [x] `merged()` post-pass in `_finish`; `Dense`–`Dense` and `Permutation`–`Permutation` across disjoint kernels *(2026-10-06)*
 - [x] Tests for the merge row; §14 sentence *(2026-10-06)*
+
+### Phase 8 — A repeated permutation as one table
+
+- [x] `_power` (table raised to a count by squaring); the planner lowers a `Repeat` of a permutation block to one `Permutation` on both paths *(2026-10-07)*
+- [x] `plan_structure` refuses a `Repeat` naming an unbuilt block instead of raising *(2026-10-07)*
+- [x] Tests for the two rows; §14 sentences *(2026-10-07)*
 
 ## Deviations log
 
@@ -497,6 +508,11 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   object: the `target_qubits` write that placed it on the state register predates this branch
   and let a state block shared by two QPE blocks corrupt the first (review probe:
   `IndexError` at flatten).  The unitary and the other parts are constructed per block.
+- Phase 8 beyond the green-lit text (user decision after the review): a `Repeat` whose block
+  is a permutation was refused unbuilt and walked once per copy when built (order finding
+  at `a = 12`: 459 ms build, 615 ms plan in the review probe), where one table raised to the
+  count by squaring costs `log2(count)` compositions and lifts the ladder's 12-qubit cap to
+  the 26-qubit table cap (the same probe after: unbuilt plan 10 ms, built plan 0.5 s).
 - Known limits, not addressed here: a gather needs a second state buffer and tables up to the
   26-qubit cap are held by the planner and the program; the controlled-powers cost rule does
   not count the matrix squarings; a `QPEBlock` handed to a primitive directly still builds,

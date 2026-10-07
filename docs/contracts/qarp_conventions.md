@@ -673,7 +673,8 @@ How circuits run.
   contiguous span of the gate stream, so remaps, pending ops and measurements match the gate
   path by construction.  Per node the planner tries, in order: a declared
   `classical_action` (§13); a declared `structure()` (§13), whose parts are planned in order
-  in place of the node's span and children, a `Repeat` counting as that many applications;
+  in place of the node's span and children, a `Repeat` counting as that many applications,
+  or as one table raised to the count when its block is a permutation;
   a `ControlledBlock` whose inner is a permutation, lifted by §6.1;
   the span's permutation table — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
   that `mcx` emits) evaluated on integers at any width, otherwise derived by restriction: the
@@ -702,7 +703,8 @@ How circuits run.
   primitive per call and hands the block's counts to the primitive's `run()`) when the
   engine can run it — `QarpEngine` with structured on, no device, a primitive that samples
   the block as given (`samples_block`, set by `Sampler` alone), every `Repeat` a ladder step of one
-  control on |1⟩ over a concrete `U` of at most 12 qubits, no parametric part, a recorded
+  control on |1⟩ over a concrete `U` of at most 12 qubits or a permutation block (its table
+  raised to the count), no parametric part, a recorded
   measurement only in the last part — and None otherwise, with no register minimum.  The
   hook knows no algorithm and no block class.  `QPE` and `DOSQPE` offer their block this way
   and build it only when refused, so their build cost no longer grows with the ancilla

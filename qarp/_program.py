@@ -219,6 +219,19 @@ def _physical_gates(cmds) -> int:
     return sum(1 for c in cmds if _is_physical(c))
 
 
+def _power(table: np.ndarray, count: int) -> np.ndarray:
+    """``table`` composed with itself ``count`` times, by squaring."""
+    result = np.arange(len(table), dtype=np.int64)
+    base = table
+    while count:
+        if count & 1:
+            result = base[result]
+        count >>= 1
+        if count:
+            base = base[base]
+    return result
+
+
 class _Planner:
     def __init__(self, commands: list, n_qubits: int, fusion_width: int):
         self.commands = commands
@@ -371,8 +384,8 @@ class _Planner:
         self._walk_entries(children)
 
     def _walk_entries(self, entries) -> None:
-        """Plan children or declared parts in order; a repeated entry is
-        walked once per copy of its span."""
+        """Plan children or declared parts in order; a repeated entry is one
+        table when its block is a permutation, else walked once per copy."""
         i = 0
         while i < len(entries):
             ladder = self._ladder(entries, i)
@@ -382,9 +395,33 @@ class _Planner:
                 continue
             kid, s, e, kid_map, count = entries[i]
             step = (e - s) // count
-            for c in range(count):
-                self.walk(kid, s + c * step, s + (c + 1) * step, kid_map)
+            found = None
+            if count > 1:
+                found = self._repeated(kid, self.commands[s : s + step], kid_map, count)
+            if found is not None:
+                self._emit(found)
+            else:
+                for c in range(count):
+                    self.walk(kid, s + c * step, s + (c + 1) * step, kid_map)
             i += 1
+
+    def _single(self, kid, span: list, qmap: list[int]) -> Optional[Permutation]:
+        """One application of ``kid`` (``span``, in the root frame) as a
+        permutation from the sources ``walk`` tries, or None."""
+        found = self._declared(kid, span, qmap)
+        if found is None:
+            found = self._controlled(kid, qmap)
+        if found is None:
+            touched = sorted({q for c in span for q in c.qubits})
+            found = self._table(span, touched) if touched else None
+        return found
+
+    def _repeated(self, kid, span: list, qmap: list[int], count: int) -> Optional[Permutation]:
+        """``count`` applications of a permutation ``kid`` as one table."""
+        found = self._single(kid, span, qmap)
+        if found is None:
+            return None
+        return Permutation(found.qubits, _power(found.table, count))
 
     def _ladder_step(self, kid, kid_map: list[int]):
         """``(key, control, inner commands)`` for a block ``C-U`` on one control
@@ -546,10 +583,12 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
     the block is never built (§14).
 
     The planned stream holds the plain parts only; every ``Repeat`` must be a
-    ladder step (one control on |1⟩, a concrete ``U`` within ``K_POWERS``) and
-    join a ``ControlledPowers`` kernel, no part may be parametric, and only
-    the last part may record a measurement.  No register minimum applies.
-    None when any of that fails, or without a structured kernel.
+    built ladder step (one control on |1⟩, a concrete ``U`` within
+    ``K_POWERS``) joining a ``ControlledPowers`` kernel or a built permutation
+    block, lowered to one table raised to the count; no part may be
+    parametric, and only the last part may record a measurement.  No register
+    minimum applies.  None when any of that fails, or without a structured
+    kernel.
     """
     if not _declares_structure(block) or _has_pending_ops(block):
         return None
@@ -567,6 +606,8 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
     repeated: set[int] = set()
     for part in parts:
         if isinstance(part, Repeat):
+            if not part.block.is_built:
+                return None
             repeated.add(len(entries))
             entries.append((part.block, len(cmds), len(cmds), _placement(part.block), part.count))
             continue
@@ -587,7 +628,13 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
             planner._emit(kernel)
             continue
         if i in repeated:
-            return None
+            kid, _, _, kid_map, count = entries[i]
+            found = planner._repeated(kid, list(kid.flatten()), kid_map, count)
+            if found is None:
+                return None
+            planner._emit(found)
+            i += 1
+            continue
         kid, s, e, kid_map, _ = entries[i]
         if n_qubits >= MIN_QUBITS:
             planner.walk(kid, s, e, kid_map)

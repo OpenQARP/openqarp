@@ -21,6 +21,9 @@ from qarp.blocks import (
     ComputationalBasisStateBlock,
     ControlledBlock,
     DOSQPEBlock,
+    HnBlock,
+    ModularMultiplicationBlock,
+    QFTBlock,
     QPEBlock,
     Repeat,
     SimpleBlock,
@@ -289,6 +292,81 @@ def test_an_unbuilt_plan_refuses_what_it_cannot_lower():
     tail = SimpleBlock(1, target_qubits=[0])
     tail.measure(0, 0)
     assert _program.plan_structure(_Declares([*ladder, tail.build()], 5), 5) is not None
+
+
+def _order_finding_declared(n_counting: int = 8) -> _Declares:
+    """Order finding for a = 2 mod 15 with one C-M(2) per counting qubit,
+    repeated 2^i times; the work register (|1⟩) follows the counting one."""
+    counting = list(range(n_counting))
+    work = list(range(n_counting, n_counting + 4))
+    one = SimpleBlock(4, target_qubits=work, name="PrepareWorkOne")
+    one.x(0)
+    mult = ModularMultiplicationBlock(2, 15).build()
+    iqft = QFTBlock(n_counting).dagger().build()
+    iqft.target_qubits = counting
+    parts = [
+        HnBlock(n_counting, target_qubits=counting).build(),
+        one.build(),
+        *(Repeat(_ladder_step(c, mult, work), 2**i) for i, c in enumerate(counting)),
+        iqft,
+    ]
+    return _Declares(parts, n_counting + 4)
+
+
+def _counting_marginal(psi, n_counting: int) -> np.ndarray:
+    probs = np.abs(np.asarray(psi)) ** 2
+    return probs.reshape(1 << 4, 1 << n_counting).sum(axis=0)
+
+
+# a = 2 mod 15 has order 4, which divides 2^8: the counting marginal is exactly
+# 1/4 at 0, 64, 128 and 192 (analytic).
+_ORDER_FOUR = np.zeros(256)
+_ORDER_FOUR[[0, 64, 128, 192]] = 0.25
+
+
+def test_a_repeated_controlled_permutation_lowers_unbuilt_to_one_table():
+    block = _order_finding_declared()
+    plan = _program.plan_structure(block, 12)
+    assert plan is not None and not block.is_built
+    kinds = plan.program().kinds()
+    assert "permutation" in kinds and "controlled_powers" not in kinds
+    zero = np.zeros(1 << 12, dtype=complex)
+    zero[0] = 1.0
+    out = qx.QarpSimulator().program_statevector(plan.program(), 12, initial_state=zero)
+    np.testing.assert_allclose(_counting_marginal(out, 8), _ORDER_FOUR, atol=1e-12)
+
+
+def test_a_repeated_controlled_permutation_is_lifted_once_per_entry_when_built(monkeypatch):
+    lifts = []
+    single = _program._Planner._single
+
+    def counted(self, kid, span, qmap):
+        lifts.append(kid)
+        return single(self, kid, span, qmap)
+
+    monkeypatch.setattr(_program._Planner, "_single", counted)
+    block = _order_finding_declared().build()
+    plan = _program.plan(block, 12)
+    assert plan is not None and "controlled_powers" not in plan.program().kinds()
+    # One lift per repeated entry (255 copies in all); Repeat(·, 1) walks as a plain part.
+    assert len(lifts) == sum(1 for p in block.structure() if isinstance(p, Repeat) and p.count > 1)
+    np.testing.assert_allclose(
+        _counting_marginal(block.statevector(structured=True), 8), _ORDER_FOUR, atol=1e-12
+    )
+
+
+def test_the_table_power_is_the_repeated_composition():
+    table = np.random.default_rng(6).permutation(64).astype(np.int64)
+    for count in (1, 2, 13, 32):
+        naive = np.arange(64, dtype=np.int64)
+        for _ in range(count):
+            naive = table[naive]
+        np.testing.assert_array_equal(_program._power(table, count), naive)
+
+
+def test_a_repeat_naming_an_unbuilt_block_refuses_the_unbuilt_plan():
+    unbuilt = ControlledBlock(_Asym(2), num_controls=1, ctrl_state=[True])
+    assert _program.plan_structure(_Declares([Repeat(unbuilt, 3)], 5), 5) is None
 
 
 def test_engines_without_the_path_offer_no_structured_run():
