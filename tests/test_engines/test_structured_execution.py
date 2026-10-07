@@ -997,3 +997,127 @@ def test_a_flattened_tree_plans_nothing_where_the_level_on_the_tree_keeps_its_ke
     np.testing.assert_allclose(
         block.statevector(psi, optimization_level=1), flat.statevector(psi), atol=1e-12
     )
+
+
+# ── Declared descendants first, daggers walked, Block.kernels() ────────────
+
+
+class _DeclaredIncrement(_Increment):
+    """``_Increment`` declaring its action."""
+
+    def classical_action(self, indices):
+        return (indices + 1) % (1 << self.n_qubits)
+
+
+def _declared_then_rotations(n: int = 12) -> CompositeBlock:
+    low = [0, 1, 2, 3, 4]
+    return CompositeBlock(
+        [_DeclaredIncrement(5, target_qubits=low), _Cancels(9, target_qubits=list(range(3, n)))],
+        n_qubits=n,
+    ).build()
+
+
+def _derived_spans(monkeypatch) -> list:
+    spans: list = []
+    table = _program._Planner._table
+
+    def spy(self, span, touched):
+        spans.append(len(span))
+        return table(self, span, touched)
+
+    monkeypatch.setattr(_program._Planner, "_table", spy)
+    return spans
+
+
+def test_a_declaring_descendant_skips_the_parents_derivation(monkeypatch):
+    n = 12
+    block = _declared_then_rotations(n)
+    spans = _derived_spans(monkeypatch)
+    assert _program.plan(block, n).program().kinds() == ["permutation", "gates"]
+    # Only the rotations were offered for derivation: not the whole span, not the declared leaf.
+    assert spans == [len(list(block.children())[1].flatten())]
+    psi = _random_state(n, 14)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(block.unitary_matrix()) @ psi,
+        atol=1e-12,
+    )
+
+
+def test_a_daggered_composite_plans_inverse_tables_in_reverse(monkeypatch):
+    n = 12
+    forward = _declared_then_rotations(n)
+    block = forward.dagger()
+    assert block.is_built
+    spans = _derived_spans(monkeypatch)
+    assert _program.plan(block, n).program().kinds() == ["gates", "permutation"]
+    assert spans == [len(list(forward.children())[1].flatten())]
+    psi = _random_state(n, 15)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(forward.unitary_matrix()).conj().T @ psi,
+        atol=1e-12,
+    )
+
+
+def test_a_daggered_qpe_ladder_plans_controlled_powers_over_u_dagger():
+    from qarp.blocks import ComputationalBasisStateBlock, QPEBlock
+
+    u = SimpleBlock(1, name="U")
+    u.p(0, 2 * np.pi * 0.375)
+    forward = QPEBlock(ComputationalBasisStateBlock([1]), u, 11, 1, measure=False).build()
+    block = forward.dagger()
+    n = block.n_qubits
+    assert "controlled_powers" in _program.plan(block, n).program().kinds()
+    psi = _random_state(n, 16)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(forward.unitary_matrix()).conj().T @ psi,
+        atol=1e-12,
+    )
+
+
+def test_a_daggered_order_finding_block_plans_permutations():
+    forward = OrderFindingBlock(2, 15).build()
+    block = forward.dagger()
+    n = block.n_qubits
+    assert "permutation" in _program.plan(block, n).program().kinds()
+    psi = _random_state(n, 17)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(forward.unitary_matrix()).conj().T @ psi,
+        atol=1e-12,
+    )
+
+
+def test_a_double_dagger_plans_as_the_forward_block():
+    n = 12
+    forward = _declared_then_rotations(n)
+    block = forward.dagger().dagger()
+    assert _program.plan(block, n).program().kinds() == _program.plan(forward, n).program().kinds()
+    psi = _random_state(n, 18)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        forward.statevector(psi, structured=True),
+        atol=1e-12,
+    )
+
+
+def test_kernels_lists_what_statevector_runs_and_caches_the_program(monkeypatch):
+    block = _tree_with_a_gate_slice(12)
+    plans = []
+    real = _program.plan
+
+    def counted(*args, **kwargs):
+        plans.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_program, "plan", counted)
+    assert block.kernels() == ["permutation", "gates", "permutation"]
+    assert block.kernels(structured=False) is None
+    assert block.kernels(optimization_level=1) == ["permutation", "gates", "permutation"]
+    block.statevector(optimization_level=1)
+    assert len(plans) == 2
+    assert block.optimize(level=1).kernels() is None
+    with pytest.raises(RuntimeError, match="built"):
+        _Cancels(9).kernels()

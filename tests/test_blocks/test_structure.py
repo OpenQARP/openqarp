@@ -126,9 +126,9 @@ def test_a_built_declaring_block_plans_from_its_declaration(monkeypatch):
     calls = []
     steps = _program._Planner._ladder_step
 
-    def counted(self, kid, kid_map):
+    def counted(self, kid, kid_map, *rest):
         calls.append(kid)
-        return steps(self, kid, kid_map)
+        return steps(self, kid, kid_map, *rest)
 
     monkeypatch.setattr(_program._Planner, "_ladder_step", counted)
     built = _program.plan(block.build(), block.n_qubits)
@@ -340,9 +340,9 @@ def test_a_repeated_controlled_permutation_is_lifted_once_per_entry_when_built(m
     lifts = []
     single = _program._Planner._single
 
-    def counted(self, kid, span, qmap):
+    def counted(self, kid, span, qmap, *rest):
         lifts.append(kid)
-        return single(self, kid, span, qmap)
+        return single(self, kid, span, qmap, *rest)
 
     monkeypatch.setattr(_program._Planner, "_single", counted)
     block = _order_finding_declared().build()

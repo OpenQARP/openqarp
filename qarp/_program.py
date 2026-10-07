@@ -192,6 +192,31 @@ def _has_pending_ops(node) -> bool:
     )
 
 
+def _has_pending_subs(node) -> bool:
+    return bool(
+        getattr(node, "_pending_substitutions", None)
+        or getattr(node, "_pending_replacements", None)
+    )
+
+
+def _is_daggered(node) -> bool:
+    return bool(getattr(node, "_is_dagger", False))
+
+
+def _daggered(span: list) -> Optional[list]:
+    """The dagger of a gate stream (reversed, each command daggered), or None
+    when a branch region or a measurement makes that ill-defined here."""
+    if any(c.gate in _TRAJECTORY or c.gate == qx.GateType.Measure for c in span):
+        return None
+    return [c.dagger() for c in reversed(span)]
+
+
+def _inverse(table: np.ndarray) -> np.ndarray:
+    out = np.empty_like(table)
+    out[table] = np.arange(len(table), dtype=np.int64)
+    return out
+
+
 def _placement(node) -> list[int]:
     tq = getattr(node, "target_qubits", None)
     return list(tq) if tq is not None else list(range(node.n_qubits))
@@ -269,33 +294,42 @@ class _Planner:
         self.kernels: list[Kernel] = []
         self._tables: dict = {}
         self._matrices: dict = {}
+        self._below: dict[int, bool] = {}
 
-    def _declared(self, node, span: list, qmap: list[int]) -> Optional[Permutation]:
-        if not _declares_action(node) or _has_pending_ops(node):
+    def _declared(
+        self, node, span: list, qmap: list[int], dagger: bool = False
+    ) -> Optional[Permutation]:
+        """``span`` (the node's stream, daggered when ``dagger``) as the
+        declared table, inverted under a dagger."""
+        if not _declares_action(node) or _has_pending_subs(node):
             return None
-        if node.n_qubits > MAX_COMPOSE_QUBITS or not _action_holds(node, span, qmap):
+        if node.n_qubits > MAX_COMPOSE_QUBITS:
+            return None
+        forward = _daggered(span) if dagger else span
+        if forward is None or not _action_holds(node, forward, qmap):
             return None
         image = node.classical_action(np.arange(1 << node.n_qubits, dtype=np.int64))
         if image is None:
             return None
-        return Permutation(tuple(qmap[: node.n_qubits]), np.ascontiguousarray(image, np.int64))
+        table = np.ascontiguousarray(image, np.int64)
+        return Permutation(tuple(qmap[: node.n_qubits]), _inverse(table) if dagger else table)
 
     def _inner_permutation(self, inner) -> Optional[tuple[list[int], np.ndarray]]:
         """``(qubits in inner's frame, table)`` for a controlled block's inner."""
-        if _has_pending_ops(inner) or inner.n_qubits > MAX_COMPOSE_QUBITS:
+        if _has_pending_subs(inner) or inner.n_qubits > MAX_COMPOSE_QUBITS:
             return None
         commands = list(inner.flatten())
-        if _declares_action(inner) and _action_holds(inner, commands, _placement(inner)):
-            image = inner.classical_action(np.arange(1 << inner.n_qubits, dtype=np.int64))
-            if image is not None:
-                return _placement(inner), np.ascontiguousarray(image, np.int64)
+        declared = self._declared(inner, commands, _placement(inner), _is_daggered(inner))
+        if declared is not None:
+            return _placement(inner), declared.table
         local = list(range(inner.n_qubits))
         found = self._table(commands, local)
         return None if found is None else (local, found.table)
 
-    def _controlled(self, node, qmap: list[int]) -> Optional[Permutation]:
-        """A permutation inner lifted under its controls (§6.1)."""
-        if not isinstance(node, qx.ControlledBlock) or _has_pending_ops(node):
+    def _controlled(self, node, qmap: list[int], dagger: bool = False) -> Optional[Permutation]:
+        """A permutation inner lifted under its controls (§6.1), inverted
+        under a dagger."""
+        if not isinstance(node, qx.ControlledBlock) or _has_pending_subs(node):
             return None
         n_ctrl = node.n_controls() if callable(node.n_controls) else node.n_controls
         state = getattr(node, "control_state", None)
@@ -313,7 +347,7 @@ class _Planner:
         want = sum(1 << j for j, active in enumerate(state) if active)
         table = np.where(ctrl == want, (inner_table[x >> n_ctrl] << n_ctrl) | ctrl, x)
         local = list(range(n_ctrl)) + [n_ctrl + q for q in inner_qubits]
-        return Permutation(tuple(qmap[q] for q in local), table)
+        return Permutation(tuple(qmap[q] for q in local), _inverse(table) if dagger else table)
 
     def _table(self, span: list, touched: list[int]) -> Optional[Permutation]:
         if len(touched) > MAX_COMPOSE_QUBITS:
@@ -342,24 +376,48 @@ class _Planner:
             self._matrices[key] = np.asarray(qx._local_unitary(span, touched))
         return Dense(tuple(touched), self._matrices[key])
 
-    def _children(self, node, start: int, end: int, qmap: list[int]):
-        """``(kid, start, end, kid_map, count)`` per child, or None."""
-        if _has_pending_ops(node) or not isinstance(node, qx.CompositeBlock):
+    def _children(self, node, start: int, end: int, qmap: list[int], dagger: bool = False):
+        """``(kid, start, end, kid_map, count, dagger)`` per child, or None.
+        A daggered node's stream is its children reversed, each daggered."""
+        if _has_pending_subs(node) or not isinstance(node, qx.CompositeBlock):
             return None
         kids = list(node.children())
         lengths = [len(k.flatten()) for k in kids]
         if sum(lengths) != end - start:
             return None
+        if dagger:
+            kids.reverse()
+            lengths.reverse()
         out = []
         for kid, length in zip(kids, lengths, strict=True):
-            out.append((kid, start, start + length, [qmap[t] for t in _placement(kid)], 1))
+            kid_map = [qmap[t] for t in _placement(kid)]
+            out.append((kid, start, start + length, kid_map, 1, dagger ^ _is_daggered(kid)))
             start += length
         return out
 
-    def _parts(self, node, start: int, end: int, qmap: list[int]):
-        """``(kid, start, end, kid_map, count)`` per declared part, or None when
-        nothing is declared or the parts are not the span."""
-        if not _declares_structure(node) or _has_pending_ops(node):
+    def _declares_below(self, node) -> bool:
+        """A descendant the walk can reach declares ``classical_action`` or
+        ``structure()``, so deriving this node's span would only repeat it."""
+        key = id(node)
+        if key not in self._below:
+            found = False
+            if isinstance(node, qx.CompositeBlock) and not _has_pending_subs(node):
+                for kid in node.children():
+                    if (
+                        _declares_action(kid)
+                        or _declares_structure(kid)
+                        or self._declares_below(kid)
+                    ):
+                        found = True
+                        break
+            self._below[key] = found
+        return self._below[key]
+
+    def _parts(self, node, start: int, end: int, qmap: list[int], dagger: bool = False):
+        """``(kid, start, end, kid_map, count, False)`` per declared part, or
+        None when nothing is declared, the span is daggered, or the parts are
+        not the span."""
+        if not _declares_structure(node) or _has_pending_subs(node) or dagger:
             return None
         parts = node.structure()
         if parts is None:
@@ -372,7 +430,8 @@ class _Planner:
             if not kid.is_built:
                 return None
             cmds = list(kid.flatten())
-            out.append((kid, at, at + len(cmds) * count, [qmap[t] for t in _placement(kid)], count))
+            kid_map = [qmap[t] for t in _placement(kid)]
+            out.append((kid, at, at + len(cmds) * count, kid_map, count, False))
             declared.append((cmds, count))
             at += len(cmds) * count
         if at != end:
@@ -382,30 +441,34 @@ class _Planner:
         span = qx._local_commands_digest(self.commands[start:end], qmap[: node.n_qubits])
         return out if qx._parts_digest(declared) == span else None
 
-    def walk(self, node, start: int, end: int, qmap: list[int]) -> None:
+    def walk(self, node, start: int, end: int, qmap: list[int], dagger: bool = False) -> None:
+        """Plan ``node``'s span; ``dagger`` says the span is the dagger of the
+        node's own stream (a daggered ancestor, or the node itself)."""
         span = self.commands[start:end]
         n_gates = _physical_gates(span)
         if n_gates < MIN_SPAN_GATES:
             self._emit(Gates(start, end))
             return
-        declared = self._declared(node, span, qmap)
+        declared = self._declared(node, span, qmap, dagger)
         if declared is None:
-            parts = self._parts(node, start, end, qmap)
+            parts = self._parts(node, start, end, qmap, dagger)
             if parts is not None:
                 self._walk_entries(parts)
                 return
-            declared = self._controlled(node, qmap)
+            declared = self._controlled(node, qmap, dagger)
         if declared is not None:
             self._emit(declared)
             return
         touched = sorted({q for c in span for q in c.qubits})
-        found: Optional[Kernel] = self._table(span, touched) if touched else None
+        found: Optional[Kernel] = None
+        if touched and not self._declares_below(node):
+            found = self._table(span, touched)
         if found is None:
             found = self._dense(span, touched, n_gates)
         if found is not None:
             self._emit(found)
             return
-        children = self._children(node, start, end, qmap)
+        children = self._children(node, start, end, qmap, dagger)
         if children is None:
             self._emit(Gates(start, end))
             return
@@ -421,40 +484,45 @@ class _Planner:
                 kernel, i = ladder
                 self._emit(kernel)
                 continue
-            kid, s, e, kid_map, count = entries[i]
+            kid, s, e, kid_map, count, dagger = entries[i]
             step = (e - s) // count
             found = None
             if count > 1:
-                found = self._repeated(kid, self.commands[s : s + step], kid_map, count)
+                found = self._repeated(kid, self.commands[s : s + step], kid_map, count, dagger)
             if found is not None:
                 self._emit(found)
             else:
                 for c in range(count):
-                    self.walk(kid, s + c * step, s + (c + 1) * step, kid_map)
+                    self.walk(kid, s + c * step, s + (c + 1) * step, kid_map, dagger)
             i += 1
 
-    def _single(self, kid, span: list, qmap: list[int]) -> Optional[Permutation]:
+    def _single(
+        self, kid, span: list, qmap: list[int], dagger: bool = False
+    ) -> Optional[Permutation]:
         """One application of ``kid`` (``span``, in the root frame) as a
         permutation from the sources ``walk`` tries, or None."""
-        found = self._declared(kid, span, qmap)
+        found = self._declared(kid, span, qmap, dagger)
         if found is None:
-            found = self._controlled(kid, qmap)
+            found = self._controlled(kid, qmap, dagger)
         if found is None:
             touched = sorted({q for c in span for q in c.qubits})
             found = self._table(span, touched) if touched else None
         return found
 
-    def _repeated(self, kid, span: list, qmap: list[int], count: int) -> Optional[Permutation]:
+    def _repeated(
+        self, kid, span: list, qmap: list[int], count: int, dagger: bool = False
+    ) -> Optional[Permutation]:
         """``count`` applications of a permutation ``kid`` as one table."""
-        found = self._single(kid, span, qmap)
+        found = self._single(kid, span, qmap, dagger)
         if found is None:
             return None
         return Permutation(found.qubits, _power(found.table, count))
 
-    def _ladder_step(self, kid, kid_map: list[int]):
+    def _ladder_step(self, kid, kid_map: list[int], dagger: bool = False):
         """``(key, control, inner commands)`` for a block ``C-U`` on one control
-        active on |1⟩, where ``key`` identifies ``U`` and its target qubits."""
-        if not isinstance(kid, qx.ControlledBlock) or _has_pending_ops(kid):
+        active on |1⟩, where ``key`` identifies ``U`` and its target qubits;
+        under a dagger ``U`` is the daggered inner stream."""
+        if not isinstance(kid, qx.ControlledBlock) or _has_pending_subs(kid):
             return None
         n_ctrl = kid.n_controls() if callable(kid.n_controls) else kid.n_controls
         state = getattr(kid, "control_state", None)
@@ -463,9 +531,14 @@ class _Planner:
         if n_ctrl != 1 or not state[0]:
             return None
         inner = kid.inner()
-        if inner.n_qubits > K_POWERS or _has_pending_ops(inner):
+        if inner.n_qubits > K_POWERS or _has_pending_subs(inner):
             return None
         commands = list(inner.flatten())
+        if dagger:
+            daggered = _daggered(commands)
+            if daggered is None:
+                return None
+            commands = daggered
         if not all(_has_unitary(c) for c in commands):
             return None
         targets = tuple(kid_map[1 + b] for b in range(inner.n_qubits))
@@ -475,7 +548,7 @@ class _Planner:
         """A run of the same ``C-U`` from entry ``i`` as one ``ControlledPowers``
         kernel and the index after the run, or None.  A repeated entry counts
         as ``count`` applications."""
-        first = self._ladder_step(entries[i][0], entries[i][3])
+        first = self._ladder_step(entries[i][0], entries[i][3], entries[i][5])
         if first is None:
             return None
         key, _, commands = first
@@ -483,8 +556,8 @@ class _Planner:
         gates = 0
         j = i
         while j < len(entries):
-            kid, _, _, kid_map, count = entries[j]
-            step = self._ladder_step(kid, kid_map)
+            kid, _, _, kid_map, count, dagger = entries[j]
+            step = self._ladder_step(kid, kid_map, dagger)
             if step is None or step[0] != key:
                 break
             counts[step[1]] = counts.get(step[1], 0) + count
@@ -537,7 +610,8 @@ def plan(
     cmds = list(block.flatten()) if commands is None else list(commands)
     planner = _Planner(cmds, n_qubits, fusion_width)
     tq = getattr(block, "target_qubits", None)
-    planner.walk(block, 0, len(cmds), list(tq) if tq is not None else list(range(n_qubits)))
+    qmap = list(tq) if tq is not None else list(range(n_qubits))
+    planner.walk(block, 0, len(cmds), qmap, _is_daggered(block))
     return _finish(planner.kernels, cmds)
 
 
@@ -637,15 +711,17 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
             if not part.block.is_built:
                 return None
             repeated.add(len(entries))
-            entries.append((part.block, len(cmds), len(cmds), _placement(part.block), part.count))
+            entries.append(
+                (part.block, len(cmds), len(cmds), _placement(part.block), part.count, False)
+            )
             continue
         kid_cmds = list(part.flatten())
         if any(c.is_parametric() for c in kid_cmds):
             return None
         start = len(cmds)
         cmds.extend(kid_cmds)
-        entries.append((part, start, len(cmds), _placement(part), 1))
-    for _, s, e, _, _ in entries[:-1]:
+        entries.append((part, start, len(cmds), _placement(part), 1, False))
+    for _, s, e, _, _, _ in entries[:-1]:
         if any(_needs_trajectory(c) for c in cmds[s:e]):
             return None
     i = 0
@@ -656,14 +732,14 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
             planner._emit(kernel)
             continue
         if i in repeated:
-            kid, _, _, kid_map, count = entries[i]
+            kid, _, _, kid_map, count, _ = entries[i]
             found = planner._repeated(kid, list(kid.flatten()), kid_map, count)
             if found is None:
                 return None
             planner._emit(found)
             i += 1
             continue
-        kid, s, e, kid_map, _ = entries[i]
+        kid, s, e, kid_map, _, _ = entries[i]
         if n_qubits >= MIN_QUBITS:
             planner.walk(kid, s, e, kid_map)
         else:

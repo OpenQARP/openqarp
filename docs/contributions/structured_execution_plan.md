@@ -86,7 +86,8 @@ lowering inside the simulator path, never visible in the IR.
      block is a permutation by steps 1, 3 or 4 (Phase 8).  A declaration whose parts do not
      add up to the node's span is ignored;
   3. a `ControlledBlock` whose inner is a permutation → that permutation lifted by §6.1;
-  4. the span's permutation table: classical gates (`X, CX, CCX, SWAP, CSWAP`, `MCZ` inside
+  4. the span's permutation table — skipped when a descendant declares `classical_action` or
+     `structure()`, so the node is walked into its children instead (Phase 10): classical gates (`X, CX, CCX, SWAP, CSWAP`, `MCZ` inside
      the `H·MCZ·H` that `mcx` emits) evaluated on integers at any width; otherwise exact
      derivation by restriction — the qubits no command couples (only ever controls, phase
      partners, or moved by classical gates among themselves) are fixed per assignment and
@@ -99,6 +100,10 @@ lowering inside the simulator path, never visible in the IR.
      targets) becomes one `ControlledPowers` kernel with one exponent per control; a leaf with
      nothing better is `Gates`.
   Adjacent permutations compose into one table inside `qx.Program.add_permutation`.
+  A daggered node (Phase 10) is walked as its children in reverse, each span daggered: a
+  declared `classical_action` gives its inverse table, a lifted controlled inner likewise, a
+  ladder's `U` is the daggered inner stream, and a `structure()` declaration under a dagger
+  is not read (its span is derived or runs as gates).
 - **Declared structure, read before the block is built.**  `structure()` returns the block as
   a sequence of parts, each a block placed in the declaring block's frame or a
   `Repeat(block, count)`, and works on an unbuilt block: it builds only its parts (for
@@ -367,6 +372,9 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 | `Block.statevector(optimization_level=k)`, k in 0, 1, 2, keeps the planned kernels of a mixed block, matches the gate path, and the optimized gate slices never grow with k (level 1 below level 0); a refused plan optimizes the whole stream; a level change re-plans (cache key) | `unitary_matrix() @ ψ`; gate counts through the transpiler | `tests/test_engines/test_structured_execution.py` |
 | `QarpEngine(optimization_level=k)` samples the same distribution at every level and passes the level to its transpiler for the gate slices and the gate path; a level outside 0–2, or any level with a device, raises | `unitary_matrix()` Born probabilities; the raise is the assertion | same |
 | A tree flattened by `Block.optimize(1)` plans nothing where `statevector(optimization_level=1)` on the tree keeps its kernels, with equal results | `unitary_matrix() @ ψ` | same |
+| A node whose descendant declares is walked into its children without a derivation attempt on its own span; a declaring leaf under a non-permutation parent still becomes one table | planner call spy; `unitary_matrix() @ ψ` | `tests/test_engines/test_structured_execution.py` |
+| A daggered composite over declared permutations plans the inverse tables in reverse order; a daggered QPE ladder plans `ControlledPowers` over `U†`; a daggered order-finding block plans permutations; a double dagger plans as the forward block | `unitary_matrix().conj().T @ ψ` | same |
+| `Block.kernels()` lists the kernels `statevector` would run, None on the gate path or with `structured=False`, raises unbuilt, and leaves the program cached for the next `statevector` | the program's own kinds; planner call spy | same |
 | The base `Engine` and an engine with a device offer no structured run | the refusal is the assertion | `tests/test_engines/test_structured_execution.py` |
 | A second `statevector()` on an unchanged block flattens nothing and scans no symbols; a block changed afterwards, a child changed afterwards, and a block with a pending dagger re-plan or take the full path | the refusal is the assertion (spies on `flatten` and `free_symbols`); `unitary_matrix() @ ψ` | same |
 | `_flatten_digest` equals `_commands_digest` of the Python `flatten()` on a composite with placed children | the two digests, same function | same |
@@ -430,6 +438,17 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
 - [x] `Block.statevector(optimization_level=)`: the gate slices of a structured program, or the whole stream on the gate path, through the native-gateset transpiler at that level; part of the program cache key *(2026-10-07)*
 - [x] `QarpEngine(optimization_level=)`: the standalone transpiler's level for compiled circuits and the gate slices of its programs (default 1); refused with a device *(2026-10-07)*
 - [x] Tests for the three rows; §14 sentences *(2026-10-07)*
+
+### Phase 10 — Declared descendants first, daggers walked
+
+- [x] A node with a declaring descendant skips its own derivation and walks its children *(2026-10-07)*
+- [x] The walk carries a dagger flag: children in reverse, declared and lifted tables inverted, ladders over the daggered inner; `structure()` not read under a dagger *(2026-10-07)*
+- [x] Tests for the two rows; §14 sentences; the derivation budget's one-off cost documented *(2026-10-07)*
+
+### Phase 11 — `Block.kernels()`
+
+- [x] `Block.kernels(*, structured=None, optimization_level=None)`: the program's kinds, None on the gate path; caches the program *(2026-10-07)*
+- [x] Test row; §14 sentence *(2026-10-07)*
 
 ## Deviations log
 
@@ -533,7 +552,14 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   on this branch its level 0 planned a qlbm step in 1.6 ms and levels 1 and 2 ran the gates
   in 65 ms.  The level now reaches the gate slices after planning, on `Block.statevector`
   and on `QarpEngine`, whose transpiler was pinned at level 1 with no knob.
-- Known limits, not addressed here: a gather needs a second state buffer and tables up to the
+- Phases 10 and 11 beyond the green-lit text (user decision on qlbm's review of the branch):
+  derivation ran before descent, so a declared leaf under a non-permutation parent cost a
+  refused derivation of the parent's span first (131 ms in a qlbm step); a daggered block was
+  an opaque span, so the inverse of a declared operator ran as gates; and the kernel kinds a
+  block would run were readable only through the private planner.
+- Known limits, not addressed here: a gather needs a second state buffer; the derivation
+  budget is paid once per distinct program and never amortises for a one-off run of a block
+  that is not a permutation (`structured=False` skips it) and tables up to the
   26-qubit cap are held by the planner and the program; the controlled-powers cost rule does
   not count the matrix squarings; a `QPEBlock` handed to a primitive directly still builds,
   flattens and transpiles its ladder, which a lazy repeat block would remove.

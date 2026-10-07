@@ -676,7 +676,8 @@ How circuits run.
   in place of the node's span and children, a `Repeat` counting as that many applications,
   or as one table raised to the count when its block is a permutation;
   a `ControlledBlock` whose inner is a permutation, lifted by §6.1;
-  the span's permutation table — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
+  the span's permutation table, unless a descendant declares (the node is then walked into
+  its children without a derivation attempt) — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
   that `mcx` emits) evaluated on integers at any width, otherwise derived by restriction: the
   qubits no command couples (controls, phase partners, or moved by classical gates among
   themselves) are enumerated and tracked, every other command is sliced at their value, and
@@ -684,6 +685,14 @@ How circuits run.
   state with amplitude 1, both within `1e-10` (phase included, EQ-2) — a span closer than
   that to a permutation runs as the exact permutation; a `Dense` kernel; its children, where a run
   of the same single-controlled `C-U` becomes one `ControlledPowers` kernel; else `Gates`.
+  A daggered node is walked as its children in reverse with each span daggered: a declared
+  `classical_action` and a lifted controlled inner give their inverse tables, a ladder's `U`
+  is the daggered inner stream, and a `structure()` declaration is not read under a dagger.
+  `Block.kernels()` lists the kernels `statevector` would run on a built block, in order, or
+  None when the gate path runs; it takes `structured` and `optimization_level` as
+  `statevector` does and leaves the program cached.  The derivation budget is paid once per
+  distinct program and never amortises for a one-off run of a block that is not a
+  permutation; `structured=False` skips it.
   A program with no structured kernel is never built — that circuit runs the unchanged
   gate path bit for bit — and neither are registers under 12 qubits, spans of fewer than
   three gates, or a program with a measurement or classical condition outside its last

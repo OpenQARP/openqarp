@@ -1011,6 +1011,27 @@ class _BlockMixin:
             return np.asarray(sim.statevector(cmds, self.n_qubits))
         return np.asarray(sim.statevector(cmds, self.n_qubits, initial_state=psi))
 
+    def kernels(
+        self, *, structured: Optional[bool] = None, optimization_level: Optional[int] = None
+    ) -> "list[str] | None":
+        """The kernels :meth:`statevector` would run on this built block, in
+        order (``"permutation"``, ``"dense"``, ``"controlled_powers"``,
+        ``"gates"``), or None when the gate path runs (§14 *Structured
+        execution*).  Same arguments as ``statevector``; the program is left
+        cached for it.
+        """
+        if not self._built:
+            raise RuntimeError("Cannot list kernels, block not built. Call build() first.")
+        _program.opt_level(optimization_level)
+        if not _program.resolve(structured):
+            return None
+        cmds = self._simulable_commands("statevector")
+        width = _program.fusion_width_of(qx.QarpSimulator(), self.n_qubits)
+        program = _program.cached_program(
+            self, cmds, self.n_qubits, width, optimization_level=optimization_level
+        )
+        return None if program is None else list(program.kinds())
+
     def classical_action(self, indices: "np.ndarray") -> "np.ndarray | None":
         """Images of local basis indices under this block, or ``None``.
 
