@@ -112,10 +112,8 @@ def _two_qubit_phase_unitary():
     return u.build()
 
 
-def test_dosqpe_dicke_probe_exact_sector_dos():
-    """Dicke |2,1⟩ probe = maximally mixed over the hamming-weight-1 sector:
-    the exact DOS is half weight at each sector eigenphase (1/4 and 1/2),
-    both exactly representable at n_ancilla=4."""
+def _run_dicke_dosqpe():
+    """The Dicke |2,1⟩ probe at n_ancilla=4, built and run exactly: ``(dosqpe, dist)``."""
     import qarp
     from qarp.engines import QarpEngine
 
@@ -125,14 +123,20 @@ def test_dosqpe_dicke_probe_exact_sector_dos():
         hamming_weight=1,
         engine=QarpEngine(n_shots=qarp.EXACT),
     ).build()
-    dist = dosqpe.run()
+    return dosqpe, dosqpe.run()
+
+
+def test_dosqpe_dicke_probe_exact_sector_dos():
+    """Dicke |2,1⟩ probe = maximally mixed over the hamming-weight-1 sector:
+    the exact DOS is half weight at each sector eigenphase (1/4 and 1/2),
+    both exactly representable at n_ancilla=4."""
+    _, dist = _run_dicke_dosqpe()
 
     bits_quarter = tuple((4 >> b) & 1 for b in range(4))  # φ = 4/16
     bits_half = tuple((8 >> b) & 1 for b in range(4))  # φ = 8/16
     assert dist.get(bits_quarter, 0.0) == pytest.approx(0.5, abs=1e-9)
     assert dist.get(bits_half, 0.0) == pytest.approx(0.5, abs=1e-9)
     assert sum(dist.values()) == pytest.approx(1.0)
-    return dosqpe
 
 
 def test_dosqpe_plot_before_run_raises():
@@ -144,7 +148,7 @@ def test_dosqpe_plot_before_run_raises():
 
 
 def test_dosqpe_dicke_plot_structural(monkeypatch):
-    dosqpe = test_dosqpe_dicke_probe_exact_sector_dos()
+    dosqpe, _ = _run_dicke_dosqpe()
 
     fig, ax = dosqpe.plot(return_fig=True)
     assert ax.get_title() == "probe: Dicke state |2, 1>"
@@ -162,7 +166,7 @@ def test_dosqpe_dicke_plot_structural(monkeypatch):
 
 
 def test_dosqpe_plot_against_spectrum_structural(monkeypatch):
-    dosqpe = test_dosqpe_dicke_probe_exact_sector_dos()
+    dosqpe, _ = _run_dicke_dosqpe()
 
     fig, ax = dosqpe.plot_against_spectrum(
         unique_eigs=[0.25, 0.5],
