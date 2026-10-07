@@ -556,8 +556,10 @@ above.
   building only the parts.  The override promises that the parts in order are the block's
   gate stream; `QPEBlock` and `DOSQPEBlock` declare theirs and add their children from the
   same list.  Structured execution (§14) lowers a declaration without the block's gate stream
-  and plans a built block from it in place of its children; a declaration whose parts do not
-  add up to the block's stream is ignored.  Every overriding class is registered in
+  and plans a built block from it in place of its children.  An unbuilt block's declaration
+  is trusted as lowered; a built block's is checked against its gates (the parts' placed
+  streams, a `Repeat` that many times, digest like the block's span in its own frame) and
+  ignored when it differs or names an unbuilt part.  Every overriding class is registered in
   `tests/test_blocks/test_structure.py`, whose completeness guard fails on an unregistered
   one, and is checked there against its `unitary_matrix()`.
 

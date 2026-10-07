@@ -475,6 +475,17 @@ std::optional<std::vector<uint64_t>> permutation_table(const std::vector<Command
   across kernels on other qubits (repeated 4-qubit sites ran one kernel per occurrence where
   fusion runs one per site; 20 layers of them went from 54 ms to 4 ms against 108 ms as
   gates).
+- A built block's `structure()` is trusted only when its parts are its gates: the planner
+  digests the declared stream (each part's placed `flatten()`, a `Repeat` that many times)
+  against the node's span in its local frame and ignores the declaration otherwise, as it
+  does a part that is not built.  The length check alone let a declaration of equal gate
+  count but different content run in place of the gates (review probe: 0.053 max amplitude
+  error).  The declared stream is hashed in C++ from `(commands, count)` pairs
+  (`qx._parts_digest`, ABI 14) and the span in place with the remap applied as it hashes, so
+  neither side copies the stream; the two digests run once per distinct program and add
+  about 0.3 s to the 1.2 s plan of a built 14-ancilla `QPEBlock` over a 3-qubit synthesized
+  `U` (2.2 M commands, after a 1.6 s build).  `plan_structure` has no stream to check and
+  stays trusted (user decision).
 - Known limits, not addressed here: a gather needs a second state buffer and tables up to the
   26-qubit cap are held by the planner and the program; the controlled-powers cost rule does
   not count the matrix squarings; a `QPEBlock` handed to a primitive directly still builds,

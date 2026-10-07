@@ -563,4 +563,37 @@ TEST(ProgramKernels, MeasurementOutsideTheLastGatesKernelIsRejected) {
     EXPECT_THROW((void)QarpSimulator().program_run(p, 2, 10, 1u), std::invalid_argument);
 }
 
+// ── Digests ─────────────────────────────────────────────────────────────
+//
+// Oracle: the plain digest of the stream written out in full.
+
+TEST(ProgramDigests, PartsDigestIsTheDigestOfTheRepeatedStream) {
+    const std::vector<Command> a = {Command(GateType::H, 0), Command(GateType::CX, 0, 2),
+                                    Command(GateType::Ry, 2, Param(0.37))};
+    const std::vector<Command> b = {Command(GateType::X, 1), measure(1, 0)};
+    std::vector<Command> written;
+    for (int i = 0; i < 3; ++i) written.insert(written.end(), a.begin(), a.end());
+    written.insert(written.end(), b.begin(), b.end());
+    for (int i = 0; i < 2; ++i) written.insert(written.end(), a.begin(), a.end());
+    EXPECT_EQ(parts_digest({{a, 3}, {b, 1}, {a, 2}}), commands_digest(written));
+    EXPECT_NE(parts_digest({{a, 2}, {b, 1}, {a, 3}}), commands_digest(written));
+    EXPECT_EQ(parts_digest({}), commands_digest({}));
+}
+
+TEST(ProgramDigests, LocalDigestIsTheDigestOfTheRemappedStream) {
+    const std::vector<Command> placed = {Command(GateType::H, 5), Command(GateType::CX, 5, 2),
+                                         Command(GateType::Rz, 7, Param(0.21)), measure(2, 3)};
+    const std::vector<uint32_t> qubits = {2, 7, 5};
+    uint32_t top = 0;
+    for (auto q : qubits) top = std::max(top, q + 1);
+    std::vector<uint32_t> map(top, UINT32_MAX);
+    for (std::size_t b = 0; b < qubits.size(); ++b) map[qubits[b]] = static_cast<uint32_t>(b);
+    std::vector<Command> local;
+    for (const auto& c : placed) local.push_back(c.remap_qubits(map));
+    EXPECT_EQ(local_commands_digest(placed, qubits), commands_digest(local));
+    EXPECT_NE(local_commands_digest(placed, qubits), commands_digest(placed));
+    // A command outside `qubits` falls back to the unmapped digest.
+    EXPECT_EQ(local_commands_digest(placed, {2, 7}), commands_digest(placed));
+}
+
 }  // namespace qarpx::test

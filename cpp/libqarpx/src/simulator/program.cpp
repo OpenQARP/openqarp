@@ -737,6 +737,42 @@ Eigen::MatrixXcd local_unitary_of(const std::vector<Command>&  commands,
     return QarpSimulator().unitary_matrix(*local, static_cast<int>(qubits.size()));
 }
 
+namespace {
+
+constexpr uint64_t kDigestSeed = 0xcbf29ce484222325ULL;
+
+// One command into the FNV-1a state, its qubits read through `map` when given.
+void mix_command(uint64_t& h, const Command& c, const std::vector<uint32_t>* map) {
+    mix(h, static_cast<uint64_t>(c.gate));
+    mix(h, c.qubits.size());
+    for (auto q : c.qubits) mix(h, map ? (*map)[q] : q);
+    mix(h, c.cbits.size());
+    for (auto b : c.cbits) mix(h, b);
+    mix(h, c.condition_bits.size());
+    for (std::size_t i = 0; i < c.condition_bits.size(); ++i) {
+        mix(h, c.condition_bits[i]);
+        mix(h, c.condition_values[i] ? 1 : 0);
+    }
+    mix(h, c.params.size());
+    for (const auto& p : c.params) {
+        if (p.is_concrete()) {
+            mix(h, std::bit_cast<uint64_t>(p.value()));
+        } else {
+            for (char ch : p.to_string()) mix(h, static_cast<unsigned char>(ch));
+        }
+    }
+    if (c.unitary) {
+        const auto& u = *c.unitary;
+        for (Eigen::Index r = 0; r < u.rows(); ++r)
+            for (Eigen::Index col = 0; col < u.cols(); ++col) {
+                mix(h, std::bit_cast<uint64_t>(u(r, col).real()));
+                mix(h, std::bit_cast<uint64_t>(u(r, col).imag()));
+            }
+    }
+}
+
+}  // namespace
+
 uint64_t local_commands_digest(const std::vector<Command>&  commands,
                                const std::vector<uint32_t>& qubits) {
     uint32_t top = 0;
@@ -745,46 +781,25 @@ uint64_t local_commands_digest(const std::vector<Command>&  commands,
     for (auto q : qubits) top = std::max(top, q + 1);
     std::vector<uint32_t> map(top, UINT32_MAX);
     for (std::size_t b = 0; b < qubits.size(); ++b) map[qubits[b]] = static_cast<uint32_t>(b);
-    std::vector<Command> local;
-    local.reserve(commands.size());
-    for (const auto& c : commands) {
+    for (const auto& c : commands)
         for (auto q : c.qubits)
             if (map[q] == UINT32_MAX) return commands_digest(commands);
-        local.push_back(c.remap_qubits(map));
-    }
-    return commands_digest(local);
+    uint64_t h = kDigestSeed;
+    for (const auto& c : commands) mix_command(h, c, &map);
+    return h;
 }
 
 uint64_t commands_digest(const std::vector<Command>& commands) {
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (const auto& c : commands) {
-        mix(h, static_cast<uint64_t>(c.gate));
-        mix(h, c.qubits.size());
-        for (auto q : c.qubits) mix(h, q);
-        mix(h, c.cbits.size());
-        for (auto b : c.cbits) mix(h, b);
-        mix(h, c.condition_bits.size());
-        for (std::size_t i = 0; i < c.condition_bits.size(); ++i) {
-            mix(h, c.condition_bits[i]);
-            mix(h, c.condition_values[i] ? 1 : 0);
-        }
-        mix(h, c.params.size());
-        for (const auto& p : c.params) {
-            if (p.is_concrete()) {
-                mix(h, std::bit_cast<uint64_t>(p.value()));
-            } else {
-                for (char ch : p.to_string()) mix(h, static_cast<unsigned char>(ch));
-            }
-        }
-        if (c.unitary) {
-            const auto& u = *c.unitary;
-            for (Eigen::Index r = 0; r < u.rows(); ++r)
-                for (Eigen::Index col = 0; col < u.cols(); ++col) {
-                    mix(h, std::bit_cast<uint64_t>(u(r, col).real()));
-                    mix(h, std::bit_cast<uint64_t>(u(r, col).imag()));
-                }
-        }
-    }
+    uint64_t h = kDigestSeed;
+    for (const auto& c : commands) mix_command(h, c, nullptr);
+    return h;
+}
+
+uint64_t parts_digest(const std::vector<std::pair<std::vector<Command>, std::size_t>>& parts) {
+    uint64_t h = kDigestSeed;
+    for (const auto& [commands, count] : parts)
+        for (std::size_t i = 0; i < count; ++i)
+            for (const auto& c : commands) mix_command(h, c, nullptr);
     return h;
 }
 

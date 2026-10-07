@@ -10,6 +10,7 @@
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <utility>
 #include <vector>
 
 namespace qarpx {
@@ -116,5 +117,10 @@ void apply_controlled_powers(const ControlledPowersKernel&        k,
 /// `qubits`.
 [[nodiscard]] uint64_t local_commands_digest(const std::vector<Command>&  commands,
                                              const std::vector<uint32_t>& qubits);
+
+/// `commands_digest` of the stream in which each part's commands repeat
+/// `count` times, in order, hashed without materialising that stream.
+[[nodiscard]] uint64_t parts_digest(
+    const std::vector<std::pair<std::vector<Command>, std::size_t>>& parts);
 
 }  // namespace qarpx

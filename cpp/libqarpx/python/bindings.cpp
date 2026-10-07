@@ -162,7 +162,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 13
+#define QARPX_ABI_VERSION 14
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -1141,6 +1141,9 @@ NB_MODULE(qarpx, m) {
           "materialising the commands in Python.");
     m.def("_local_commands_digest", &local_commands_digest, "commands"_a, "qubits"_a,
           "Internal: digest of commands remapped onto range(len(qubits)).");
+    m.def("_parts_digest", &parts_digest, "parts"_a,
+          "Internal: _commands_digest of each part's commands repeated count "
+          "times, in order, without materialising the stream.");
 
     // ── QarpSimulator ──
     nb::class_<QarpSimulator>(m, "QarpSimulator")

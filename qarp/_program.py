@@ -317,19 +317,29 @@ class _Planner:
 
     def _parts(self, node, start: int, end: int, qmap: list[int]):
         """``(kid, start, end, kid_map, count)`` per declared part, or None when
-        nothing is declared or the parts do not add up to the span."""
+        nothing is declared or the parts are not the span."""
         if not _declares_structure(node) or _has_pending_ops(node):
             return None
         parts = node.structure()
         if parts is None:
             return None
-        out = []
+        out: list = []
+        declared: list = []
+        at = start
         for part in parts:
             kid, count = (part.block, part.count) if isinstance(part, Repeat) else (part, 1)
-            length = len(kid.flatten()) * count
-            out.append((kid, start, start + length, [qmap[t] for t in _placement(kid)], count))
-            start += length
-        return out if start == end else None
+            if not kid.is_built:
+                return None
+            cmds = list(kid.flatten())
+            out.append((kid, at, at + len(cmds) * count, [qmap[t] for t in _placement(kid)], count))
+            declared.append((cmds, count))
+            at += len(cmds) * count
+        if at != end:
+            return None
+        # A declaration is trusted only for the gates it names (§13): the parts
+        # sit in the node's frame, so the span is digested there too.
+        span = qx._local_commands_digest(self.commands[start:end], qmap[: node.n_qubits])
+        return out if qx._parts_digest(declared) == span else None
 
     def walk(self, node, start: int, end: int, qmap: list[int]) -> None:
         span = self.commands[start:end]

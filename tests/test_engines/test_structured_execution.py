@@ -786,6 +786,13 @@ def test_the_cpp_digest_equals_the_python_digest():
     assert qx._flatten_digest(block) == qx._commands_digest(list(block.flatten()))
 
 
+def test_the_parts_digest_is_the_digest_of_the_repeated_stream():
+    a = list(_Increment(3, target_qubits=[2, 0, 1]).build().flatten())
+    b = list(_Mix(2, target_qubits=[3, 1]).build().flatten())
+    assert qx._parts_digest([(a, 3), (b, 1), (a, 2)]) == qx._commands_digest(a * 3 + b + a * 2)
+    assert qx._parts_digest([(a, 2), (b, 1), (a, 3)]) != qx._commands_digest(a * 3 + b + a * 2)
+
+
 # ── Same-qubit kernels merge across kernels on other qubits ─────────────────
 
 

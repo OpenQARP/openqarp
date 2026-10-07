@@ -168,6 +168,64 @@ def test_a_declaration_that_does_not_add_up_is_ignored(monkeypatch):
     )
 
 
+class _AsymOther(_Asym):
+    """The same gate count as ``_Asym`` with other angles."""
+
+    def build_vanilla(self):
+        self.h(0)
+        self.cx(0, 1)
+        self.ry(1, 0.91)
+        self.rz(0, 0.64)
+        self.t(1)
+        self.gphase(0.12)
+
+
+class _LiesInContent(qb.CompositeBlockBase):
+    """Declares a ladder over one U and builds one of equal length over another."""
+
+    def __init__(self, declared, used):
+        self._declared = declared
+        self._used = used
+        super().__init__(n_qubits=5)
+
+    def structure(self):
+        return [Repeat(self._declared, 4)]
+
+    def build_vanilla(self):
+        for _ in range(4):
+            self.add_child(self._used)
+
+
+def test_a_declaration_of_the_right_length_but_other_gates_is_ignored(monkeypatch):
+    # Same gate count, so only the digest of the parts tells the declaration
+    # from the gates; planned from the declaration this gave wrong amplitudes.
+    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
+    declared = _ladder_step(0, _Asym(2).build(), [3, 4])
+    used = _ladder_step(0, _AsymOther(2).build(), [3, 4])
+    assert len(declared.flatten()) == len(used.flatten())
+    block = _LiesInContent(declared, used).build()
+    psi = _random_state(5, 4)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(block.unitary_matrix()) @ psi,
+        atol=1e-12,
+    )
+
+
+def test_a_declaration_naming_an_unbuilt_part_is_ignored(monkeypatch):
+    monkeypatch.setattr(_program, "MIN_QUBITS", 0)
+    unbuilt = ControlledBlock(_Asym(2), num_controls=1, ctrl_state=[True])
+    used = _ladder_step(0, _Asym(2).build(), [3, 4])
+    block = _LiesInContent(unbuilt, used).build()
+    assert not unbuilt.is_built
+    psi = _random_state(5, 5)
+    np.testing.assert_allclose(
+        block.statevector(psi, structured=True),
+        np.asarray(block.unitary_matrix()) @ psi,
+        atol=1e-12,
+    )
+
+
 def test_repeat_refuses_a_count_below_one():
     with pytest.raises(ValueError, match="count"):
         Repeat(_phase_u().build(), 0)
