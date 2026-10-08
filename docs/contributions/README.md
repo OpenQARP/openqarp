@@ -136,7 +136,7 @@ something else, parked until they are picked up.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
-| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | 🚧 | Revision 3 green-lit; Phase R4 pending: OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool` |
+| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | 🚧 | OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool`; the PR's three-mode table pending |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | ✅ | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | ✅ | Same PR as `sampler_distribution_plan.md`; no convention edit |
 | [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels | Stefano Scali | ✅ | Structural: §13/§14 edits; replaces the structured-QPE fast path (`prepare_structured_qpe` removed) |

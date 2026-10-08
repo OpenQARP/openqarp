@@ -1,6 +1,6 @@
 # Keep OpenBLAS's idle workers from starving the simulator
 
-**Status:** In progress (revision 3 green-lit; Phase R4 pending)
+**Status:** In progress (Phase R4 in code; its PR text pending)
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-29
@@ -289,10 +289,10 @@ cases (`bm_lqlga_d1q2_8_bb` and two MS cases) run with a norm in the loop.
 
 ### Phase R4 — modes (revision 3)
 
-- [ ] `limit` as the default, `pool` as a setting, in `qarp/_blas_threads.py`; hooks registered only in `pool` mode
-- [ ] Tests: the default-mode rows; pool tests run under `pool` and assert the callback counter
-- [ ] `configuration.rst`: the modes, their costs and limits; an example cell showing the setting
-- [ ] PR: the three-mode table above; bare-metal timings as a named follow-up
+- [x] `limit` as the default, `pool` as a setting, in `qarp/_blas_threads.py`; hooks registered only in `pool` mode *(2026-10-08)*
+- [x] Tests: the default-mode rows; pool tests run under `pool` and assert the callback counter *(2026-10-08)*
+- [x] `configuration.rst`: the modes, their costs and limits; an example cell showing the setting *(2026-10-08)*
+- [ ] PR: the three-mode table above; bare-metal timings as a named follow-up (`to_do.md`)
 
 ## Decisions (revision 3, 2026-09-29)
 
@@ -372,3 +372,6 @@ Declared in the PR and folded in above.
   call in flight, with the mutex held and no child handler.
 - **ABI 11**, for the `_blas_pool_workers` binding (scope already covered
   `qarp/_abi.py`).
+- **`install()` returns the libraries examined, in every mode.**  The sketch
+  returned the libraries the callback is in, which under the default mode
+  is none; the thread-count tests read the library through that list.

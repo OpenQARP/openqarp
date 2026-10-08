@@ -1,11 +1,12 @@
-"""Run OpenBLAS's parallel jobs on a qarpx-owned pool.
+"""Keep numpy's and scipy's OpenBLAS from starving the simulator.
 
 numpy and scipy wheels each bundle their own OpenBLAS.  After a
 multi-threaded call its workers keep spinning, and the next simulator call
-competes with them for the cores.  OpenBLAS accepts a threading callback;
-qarpx supplies one that runs the jobs on a pool whose idle workers sleep and
-which a forked child rebuilds.  ``QARP_BLAS_THREADS=native`` leaves OpenBLAS
-alone.
+competes with them for the cores.  ``QARP_BLAS_THREADS`` selects what the
+first simulation does to every bundled copy found: ``limit`` (the default)
+lowers its thread count to qarpx's; ``pool`` also hands it a threading
+callback that runs its jobs on a qarpx-owned pool whose idle workers sleep
+and which a forked child rebuilds; ``native`` leaves it alone.
 """
 
 import ctypes
@@ -35,6 +36,7 @@ _ENTRY_POINTS = (
     ),
 )
 _PACKAGES = ("numpy", "scipy")
+_MODES = ("limit", "pool", "native")
 # Counts the user set for OpenBLAS; qarp then leaves the count alone.
 _USER_COUNT_VARIABLES = ("OPENBLAS_NUM_THREADS", "GOTO_NUM_THREADS")
 
@@ -102,21 +104,23 @@ def _user_set_count() -> bool:
     return False
 
 
-def _opted_out() -> bool:
+def _mode() -> str:
+    """The ``QARP_BLAS_THREADS`` mode: unset is ``limit``; an unknown value
+    warns once and counts as unset."""
     global _warned_about_setting
     raw = os.environ.get("QARP_BLAS_THREADS", "")
     value = raw.strip().lower()
-    if value == "native":
-        return True
+    if value in _MODES:
+        return value
     if value and not _warned_about_setting:
         warnings.warn(
-            f"QARP_BLAS_THREADS={raw!r} is not recognised; set it to 'native' to keep "
-            "OpenBLAS's own threads, or leave it unset",
+            f"QARP_BLAS_THREADS={raw!r} is not recognised; accepted values are "
+            "'limit' (the default), 'pool' and 'native'",
             UserWarning,
             stacklevel=3,
         )
         _warned_about_setting = True
-    return False
+    return "limit"
 
 
 def _follows_qarp(count: int) -> bool:
@@ -134,8 +138,8 @@ def _follows_qarp(count: int) -> bool:
 
 
 def install() -> list[str]:
-    """Install qarpx's callback into the bundled OpenBLAS of every imported
-    package not yet examined; return the paths of all libraries it is in.
+    """Apply the mode to the bundled OpenBLAS of every imported package not
+    yet examined; return the paths of all libraries examined so far.
 
     Runs at the first simulation (a ``QarpEngine`` built, ``Block.statevector``
     or ``Block.unitary_matrix``) and again at each later one, so a process
@@ -143,12 +147,15 @@ def install() -> list[str]:
     is covered from the next simulation on.  OpenBLAS's thread count is
     lowered to qarpx's and left alone when the environment sets it; it is
     raised only from the count OpenBLAS took from a thread bound by OpenMP.
+    The callback, and with it the pool's fork and exit handlers, exist only
+    under ``pool``.
     """
-    if _opted_out():
+    mode = _mode()
+    if mode == "native":
         return [library.path for library in _installed]
     pending = [p for p in _PACKAGES if p not in _examined_packages and p in sys.modules]
     if pending:
-        address = qx._openblas_threads_callback_address()
+        address = qx._openblas_threads_callback_address() if mode == "pool" else None
         keep_count = _user_set_count()
         for package in pending:
             _examined_packages.add(package)
@@ -158,13 +165,15 @@ def install() -> list[str]:
                     continue
                 if not keep_count and _follows_qarp(library.get_num_threads()):
                     library.set_num_threads(qx._configured_thread_count())
-                library.set_callback(address)
+                if address is not None:
+                    library.set_callback(address)
                 _installed.append(library)
     return [library.path for library in _installed]
 
 
 def uninstall() -> None:
-    """Hand every library back to OpenBLAS's own pool."""
+    """Hand every library back to OpenBLAS's own pool and forget it, so the
+    next ``install`` examines it again."""
     for library in _installed:
         library.set_callback(None)
     _installed.clear()

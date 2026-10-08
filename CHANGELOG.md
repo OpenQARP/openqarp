@@ -29,8 +29,10 @@ All notable changes to OpenQARP are recorded here. The format follows
   `counts`, `standard_errors`, `marginal`, `to_dense`,
   `parity_expectation`, `top`, `most_likely`, `total_variation`,
   `hellinger_fidelity` and `sample`.
-- `QARP_BLAS_THREADS=native` keeps numpy's and scipy's OpenBLAS threading
-  untouched (see *Changed*).
+- `QARP_BLAS_THREADS`: `limit`, the default, lowers numpy's and scipy's
+  OpenBLAS thread count to qarp's at the first simulation; `pool` also runs
+  their parallel jobs on a qarpx-owned pool whose workers sleep as soon as a
+  call ends; `native` leaves OpenBLAS untouched (see *Changed*).
 - `examples/engines/mwe_structured_execution.ipynb`.
 
 ### Changed
@@ -43,11 +45,11 @@ All notable changes to OpenQARP are recorded here. The format follows
   their controlled-U ladder; the run goes through one controlled-powers
   kernel whatever the ancilla count.
 - OpenBLAS's thread count in numpy and scipy is lowered to qarp's
-  (`QARP_NUM_THREADS`) at the first simulation, and their parallel jobs run
-  on a small pool of qarpx's own whose workers sleep as soon as a call
-  ends, so a BLAS call no longer leaves workers spinning against the next
-  simulator call (a 16-qubit `statevector` right after a norm: 108 ms to
-  5 ms).  A count set in `OPENBLAS_NUM_THREADS` or in code is kept.
+  (`QARP_NUM_THREADS`) at the first simulation, so a BLAS call no longer
+  leaves a worker spinning on every logical CPU against the next simulator
+  call (a 16-qubit `statevector` right after a norm: 108 ms to under 8 ms).
+  A count set in `OPENBLAS_NUM_THREADS` or in code is kept, and
+  `QARP_BLAS_THREADS=native` restores the previous behaviour.
 
 ### Removed
 

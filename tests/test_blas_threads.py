@@ -1,4 +1,6 @@
-"""OpenBLAS's parallel jobs run on a qarpx-owned pool (``qarp/_blas_threads.py``).
+"""The three ``QARP_BLAS_THREADS`` modes of ``qarp/_blas_threads.py``: OpenBLAS's
+thread count lowered to qarpx's by default, its parallel jobs on a qarpx-owned
+pool under ``pool``, nothing under ``native``.
 
 Numerical oracles are analytic identities (``Q Qᵀ = I``, ``‖1‖ = √n``, a
 known solution, uniform amplitudes) and a BLAS-free ``einsum`` product;
@@ -57,22 +59,53 @@ def _orthogonal(n: int, seed: int = 0) -> np.ndarray:
     return q
 
 
-def _run(code: str, env: dict | None = None, timeout: int = 180) -> str:
-    result = subprocess.run(
+_POOL = {"QARP_BLAS_THREADS": "pool"}
+_COUNT_VARIABLES = (
+    "QARP_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "GOTO_NUM_THREADS",
+)
+
+
+def _inherited_env() -> dict:
+    """The environment without the mode: the fixture sets ``pool`` in this
+    process, and a subprocess must see only the mode its test passes."""
+    return {k: v for k, v in os.environ.items() if k != "QARP_BLAS_THREADS"}
+
+
+def _clean_env() -> dict:
+    """``_inherited_env`` without any thread count either, so a subprocess
+    sees the counts its test sets and nothing else."""
+    return {k: v for k, v in _inherited_env().items() if k not in _COUNT_VARIABLES}
+
+
+def _result(code: str, env: dict | None = None, timeout: int = 180) -> subprocess.CompletedProcess:
+    return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(code)],
-        env={**os.environ, "SKBUILD_EDITABLE_VERBOSE": "0", **(env or {})},
+        env={**_inherited_env(), "SKBUILD_EDITABLE_VERBOSE": "0", **(env or {})},
         capture_output=True,
         text=True,
         timeout=timeout,
     )
+
+
+def _run(code: str, env: dict | None = None, timeout: int = 180) -> str:
+    result = _result(code, env, timeout)
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
 
 @pytest.fixture(autouse=True)
-def _callback_installed():
-    """In-process tests exercise the callback; its trigger is tested in subprocesses."""
+def _pool_installed(monkeypatch):
+    """In-process tests exercise the callback pool; the modes' triggers are
+    tested in subprocesses.  An earlier test may have applied the default
+    mode, so the libraries are examined again under ``pool``."""
+    monkeypatch.setenv("QARP_BLAS_THREADS", "pool")
+    _blas_threads.uninstall()
     _blas_threads.install()
+    yield
+    _blas_threads.uninstall()
 
 
 # ── discovery ───────────────────────────────────────────────────────────
@@ -104,7 +137,7 @@ def test_import_alone_leaves_openblas_untouched():
         "from qarp.blocks import HnBlock; HnBlock(2).build().unitary_matrix()",
     ],
 )
-def test_first_simulation_installs_the_callback(trigger):
+def test_pool_mode_installs_the_callback_at_each_trigger(trigger):
     """qarp imported before numpy, so numpy's library must still be found."""
     out = _run(
         f"""
@@ -114,9 +147,68 @@ def test_first_simulation_installs_the_callback(trigger):
         a = np.ones((1200, 1200))
         a @ a
         print(qarpx._blas_callback_invocations() > 0)
-        """
+        """,
+        _POOL,
     )
     assert out == "True"
+
+
+_DEFAULT_MODE = """
+    import ctypes, glob, os, sys
+    import numpy as np, qarp, qarpx
+    from qarp.engines import QarpEngine
+
+    def tasks():
+        return len(glob.glob("/proc/self/task/*")) if os.path.isdir("/proc/self/task") else -1
+
+    a = np.ones((1200, 1200))
+    a @ a  # OpenBLAS's own workers exist before the install
+    lib = ctypes.CDLL(sys.argv[1])
+    native = lib.scipy_openblas_get_num_threads64_()
+    QarpEngine()
+    after = lib.scipy_openblas_get_num_threads64_()
+    before = tasks()
+    a @ a
+    print(native >= 2, after, qarpx._blas_callback_invocations(), qarpx._blas_pool_workers(),
+          tasks() == before)
+"""
+
+
+@pytest.mark.parametrize("env", [{}, {"QARP_BLAS_THREADS": "limit"}], ids=["unset", "limit"])
+def test_default_mode_lowers_the_count_and_installs_nothing(env):
+    """The count is lowered to qarp's; no callback, no pool worker, and the
+    process's thread count is unchanged by a threaded product after the
+    first simulation (Linux reads ``/proc/self/task``; elsewhere -1 == -1)."""
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(_DEFAULT_MODE), _NUMPY_OPENBLAS[0]],
+        env={**_clean_env(), "SKBUILD_EDITABLE_VERBOSE": "0", "QARP_NUM_THREADS": "2", **env},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["True", "2", "0", "0", "True"]
+
+
+_MODE_NUMBERS = """
+    import numpy as np, qarp, qarpx
+    from qarp import _blas_threads
+    from qarp.engines import QarpEngine
+    QarpEngine()
+    q, _ = np.linalg.qr(np.random.default_rng(5).normal(size=(1200, 1200)))
+    print(float(np.abs(q @ q.T - np.eye(1200)).max()) < 1e-12,
+          qarpx._blas_callback_invocations() > 0, len(_blas_threads._installed) > 0)
+"""
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("limit", "True False True"), ("pool", "True True True"), ("native", "True False False")],
+)
+def test_the_modes_give_the_same_numbers(mode, expected):
+    """``Q Qᵀ = I`` in each mode, with the mode's own fingerprint: the callback
+    counter and whether any library was examined."""
+    assert _run(_MODE_NUMBERS, {"QARP_BLAS_THREADS": mode}) == expected
 
 
 def test_import_never_loads_scipys_library():
@@ -145,7 +237,8 @@ def test_scipy_imported_after_qarp_is_covered_from_the_next_engine():
         p, l, u = scipy.linalg.lu(a)
         rose = qarpx._blas_callback_invocations() > before
         print(covered_before, rose, float(np.abs(p @ l @ u - a).max()) < 1e-10)
-        """
+        """,
+        _POOL,
     )
     assert out == "False True True"
 
@@ -232,15 +325,9 @@ def _count_after_install(env, limit=None, first="numpy_first"):
     the count set to ``limit`` in code beforehand when given.  ``first`` is
     the library loaded first, numpy's OpenBLAS or qarpx with its OpenMP."""
     args = [_NUMPY_OPENBLAS[0], "-" if limit is None else str(limit), first]
-    clean = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in ("QARP_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS")
-        and k != "GOTO_NUM_THREADS"
-    }
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(_COUNT_AFTER_INSTALL), *args],
-        env={**clean, "SKBUILD_EDITABLE_VERBOSE": "0", **env},
+        env={**_clean_env(), "SKBUILD_EDITABLE_VERBOSE": "0", **env},
         capture_output=True,
         text=True,
         timeout=180,
@@ -317,7 +404,7 @@ def test_pool_workers_run_on_every_cpu_of_the_process(pin, env):
         pytest.skip("needs at least two usable CPUs")
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(_WORKER_MASKS), pin],
-        env={**os.environ, "SKBUILD_EDITABLE_VERBOSE": "0", **env},
+        env={**_inherited_env(), "SKBUILD_EDITABLE_VERBOSE": "0", **_POOL, **env},
         capture_output=True,
         text=True,
         timeout=180,
@@ -366,15 +453,45 @@ def test_native_opt_out_in_process(monkeypatch):
     assert _blas_threads.install() == []
 
 
-def test_unknown_setting_warns_once(monkeypatch):
+def test_unknown_setting_warns_once_naming_the_modes(monkeypatch):
     monkeypatch.setenv("QARP_BLAS_THREADS", "natve")
     monkeypatch.setattr(_blas_threads, "_warned_about_setting", False)
-    with pytest.warns(UserWarning, match="not recognised"):
+    with pytest.warns(UserWarning, match=r"not recognised.*limit.*pool.*native"):
         _blas_threads.install()
     with warnings.catch_warnings(record=True) as again:
         warnings.simplefilter("always")
         _blas_threads.install()
     assert again == []
+
+
+def test_unknown_setting_is_treated_as_unset():
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(_DEFAULT_MODE), _NUMPY_OPENBLAS[0]],
+        env={
+            **_clean_env(),
+            "SKBUILD_EDITABLE_VERBOSE": "0",
+            "QARP_NUM_THREADS": "2",
+            "QARP_BLAS_THREADS": "natve",
+        },
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "not recognised" in result.stderr
+    assert result.stdout.split() == ["True", "2", "0", "0", "True"]
+
+
+def test_limit_mode_in_process_lowers_the_count_without_the_callback(monkeypatch):
+    monkeypatch.setenv("QARP_BLAS_THREADS", "limit")
+    _blas_threads.uninstall()
+    assert _NUMPY_OPENBLAS[0] in _blas_threads.install()
+    (numpy_blas,) = [lib for lib in _blas_threads._installed if lib.path == _NUMPY_OPENBLAS[0]]
+    assert numpy_blas.get_num_threads() == qx._configured_thread_count()
+    before = qx._blas_callback_invocations()
+    q = _orthogonal(N, seed=7)
+    np.testing.assert_allclose(q @ q.T, np.eye(N), atol=1e-12)
+    assert qx._blas_callback_invocations() == before
 
 
 # ── numpy and scipy BLAS through the callback ───────────────────────────
@@ -487,7 +604,7 @@ def test_concurrent_python_threads_get_correct_results():
     out = _run(
         """
         import threading
-        import numpy as np, qarp
+        import numpy as np, qarp, qarpx
         from qarp.engines import QarpEngine
         QarpEngine()
         residuals = []
@@ -502,10 +619,11 @@ def test_concurrent_python_threads_get_correct_results():
             t.start()
         for t in threads:
             t.join()
-        print(len(residuals), max(residuals) < 1e-12)
-        """
+        print(len(residuals), max(residuals) < 1e-12, qarpx._blas_callback_invocations() > 0)
+        """,
+        _POOL,
     )
-    assert out == "12 True"
+    assert out == "12 True True"
 
 
 def test_blas_beside_the_simulator_on_two_threads():
@@ -513,7 +631,7 @@ def test_blas_beside_the_simulator_on_two_threads():
         _UNIFORM_BLOCK
         + """
     import threading
-    import numpy as np, qarp
+    import numpy as np, qarp, qarpx
     from qarp.engines import QarpEngine
 
     QarpEngine()
@@ -530,11 +648,12 @@ def test_blas_beside_the_simulator_on_two_threads():
     for _ in range(5):
         amplitude_errors.append(float(np.abs(np.abs(block.statevector()) - 2.0**-8).max()))
     worker.join()
-    print(max(blas_residuals) < 1e-12, max(amplitude_errors) < 1e-12)
+    print(max(blas_residuals) < 1e-12, max(amplitude_errors) < 1e-12,
+          qarpx._blas_callback_invocations() > 0)
     """,
-        {"QARP_NUM_THREADS": "2"},
+        {**_POOL, "QARP_NUM_THREADS": "2"},
     )
-    assert out == "True True"
+    assert out == "True True True"
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="fork only")
@@ -562,6 +681,7 @@ def test_child_forked_after_numpy_only_blas_runs_a_simulation():
         with multiprocessing.get_context("fork").Pool(1) as pool:
             print(used, pool.apply_async(simulate, (18,)).get(timeout=60) < 1e-12)
     """,
+        _POOL,
         timeout=120,
     )
     assert out == "True True"
@@ -585,7 +705,7 @@ def test_forked_child_runs_blas():
 def test_exit_with_daemon_threads_still_in_blas():
     code = """
         import threading, time
-        import numpy as np, qarp
+        import numpy as np, qarp, qarpx
         from qarp.engines import QarpEngine
         QarpEngine()
         a = np.random.default_rng(0).normal(size=(800, 800))
@@ -597,20 +717,23 @@ def test_exit_with_daemon_threads_still_in_blas():
         for _ in range(3):
             threading.Thread(target=loop, daemon=True).start()
         time.sleep(0.3)
+        print(qarpx._blas_callback_invocations() > 0)
     """
     for _ in range(10):
-        _run(code, timeout=60)
+        assert _run(code, _POOL, timeout=60) == "True"
 
 
 def test_blas_during_interpreter_shutdown():
     out = _run(
         """
         import atexit
-        import numpy as np, qarp
+        import numpy as np, qarp, qarpx
         from qarp.engines import QarpEngine
         QarpEngine()
         q, _ = np.linalg.qr(np.random.default_rng(0).normal(size=(1000, 1000)))
-        atexit.register(lambda: print(float(np.abs(q @ q.T - np.eye(1000)).max()) < 1e-12))
-        """
+        atexit.register(lambda: print(float(np.abs(q @ q.T - np.eye(1000)).max()) < 1e-12,
+                                      qarpx._blas_callback_invocations() > 0))
+        """,
+        _POOL,
     )
-    assert out == "True"
+    assert out == "True True"

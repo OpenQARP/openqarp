@@ -163,35 +163,48 @@ above it each call already occupies every core, so threading buys little
 there.
 
 numpy and scipy wheels each bundle their own OpenBLAS, with its own thread
-pool.  After a multi-threaded BLAS call (a complex ``np.linalg.norm``, a
-matrix product, a solve) its workers keep spinning for 100–200 ms, and a
-simulator call started in that window competes with them for the cores: a
-16-qubit ``statevector`` right after a norm took 108 ms instead of 5 ms.
-qarp therefore hands those OpenBLAS copies a threading callback that runs
-their parallel jobs on a small pool of qarpx's own, whose idle workers sleep
-the moment a call ends.  BLAS stays multi-threaded: its thread count is
-lowered to qarp's (``QARP_NUM_THREADS``), and numpy and scipy keep that count
-for the rest of the process.  A count set in ``OPENBLAS_NUM_THREADS`` or
-``GOTO_NUM_THREADS`` stays, and so does a lower limit set in code before the
-first simulation (``threadpoolctl``); one set inside a ``with`` block that
-the first simulation runs in is restored by ``threadpoolctl`` to OpenBLAS's
-own count when the block ends.  BLAS calls from several Python threads run one at a time, because
-OpenBLAS's per-job scratch buffers are shared between calls.  The pool's
-workers run on every CPU the process may use, even when the thread that
-made the first call is pinned to one.  A child created
-with ``fork`` starts a fresh pool, so numpy work before a fork never affects
-the child's simulations.
+pool sized to every logical CPU.  After a multi-threaded BLAS call (a
+complex ``np.linalg.norm``, a matrix product, a solve) its workers keep
+spinning for 100–200 ms, and a simulator call started in that window
+competes with them for the cores: a 16-qubit ``statevector`` right after a
+norm took 108 ms instead of 5 ms.  The penalty is oversubscription, so by
+default qarp lowers each bundled copy's thread count to its own
+(``QARP_NUM_THREADS``) at the first simulation, and numpy and scipy keep
+that count for the rest of the process.  BLAS stays multi-threaded.  A
+count set in ``OPENBLAS_NUM_THREADS`` or ``GOTO_NUM_THREADS`` stays, and so
+does a lower limit set in code before the first simulation
+(``threadpoolctl``); one set inside a ``with`` block that the first
+simulation runs in is restored by ``threadpoolctl`` to OpenBLAS's own count
+when the block ends.
 
-The callback is installed at the first simulation: the first ``QarpEngine``
-built, or the first ``Block.statevector`` or ``Block.unitary_matrix``.  A
-process that imports qarp but never simulates keeps OpenBLAS exactly as it
-was.  scipy's copy is hooked at the first simulation after scipy is imported;
-qarp never loads scipy itself.  Other BLAS libraries (MKL, Accelerate, a
-conda OpenBLAS) are left alone.  To keep OpenBLAS's own threading:
+``QARP_BLAS_THREADS`` selects what that first simulation does:
 
 .. code-block:: bash
 
-    QARP_BLAS_THREADS=native python my_script.py
+    QARP_BLAS_THREADS=limit  python my_script.py   # the default: the count alone
+    QARP_BLAS_THREADS=pool   python my_script.py   # the count, plus qarpx's pool
+    QARP_BLAS_THREADS=native python my_script.py   # OpenBLAS untouched
+
+Lowering the count stops helping where qarpx's threads and as many BLAS
+threads no longer fit the logical CPUs: a budget close to the logical count
+(no hyper-threading, or ``QARP_NUM_THREADS`` raised).  ``pool`` covers that
+case too.  It hands each OpenBLAS copy a threading callback that runs its
+parallel jobs on a small pool of qarpx's own, whose idle workers sleep the
+moment a call ends.  The pool's workers run on every CPU the process may
+use, even when the thread that made the first call is pinned to one, and a
+child created with ``fork`` starts a fresh pool, so numpy work before a
+fork never affects the child's simulations.  It costs: BLAS calls from
+several Python threads run one at a time, because OpenBLAS's per-job
+scratch buffers are shared between calls, and factorisation loops run
+1.4–1.7× slower than on OpenBLAS's own pool at the lowered count.  Any
+other value warns and counts as unset.
+
+The mode is applied at the first simulation: the first ``QarpEngine``
+built, or the first ``Block.statevector`` or ``Block.unitary_matrix``.  A
+process that imports qarp but never simulates keeps OpenBLAS exactly as it
+was.  scipy's copy is covered at the first simulation after scipy is
+imported; qarp never loads scipy itself.  Other BLAS libraries (MKL,
+Accelerate, a conda OpenBLAS) are left alone.
 
 Gate fusion
 ===========
