@@ -1,12 +1,12 @@
 # Keep OpenBLAS's idle workers from starving the simulator
 
-**Status:** In progress (revision 3 awaits its green-light)
+**Status:** In progress (revision 3 green-lit; Phase R4 pending)
 **Author:** Stefano Scali (+ Claude Code)
 **Reviewer:** <to be named>
 **Date:** 2026-09-29
 **Tier:** Structural
 **Branch:** improvement/sampler-exact-speed
-**Green-lit:** revision 2 at 837527d (2026-09-28), plan blob 5d8cd2eff7f7b9ef6ddba79d1b7477501e5d57a1; revision 1 at 7a90d38 (2026-09-26), plan blob bf26f62cc09220a9333afaab68d33479a20e3ba5
+**Green-lit:** revision 3 at 03cad63 (2026-10-08), plan blob bb73f674443596dcd0f0b82e29755b0e06b2f4c9; revision 2 at 837527d (2026-09-28), plan blob 5d8cd2eff7f7b9ef6ddba79d1b7477501e5d57a1; revision 1 at 7a90d38 (2026-09-26), plan blob bf26f62cc09220a9333afaab68d33479a20e3ba5
 **Scope:**
 - `cpp/libqarpx/include/qarpx/parallel/blas_threads.h`, `cpp/libqarpx/src/parallel/blas_threads.cpp` — the callback and its worker pool
 - `cpp/libqarpx/CMakeLists.txt` (source list), `cpp/libqarpx/tests/cpp/CMakeLists.txt` (test list)

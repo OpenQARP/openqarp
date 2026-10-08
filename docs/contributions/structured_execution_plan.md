@@ -1,6 +1,6 @@
 # Execute block structure as typed kernels instead of flattened gates
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Stefano Scali
 **Reviewer:** to be named at the sit-down
 **Date:** 2026-09-28

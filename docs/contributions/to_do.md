@@ -91,6 +91,11 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
 
 ## Additive, no window needed
 
+- **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
+  and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
+  at 12 threads is slow on its own.  Repeat the Threads measurements of
+  `openblas_thread_sharing_plan.md` on bare-metal Linux and revisit the
+  default from them.
 - **`Sampler(postselect=PostSelection(...))`.**  Applying post-selection
   inside `Sampler.run()` waited on a result type that could carry
   `success_rate` without breaking the dict return; `SamplingDistribution`
