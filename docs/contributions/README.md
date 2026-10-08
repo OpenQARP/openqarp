@@ -123,7 +123,9 @@ A plan not tied to one of these windows lands when its own two gates clear.
 
 One row per plan file, open work first (🚧, 📋, then ✅, 🗄️; alphabetical
 within each group).  Every plan also carries a matching `**Status:**` header.
-Not a row: [`_template.md`](_template.md), the plan scaffold.
+Not a row: [`_template.md`](_template.md), the plan scaffold, and
+[`to_do.md`](to_do.md), the side quests: fixes found while working on
+something else, parked until they are picked up.
 
 | Badge | Meaning |
 |-------|---------|
