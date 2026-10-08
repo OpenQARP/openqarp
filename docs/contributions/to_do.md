@@ -13,15 +13,6 @@ never stands in for one.
 type stubs and the repository layout move land, in that order.  These ride
 the same window.
 
-- **Deprecation policy in `RELEASING.md`.**  The landed plans decided that a
-  pre-1.0 release removes or changes a public name without a shim, and the
-  single-import-name plan promises a `qarpx` shim at 1.0; neither rule is
-  written where the next person removing a name will look.  Add to
-  *Versioning*: "While on `0.x`, a minor release may remove or change a
-  public name with no deprecation shim; the change is listed under *Removed*
-  or *Changed* in `CHANGELOG.md`.  From 1.0, a removal is preceded by one
-  minor release in which the old name still works and emits a
-  `DeprecationWarning`."  Trivial PR into `develop`.
 - **`CHANGELOG.md` carries each PR's lines.**  Every PR into `develop`
   before the release adds its entries under `[Unreleased]`; the release PR
   only moves them.  The structured-execution PR's lines.  Removed:
