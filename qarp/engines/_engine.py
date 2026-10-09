@@ -12,13 +12,14 @@ Primitives build ``Block`` objects and submit them via
 
 import warnings
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Literal, Mapping, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Mapping, Optional, Sequence, Union
 
 import numpy as np
 
 import qarpx as qx
 
-from .._types import Consumes, ExactResult, SamplingDictionary, Shots
+from .._sampling_distribution import SamplingDistribution, pack_bits
+from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._runnable import Runnable
 
@@ -99,6 +100,20 @@ def _exact_result(sim, commands, n_qubits: int, initial_state=None) -> ExactResu
     return ExactResult(n_qubits=n_qubits, keys=idx.astype(np.int64), probs=probs[idx])
 
 
+def _exact_program_result(sim, program, n_qubits: int, initial_state=None) -> ExactResult:
+    """``_exact_result`` for a structured program (§14): the same terminal
+    strip, Born probabilities and pruning."""
+    stripped = program.without_measurements()
+    if initial_state is None:
+        sv = np.asarray(sim.program_statevector(stripped, n_qubits))
+    else:
+        psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
+        sv = np.asarray(sim.program_statevector(stripped, n_qubits, initial_state=psi))
+    probs = np.abs(sv) ** 2
+    (idx,) = np.nonzero(probs > _EXACT_PRUNE_TOL)
+    return ExactResult(n_qubits=n_qubits, keys=idx.astype(np.int64), probs=probs[idx])
+
+
 def _reindex_exact(er: ExactResult, l2p) -> ExactResult:
     """Physical→logical bit permutation of an ``ExactResult``.
 
@@ -106,13 +121,11 @@ def _reindex_exact(er: ExactResult, l2p) -> ExactResult:
     physical bit ``l2p[l]``; ``n_qubits`` is unchanged; colliding keys
     accumulate.  Arrays in, arrays out — no dict is built on either side.
     """
-    phys, probs = er.keys, er.probs
-    log = np.zeros_like(phys)
-    for l, p in enumerate(l2p):
-        log |= ((phys >> p) & 1) << l
-    keys, inv = np.unique(log, return_inverse=True)
+    keys, inv = np.unique(pack_bits(er.keys, l2p), return_inverse=True)
     return ExactResult(
-        n_qubits=er.n_qubits, keys=keys, probs=np.bincount(inv, weights=probs, minlength=len(keys))
+        n_qubits=er.n_qubits,
+        keys=keys,
+        probs=np.bincount(inv, weights=er.probs, minlength=len(keys)),
     )
 
 
@@ -158,59 +171,40 @@ def _coerce_params(params: Mapping) -> dict[str, float]:
     return {str(k): float(v) for k, v in params.items()}
 
 
-class StructuredQPEPlan:
-    """Run()-able artefact for the structured QPE / DOS-QPE fast path.
+class StructuredRun:
+    """A block's declared structure lowered to a program before the block is
+    built (§14 *Structured execution*), from :meth:`Engine.prepare_structured`.
 
-    Produced by :meth:`Engine.prepare_structured_qpe`.  Captures the
-    transpiled ingredient streams at build() time; shots resolve at
-    ``sample()`` time so a per-primitive ``n_shots`` override keeps winning
-    over the engine default, mirroring the generic path.  The owning
-    engine's ``_sim`` must provide the C++ ``QarpSimulator``
-    ``simulate_{qpe,dosqpe}_structured`` protocol.
+    Shots and ``initial_state`` are read from the primitive at ``sample()``
+    time, so a per-primitive override keeps winning over the engine default as
+    on the ordinary path, and the result is the primitive's own ``run()`` of
+    the block's counts.
     """
 
-    def __init__(self, engine, kind, u, state_prep, iqft, n_system, n_ancilla, primitive):
+    def __init__(self, engine, program, n_qubits: int, primitive: Runnable):
         self._engine = engine
-        self._kind = kind
-        self._u = u
-        self._state_prep = state_prep
-        self._iqft = iqft
-        self._n_system = n_system
-        self._n_ancilla = n_ancilla
+        self._program = program
+        self._n_qubits = n_qubits
         self._primitive = primitive
 
-    def sample(self) -> SamplingDictionary:
-        """Sample the ancilla register: ``{LSB-first bits tuple: probability}``."""
-        engine = self._engine
-        nm = getattr(engine, "noise_model", None)
-        if nm is not None and nm.enabled:
-            # Eligibility refused noise at prepare() time; the model was
-            # enabled afterwards.  The structured C++ sampler is noiseless —
-            # running it would silently drop the noise.
-            raise CapabilityError(
-                "This structured QPE plan was prepared without noise, but the "
-                "engine's noise model is now enabled; rebuild the algorithm to "
-                "route through the generic (trajectory) path."
+    def sample(self) -> SamplingDistribution:
+        """Sample the program, or evaluate it exactly under ``EXACT`` readout."""
+        engine, prim = self._engine, self._primitive
+        engine._pre_run()
+        engine._validate_primitive(prim)
+        shots = engine._resolve_shots(prim)
+        psi = prim.initial_state
+        if psi is not None:
+            psi = np.ascontiguousarray(psi, dtype=np.complex128)
+        if shots is Shots.EXACT:
+            sr = _exact_program_result(
+                engine._sim, self._program, self._n_qubits, initial_state=psi
             )
-        sim_fn = (
-            engine._sim.simulate_qpe_structured
-            if self._kind == "qpe"
-            else engine._sim.simulate_dosqpe_structured
-        )
-        sr = sim_fn(
-            self._u,
-            self._state_prep,
-            self._iqft,
-            self._n_system,
-            self._n_ancilla,
-            engine._resolve_shots(self._primitive),
-            engine._seed,
-        )
-        distribution: SamplingDictionary = {}
-        for outcome, count in sr.counts.items():
-            bits = tuple((outcome >> q) & 1 for q in range(self._n_ancilla))
-            distribution[bits] = distribution.get(bits, 0.0) + count / sr.n_shots
-        return distribution
+        else:
+            sr = engine._sim.program_run(
+                self._program, self._n_qubits, shots, engine._circuit_seed(0), initial_state=psi
+            )
+        return prim.run([sr])
 
 
 class Engine(ABC):
@@ -231,6 +225,8 @@ class Engine(ABC):
     _seed: Optional[int]
     _primitives: list[Runnable]
     _l2p_per_primitive: list
+    # id(primitive) -> one structured program (or None) per compiled circuit.
+    _programs: dict[int, list]
 
     # ``build()`` / ``run()`` / ``batch_run()`` / ``run_gradient()`` are
     # template methods defined below; engines implement the ``_compile_one``
@@ -247,7 +243,7 @@ class Engine(ABC):
         param_sets: Sequence[Mapping],
         n_shots: Optional[Union[int, Shots]] = None,
         rebuild: bool = True,
-    ) -> list[list[Union[float, complex, SamplingDictionary]]]:
+    ) -> list[list[PrimitiveResult]]:
         """Sweep one set of primitives over multiple parameter dicts.
 
         The inner simulation loop stays entirely in C++ (no Python round-trip
@@ -280,7 +276,7 @@ class Engine(ABC):
         l2p_per_prim: Sequence,
         param_sets: Sequence[Mapping[str, float]],
         shots_override,
-    ) -> list[list[Union[float, complex, SamplingDictionary]]]:
+    ) -> list[list[PrimitiveResult]]:
         """Evaluate already-built primitives at many parameter points.
 
         ``circuits_per_prim[j]`` replaces ``primitives[j].compiled_circuits``
@@ -370,24 +366,14 @@ class Engine(ABC):
     def provides_amplitudes(self) -> bool:
         return True
 
-    def prepare_structured_qpe(
-        self,
-        kind: Literal["qpe", "dosqpe"],
-        unitary,
-        state,
-        n_ancilla: int,
-        primitive: Runnable,
-    ) -> Optional[StructuredQPEPlan]:
-        """Offer a fast-path plan for canonical / DOS phase estimation.
+    def prepare_structured(self, block, primitive: Runnable) -> Optional[StructuredRun]:
+        """Lower ``block``'s declared ``structure()`` to a runnable program
+        without building the block (§14 *Structured execution*).
 
-        ``unitary`` / ``state`` are built blocks.  Returns a
-        :class:`StructuredQPEPlan` when this engine can evaluate the QPE via
-        a structured sampler (matrix exponentiation — the controlled-U
-        ladder is never compiled), or None → the caller builds the generic
-        circuit.  Base default: no fast path.
-
-        Callers must not probe *why* a plan was refused — every eligibility
-        rule lives in the engine override (see ``QarpEngine``).
+        ``block`` is constructed, not built.  Returns a :class:`StructuredRun`
+        when this engine can run the declaration, else None and the caller
+        builds the block and takes the ordinary ``build()``/``run()`` path.
+        The hook knows no algorithm and no block class; base default: None.
         """
         return None
 
@@ -465,8 +451,17 @@ class Engine(ABC):
         """Engine-specific per-call rejection before dispatch (no-op)."""
         return
 
-    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int):
-        """Simulate one primitive's substituted circuits.
+    def _plan_one(self, prim: Runnable, blk, flat) -> "Optional[qx.Program]":
+        """Structured program for one freshly compiled block, or None to run
+        its gate stream (§14 *Structured execution*; no engine plans by
+        default)."""
+        return None
+
+    def _dispatch_one(
+        self, prim: Runnable, substituted, l2p_list, ordinal: int, params: Mapping[str, float]
+    ):
+        """Simulate one primitive's substituted circuits; ``params`` is the
+        run's parameter binding, for structured programs built at ``build()``.
 
         Returns ``(result, ordinal)`` — ``ordinal`` advanced by the number of
         seed-consuming circuit executions (see ``_circuit_seed``).
@@ -511,6 +506,8 @@ class Engine(ABC):
         prev_l2p = {
             id(p): l for p, l in zip(self._primitives, self._l2p_per_primitive, strict=False)
         }
+        prev_programs = getattr(self, "_programs", {})
+        self._programs = {}
         self._primitives = list(primitives)
         self._l2p_per_primitive = []
         for prim in self._primitives:
@@ -519,6 +516,9 @@ class Engine(ABC):
                 self._l2p_per_primitive.append(
                     prev_l2p.get(id(prim), [None] * len(prim.compiled_circuits))
                 )
+                self._programs[id(prim)] = prev_programs.get(
+                    id(prim), [None] * len(prim.compiled_circuits)
+                )
                 continue
             prim.sub_blocks.clear()
             prim.compiled_circuits.clear()
@@ -526,6 +526,7 @@ class Engine(ABC):
             prim.build()
             self._validate_primitive(prim)
             l2p_list: list = []
+            programs: list = []
             for blk in prim.sub_blocks:
                 flat = blk.flatten()
                 if params:
@@ -537,12 +538,14 @@ class Engine(ABC):
                 prim.compiled_circuits.append(compiled)
                 prim._n_qubits_list.append(sim_n)
                 l2p_list.append(l2p)
+                programs.append(self._plan_one(prim, blk, flat))
             self._l2p_per_primitive.append(l2p_list)
+            self._programs[id(prim)] = programs
 
     def run(
         self,
         params: Mapping = {},
-    ) -> list[Union[float, complex, SamplingDictionary]]:
+    ) -> list[PrimitiveResult]:
         """Simulate all built primitives and return their scalar results.
 
         Template method: re-validates every primitive per call (noise toggles
@@ -552,7 +555,7 @@ class Engine(ABC):
         """
         params = _coerce_params(params)
         self._pre_run()
-        results: list[Union[float, complex, SamplingDictionary]] = []
+        results: list[PrimitiveResult] = []
         ordinal = 0
         for prim, l2p_list in zip(self._primitives, self._l2p_per_primitive, strict=True):
             self._validate_primitive(prim)
@@ -561,7 +564,7 @@ class Engine(ABC):
                 qx.substitute_all(cmds, params) if params else cmds
                 for cmds in prim.compiled_circuits
             ]
-            result, ordinal = self._dispatch_one(prim, substituted, l2p_list, ordinal)
+            result, ordinal = self._dispatch_one(prim, substituted, l2p_list, ordinal, params)
             results.append(result)
         return results
 

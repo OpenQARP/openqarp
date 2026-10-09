@@ -25,6 +25,8 @@ from sympy import Symbol
 
 import qarpx as qx
 
+from .. import _blas_threads, _program
+
 
 def as_param(angle) -> qx.Param:
     """The one angle → ``qx.Param`` coercion (§13: parameters coerce to Param).
@@ -338,6 +340,13 @@ class _BlockMixin:
         self._mark_cpp_built()
         self._finalize()
         self._built = True
+        # A declared classical_action is trusted for these gates only (§13):
+        # the planner derives the span instead once its local-frame digest
+        # differs.  flatten() is placed, so map it back through target_qubits.
+        if _program._declares_action(self):
+            self._action_digest = qx._local_commands_digest(
+                list(self._cpp_flatten()), list(self.target_qubits)
+            )
         # Structural validation hook (CompositeBlockBase defines one).  Looked
         # up on the concrete class, not the mixin: ``_attach_mixin`` copies
         # every mixin attribute onto each class and would shadow it.
@@ -934,7 +943,13 @@ class _BlockMixin:
             )
         return self.flatten()
 
-    def statevector(self, initial_state: "np.ndarray | None" = None) -> "np.ndarray":
+    def statevector(
+        self,
+        initial_state: "np.ndarray | None" = None,
+        *,
+        structured: Optional[bool] = None,
+        optimization_level: Optional[int] = None,
+    ) -> "np.ndarray":
         """Exact statevector of this block applied to ``initial_state``
         (default ``|0…0⟩``).
 
@@ -951,12 +966,98 @@ class _BlockMixin:
                 renormalised).  The returned statevector feeds back in
                 unchanged, so step → snapshot → re-seed loops are O(2^n)
                 per step.
+            structured: Run the block's structure as typed kernels (§14
+                *Structured execution*) where it is cheaper than its gates;
+                ``False`` runs the gate stream as-is.  ``None`` follows
+                ``QARP_STRUCTURED`` (default on).
+            optimization_level: ``0``, ``1`` or ``2`` runs the gates at that
+                transpiler level (as ``optimize``) — the gate slices of a
+                structured program, or the whole stream on the gate path —
+                keeping the structure the planner reads.  ``None`` runs them
+                as they are.
         """
+        _blas_threads.install()
+        _program.opt_level(optimization_level)
+        psi = None
+        if initial_state is not None:
+            psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
+        sim = qx.QarpSimulator()
+        run_structured = _program.resolve(structured)
+        if run_structured and self._built and not _program._has_pending_ops(self):
+            # The cached program is checked by a C++ digest of the stream: a
+            # hit never materialises the commands in Python.  Pending ops are
+            # applied by the Python flatten() only, so they take the full path.
+            width = _program.fusion_width_of(sim, self.n_qubits)
+            key = (qx._flatten_digest(self), self.n_qubits, width, optimization_level)
+            hit = _program.cached_lookup(self, key)
+            if hit is not _program._MISS and hit is not None:
+                return np.asarray(sim.program_statevector(hit, self.n_qubits, initial_state=psi))
         cmds = self._simulable_commands("statevector")
-        if initial_state is None:
-            return np.asarray(qx.QarpSimulator().statevector(cmds, self.n_qubits))
-        psi = np.ascontiguousarray(initial_state, dtype=np.complex128)
-        return np.asarray(qx.QarpSimulator().statevector(cmds, self.n_qubits, initial_state=psi))
+        if run_structured:
+            program = _program.cached_program(
+                self,
+                cmds,
+                self.n_qubits,
+                _program.fusion_width_of(sim, self.n_qubits),
+                optimization_level=optimization_level,
+            )
+            if program is not None:
+                return np.asarray(
+                    sim.program_statevector(program, self.n_qubits, initial_state=psi)
+                )
+        if optimization_level is not None:
+            cmds = _program.optimized(cmds, optimization_level)
+        if psi is None:
+            return np.asarray(sim.statevector(cmds, self.n_qubits))
+        return np.asarray(sim.statevector(cmds, self.n_qubits, initial_state=psi))
+
+    def kernels(
+        self, *, structured: Optional[bool] = None, optimization_level: Optional[int] = None
+    ) -> "list[str] | None":
+        """The kernels :meth:`statevector` would run on this built block, in
+        order (``"permutation"``, ``"dense"``, ``"controlled_powers"``,
+        ``"gates"``), or None when the gate path runs (§14 *Structured
+        execution*).  Same arguments as ``statevector``; the program is left
+        cached for it.
+        """
+        if not self._built:
+            raise RuntimeError("Cannot list kernels, block not built. Call build() first.")
+        _program.opt_level(optimization_level)
+        if not _program.resolve(structured):
+            return None
+        cmds = self._simulable_commands("statevector")
+        width = _program.fusion_width_of(qx.QarpSimulator(), self.n_qubits)
+        program = _program.cached_program(
+            self, cmds, self.n_qubits, width, optimization_level=optimization_level
+        )
+        return None if program is None else list(program.kinds())
+
+    def classical_action(self, indices: "np.ndarray") -> "np.ndarray | None":
+        """Images of local basis indices under this block, or ``None``.
+
+        A block that is a basis-state permutation may override this to
+        return ``f(indices)`` (int64, LSB, same shape) so structured
+        execution (§14) applies it as one gather instead of its gates.
+        Overriding it promises ``U|x⟩ = |f(x)⟩`` exactly, phase included
+        (§13): the block may sit under ``ControlledBlock``.
+        """
+        return None
+
+    classical_action._qarp_default = True  # type: ignore[attr-defined]
+
+    def structure(self) -> "list | None":
+        """This block as a sequence of parts, or ``None``.
+
+        A part is a block placed in this block's frame by its own
+        ``target_qubits``, or ``qarp.blocks.Repeat(block, count)``.
+        Overriding it promises that the parts in order are this block's gate
+        stream (§13), and that it works before ``build()``, building only
+        the parts: structured execution (§14) lowers the declaration without
+        the stream, and plans a built block from it in place of its children.
+        """
+        return None
+
+    structure._qarp_default = True  # type: ignore[attr-defined]
 
     def unitary_matrix(self) -> "np.ndarray":
         """Dense ``2^n × 2^n`` unitary of this block, global phase included.
@@ -965,6 +1066,7 @@ class _BlockMixin:
         an exploration/validation tool, not a simulation path.
         """
         cmds = self._simulable_commands("unitary_matrix")
+        _blas_threads.install()
         return np.asarray(qx.QarpSimulator().unitary_matrix(cmds, self.n_qubits))
 
     # ── deepcopy ──────────────────────────────────────────────────────
@@ -1368,6 +1470,8 @@ def _materialise_pending_ops(block: "AnyBlock") -> "AnyBlock":
     fresh.target_qubits = saved_target
     fresh.n_cbits = saved_cbits
     fresh._publish_symbols()
+    # The planner reads the block's structure through the shadow (§14).
+    fresh._materialised_from = block
     return fresh
 
 

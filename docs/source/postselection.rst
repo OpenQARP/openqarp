@@ -8,7 +8,9 @@ the condition.
 
 Conventions (qarpx LSB throughout, see :doc:`endianness`): distribution keys are LSB-first
 tuples with qubit ``q`` at position ``q``; for statevectors, bit ``q`` of the amplitude index
-is qubit ``q``.
+is qubit ``q``.  :meth:`~qarp.PostSelection.apply` takes a :class:`~qarp.SamplingDistribution`
+or a plain ``{bits-tuple: probability}`` dict whose keys share one width, and its result's
+``distribution`` is a :class:`~qarp.SamplingDistribution`.
 
 Two kinds of condition
 -----------------------
@@ -52,8 +54,8 @@ Fixed bits on a readout distribution
 ``apply`` returns a :class:`~qarp.PostSelected`, a ``(distribution,
 success_rate)`` pair. The conditioned distribution is renormalised (probabilities sum to 1
 over the surviving keys); ``success_rate`` is the probability mass that satisfied the
-condition before renormalisation. Zero surviving mass returns ``PostSelected({}, 0.0)``
-rather than raising, so a condition with vanishing support does not break a parameter sweep.
+condition before renormalisation. Zero surviving mass returns an empty distribution with
+``success_rate`` 0.0 rather than raising, so a condition with vanishing support does not break a parameter sweep.
 
 The same spec applies to any :class:`~qarp.algorithms.Sampler` output, whether it came from
 finite shots or the exact Born distribution (``n_shots=qarp.EXACT``):

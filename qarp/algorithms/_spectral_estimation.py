@@ -1,5 +1,6 @@
 import importlib
 import importlib.util
+from collections.abc import Mapping
 from math import comb
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union, cast
 
@@ -287,7 +288,7 @@ class SpectrumEstimator:
 
     def prepare_observed_data(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         n_bins: Optional[int] = None,
         freqs: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -1161,7 +1162,7 @@ class SpectrumEstimator:
 
     def _optimize_auto(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         auto_modes: Optional[Sequence[ModeName]] = None,
         **call_kwargs,
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -1233,7 +1234,7 @@ class SpectrumEstimator:
 
     def estimate(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         n_candidates: int = 200,
         n_bins: Optional[int] = None,
         cluster: bool = True,
@@ -1458,7 +1459,7 @@ class SpectrumEstimator:
 
     def plot(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         true_phases: Optional[np.ndarray] = None,
         true_degeneracies: Optional[np.ndarray] = None,
         n_bins: Optional[int] = None,

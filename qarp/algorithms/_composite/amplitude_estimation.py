@@ -1,5 +1,6 @@
 """Canonical quantum amplitude estimation."""
 
+from collections.abc import Mapping
 from copy import deepcopy
 from math import pi, sin
 from typing import Optional, Self, cast
@@ -91,7 +92,7 @@ class AmplitudeEstimation(CompositeAlgorithm):
             raise ValueError("Circuit not built. Call build() before run().")
 
         result = self.engine.run()[0]
-        if not isinstance(result, dict):
+        if not isinstance(result, Mapping):
             raise TypeError("AmplitudeEstimation requires a sampling primitive")
         self.distribution = cast(SamplingDictionary, result)
 

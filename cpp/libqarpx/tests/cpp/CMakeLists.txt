@@ -15,6 +15,7 @@ add_executable(qarpx_tests
     test_dagger_round_trip.cpp
     test_fusion_consistency.cpp
     test_simulation_fusion.cpp
+    test_program_kernels.cpp
     test_qasm3_emitter.cpp
     test_qasm2_emitter.cpp
     test_trajectory.cpp
@@ -47,6 +48,7 @@ add_executable(qarpx_tests
     test_operators_sparse.cpp
     test_operators_symbolic.cpp
     test_cpu_budget.cpp
+    test_blas_threads.cpp
 )
 
 target_link_libraries(qarpx_tests PRIVATE

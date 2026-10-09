@@ -11,7 +11,7 @@ for them).
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
 
-from ..._types import Consumes, SamplingDictionary, Shots
+from ..._types import Consumes, PrimitiveResult, Shots
 from .target import Target
 
 
@@ -67,6 +67,10 @@ class PrimitiveAlgorithm(ABC):
       already returns ``|⟨bra|ket⟩|²`` rather than the amplitude ``⟨bra|ket⟩``.
       Consumers that need the squared overlap (VQD/ADAPT-VQD deflation) must not
       square such a value again.  Default ``False`` (amplitude-returning).
+    - ``samples_block``: ``True`` iff the primitive's only circuit is its block as
+      given and ``run()`` returns the distribution of that block's recorded
+      measurements.  Only such a primitive can take a structured run
+      (``Engine.prepare_structured``, §14).  Default ``False``; ``Sampler`` sets it.
     """
 
     supported_targets: frozenset[Target] = frozenset()
@@ -76,6 +80,7 @@ class PrimitiveAlgorithm(ABC):
     gradient_kind: str = "none"
     requires_noiseless: bool = False
     returns_probability: bool = False
+    samples_block: bool = False
     # Ket-seeding amplitudes — class-level None so engines can read the field
     # on every primitive.  ``accepts_initial_state`` is the enforcement point
     # (checked in ``Engine._validate_primitive``): estimator primitives with
@@ -172,7 +177,7 @@ class PrimitiveAlgorithm(ABC):
         """
 
     @abstractmethod
-    def run(self, results: list) -> Union[float, complex, SamplingDictionary]:
+    def run(self, results: list) -> PrimitiveResult:
         """Post-process the engine's sampling output into a result.
 
         Contract: a pure function of ``results`` — no simulator or engine
@@ -185,8 +190,8 @@ class PrimitiveAlgorithm(ABC):
 
         Returns:
             A scalar (`float` / `complex`) for expectation/overlap-style
-            primitives, or a :data:`SamplingDictionary`
-            (``{bitstring-tuple: probability}``) for :class:`Sampler`.
+            primitives, or a :class:`~qarp.SamplingDistribution` for
+            :class:`Sampler`.
         """
 
     def run_from_amplitudes(self, compiled_circuits: list, simulator=None) -> Union[float, complex]:

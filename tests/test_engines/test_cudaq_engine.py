@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 import qarpx as qx
+from qarp import SamplingDistribution
 from qarp.algorithms import Sampler, StateVector
 from qarp.blocks import SimpleBlock
 from qarp.engines import CudaqEngine, Engine
@@ -194,7 +195,7 @@ def test_build_then_run_returns_one_result_per_primitive():
     out = eng.run()
     assert len(out) == 1
     dist = out[0]
-    assert isinstance(dist, dict)
+    assert isinstance(dist, SamplingDistribution)
     assert abs(sum(dist.values()) - 1.0) < 1e-9
 
 

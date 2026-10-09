@@ -6,6 +6,7 @@ Submodules are private implementation and may be reorganised without notice.
 import importlib.util as _importlib_util
 
 from .._lazy import lazy_exports as _lazy_exports
+from .._structure import Repeat
 
 from ._block import (
     AnyBlock,  # = qx.Block: the type to annotate with / isinstance against;
@@ -158,6 +159,7 @@ __all__ = [
     "RSPBlock",
     "ReadoutBlock",
     "ReflectionBlock",
+    "Repeat",
     "ResetBlock",
     "SPABlock",
     "SWAPTestBlock",

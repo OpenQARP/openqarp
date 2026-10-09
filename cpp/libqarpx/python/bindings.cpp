@@ -1,4 +1,5 @@
 #include <nanobind/nanobind.h>
+#include "qarpx/parallel/blas_threads.h"
 #include "qarpx/parallel/cpu_budget.h"
 #include "qarpx/parallel/thread_pool.h"
 #include <nanobind/operators.h>
@@ -77,6 +78,30 @@ initial_state_to_vector(const std::optional<InitialStateArray>& arr) {
     return std::vector<std::complex<double>>(p, p + arr->shape(0));
 }
 
+// Permutation tables cross as 1-D int64 ndarrays (numpy's default integer).
+using TableArray =
+    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
+
+static std::vector<uint64_t> table_to_vector(const TableArray& t) {
+    std::vector<uint64_t> out(t.shape(0));
+    const int64_t* p = t.data();
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        if (p[i] < 0) throw std::invalid_argument("permutation table entries must be >= 0");
+        out[i] = static_cast<uint64_t>(p[i]);
+    }
+    return out;
+}
+
+static nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>
+table_to_numpy(std::vector<uint64_t>&& v) {
+    auto* heap = new std::vector<int64_t>(v.begin(), v.end());
+    nb::capsule owner(heap, [](void* p) noexcept {
+        delete static_cast<std::vector<int64_t>*>(p);
+    });
+    const size_t shape[1] = {heap->size()};
+    return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(heap->data(), 1, shape, owner);
+}
+
 // __deepcopy__ for raw qarpx blocks, defined here (not monkeypatched from
 // qarp.blocks) so `copy.deepcopy` works on C++-created blocks regardless of
 // Python import order.  Children/inner/bodies recurse through Python's
@@ -137,7 +162,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 9
+#define QARPX_ABI_VERSION 14
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -153,6 +178,18 @@ NB_MODULE(qarpx, m) {
         return d;
     }, "Internal: this process's CPU budget as read now (0 = unknown, or no "
        "limit) and the default thread count it gives.");
+
+    m.def("_openblas_threads_callback_address", [] {
+        qarpx::register_blas_process_hooks();
+        return reinterpret_cast<std::uintptr_t>(&qarpx::qarpx_openblas_threads);
+    }, "Internal: address of the OpenBLAS threading callback that runs BLAS "
+       "jobs on qarpx's parking pool.");
+    m.def("_blas_callback_invocations", &qarpx::blas_callback_invocations,
+          "Internal: calls of the OpenBLAS threading callback so far.");
+    m.def("_blas_pool_workers", &qarpx::blas_pool_workers,
+          "Internal: workers of the OpenBLAS callback's pool alive now.");
+    m.def("_configured_thread_count", &qarpx::configured_thread_count,
+          "Internal: the worker count every qarpx parallel layer uses.");
 
     // ── Exception taxonomy at the Python boundary ──
     // capability_error → qarp.errors.CapabilityError (ValueError fallback if
@@ -1054,6 +1091,60 @@ NB_MODULE(qarpx, m) {
         .def_ro("statevector",  &SamplingResult::statevector)
         .def("probability", &SamplingResult::probability, "outcome"_a);
 
+    // ── Structured programs (§14 Structured execution) ──
+    nb::class_<Program>(m, "Program")
+        .def(nb::init<>())
+        .def("add_gates", &Program::add_gates, "commands"_a)
+        .def("add_permutation",
+             [](Program& p, std::vector<uint32_t> qubits, const TableArray& table) {
+                 p.add_permutation(std::move(qubits), table_to_vector(table));
+             }, "qubits"_a, "table"_a,
+             "|x> -> |table[x]> on qubits (local bit b <-> qubits[b]); table is a "
+             "1-D int64 bijection of range(2**len(qubits)).")
+        .def("add_dense", &Program::add_dense, "qubits"_a, "matrix"_a)
+        .def("add_controlled_powers", &Program::add_controlled_powers,
+             "controls"_a, "exponents"_a, "targets"_a, "matrix"_a,
+             "matrix**exponents[j] on targets wherever control j is |1>.")
+        .def("kinds", &Program::kinds)
+        .def("__len__", [](const Program& p) { return p.kernels().size(); })
+        .def_prop_ro("min_register_width", &Program::min_register_width)
+        .def("substituted", &Program::substituted, "params"_a)
+        .def("without_measurements", &Program::without_measurements);
+
+    m.def("_permutation_table",
+          [](const std::vector<Command>& cmds, std::vector<uint32_t> qubits,
+             uint32_t max_rest, uint32_t max_work_log2)
+              -> std::optional<nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>> {
+              std::optional<std::vector<uint64_t>> t;
+              {
+                  nb::gil_scoped_release nogil;
+                  t = permutation_table(cmds, qubits, max_rest, max_work_log2);
+              }
+              if (!t) return std::nullopt;
+              return table_to_numpy(std::move(*t));
+          }, "commands"_a, "qubits"_a, "max_rest"_a, "max_work_log2"_a,
+          "Internal: the basis permutation commands apply to qubits, exact "
+          "including phase, or None (see program.h permutation_table).");
+    m.def("_local_unitary",
+          [](const std::vector<Command>& cmds, const std::vector<uint32_t>& qubits) {
+              nb::gil_scoped_release nogil;
+              return local_unitary_of(cmds, qubits);
+          }, "commands"_a, "qubits"_a,
+          "Internal: the 2^k x 2^k unitary commands apply to qubits (k <= 12).");
+    m.def("_commands_digest", &commands_digest, "commands"_a,
+          "Internal: 64-bit digest of a command stream (a cache key).");
+    m.def("_flatten_digest", [](const Block& block) {
+              nb::gil_scoped_release nogil;
+              return commands_digest(block.flatten());
+          }, "block"_a,
+          "Internal: _commands_digest of block.flatten(), computed without "
+          "materialising the commands in Python.");
+    m.def("_local_commands_digest", &local_commands_digest, "commands"_a, "qubits"_a,
+          "Internal: digest of commands remapped onto range(len(qubits)).");
+    m.def("_parts_digest", &parts_digest, "parts"_a,
+          "Internal: _commands_digest of each part's commands repeated count "
+          "times, in order, without materialising the stream.");
+
     // ── QarpSimulator ──
     nb::class_<QarpSimulator>(m, "QarpSimulator")
         .def(nb::init<>())
@@ -1111,6 +1202,31 @@ NB_MODULE(qarpx, m) {
            nb::kw_only(), "initial_state"_a = nb::none(),
            "Full statevector as a zero-copy 1-D complex128 numpy array.  "
            "initial_state: same contract as run().")
+        .def("program_statevector", [](const QarpSimulator& sim,
+                                       const Program& program,
+                                       int n_qubits,
+                                       std::optional<InitialStateArray> initial_state) {
+            auto psi = initial_state_to_vector(initial_state);
+            std::vector<std::complex<double>> sv;
+            {
+                nb::gil_scoped_release nogil;
+                sv = sim.program_statevector(program, n_qubits, std::move(psi));
+            }
+            return statevector_to_numpy(std::move(sv));
+        }, "program"_a, "n_qubits"_a,
+           nb::kw_only(), "initial_state"_a = nb::none(),
+           "statevector() for a structured program; initial_state: same contract as run().")
+        .def("program_run", [](const QarpSimulator& sim,
+                               const Program& program,
+                               int n_qubits, int n_shots,
+                               std::optional<uint32_t> seed,
+                               std::optional<InitialStateArray> initial_state) {
+            auto psi = initial_state_to_vector(initial_state);
+            nb::gil_scoped_release nogil;
+            return sim.program_run(program, n_qubits, n_shots, seed, std::move(psi));
+        }, "program"_a, "n_qubits"_a, "n_shots"_a, "seed"_a = nb::none(),
+           nb::kw_only(), "initial_state"_a = nb::none(),
+           "run()'s terminal sample-once path for a structured program.")
         .def("expectation", [](const QarpSimulator& sim,
                                const std::vector<Command>& cmds,
                                int n_qubits,
@@ -1171,14 +1287,6 @@ NB_MODULE(qarpx, m) {
             return out;
         }, "commands"_a, "n_qubits"_a,
            "Compute the 2^n × 2^n unitary matrix. Returns a list-of-rows.")
-        .def("simulate_qpe_structured", &QarpSimulator::simulate_qpe_structured,
-            "u_cmds"_a, "state_prep"_a, "iqft_cmds"_a,
-            "n_state"_a, "n_ancilla"_a, "n_shots"_a, "seed"_a = nb::none(),
-            "Fast QPE via matrix exponentiation. Returns SamplingResult over ancilla.")
-        .def("simulate_dosqpe_structured", &QarpSimulator::simulate_dosqpe_structured,
-            "u_cmds"_a, "state_prep"_a, "iqft_cmds"_a,
-            "n_state"_a, "n_ancilla"_a, "n_shots"_a, "seed"_a = nb::none(),
-            "Fast DOS-QPE via matrix exponentiation. Returns SamplingResult over ancilla.")
         .def("run_gradient", [](const QarpSimulator& sim,
                                 const std::vector<Command>& cmds,
                                 int n_qubits,

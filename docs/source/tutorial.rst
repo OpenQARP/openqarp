@@ -82,8 +82,9 @@ shots reproducible.
     distribution = results[0]
     print(distribution)
 
-You should see, up to shot noise, about 50 % ``(0, 0)`` and 50 % ``(1, 1)`` — a
-Bell state.  Two things to internalise straight away:
+You should see a :class:`~qarp.SamplingDistribution` with, up to shot noise,
+about 50 % ``(0, 0)`` and 50 % ``(1, 1)`` — a Bell state.  It reads like a
+dictionary.  Two things to internalise straight away:
 
 * The keys are **tuples of bits indexed by qubit**: position ``q`` in the tuple
   is qubit ``q``.  OpenQARP is **LSB-first** everywhere (qubit 0 is the

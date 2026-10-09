@@ -664,6 +664,8 @@ def test_pce_gradient_with_sampler_is_refused_at_gradient_time():
     pce.build()
     with pytest.raises(CapabilityError, match="gradient_kind='none'"):
         pce.engine.run_gradient(pce.ket.parameter_map(pce.initial_parameters))
+    with pytest.raises(CapabilityError, match="gradient_kind='none'"):
+        pce.get_gradient_function()(pce.initial_parameters)
 
 
 def test_pce_verbose_build_gradient_banner(capsys):
