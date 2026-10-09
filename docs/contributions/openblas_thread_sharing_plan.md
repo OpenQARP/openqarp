@@ -1,8 +1,7 @@
 # Keep OpenBLAS's idle workers from starving the simulator
 
-**Status:** In progress (Phase R4 in code; its PR text pending)
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
-**Reviewer:** <to be named>
 **Date:** 2026-09-29
 **Tier:** Structural
 **Branch:** improvement/sampler-exact-speed
@@ -292,7 +291,7 @@ cases (`bm_lqlga_d1q2_8_bb` and two MS cases) run with a norm in the loop.
 - [x] `limit` as the default, `pool` as a setting, in `qarp/_blas_threads.py`; hooks registered only in `pool` mode *(2026-10-08)*
 - [x] Tests: the default-mode rows; pool tests run under `pool` and assert the callback counter *(2026-10-08)*
 - [x] `configuration.rst`: the modes, their costs and limits; an example cell showing the setting *(2026-10-08)*
-- [ ] PR: the three-mode table above; bare-metal timings as a named follow-up (`to_do.md`)
+- [x] PR: the three-mode table above; bare-metal timings as a named follow-up (`to_do.md`) *(2026-10-09)*
 
 ## Decisions (revision 3, 2026-09-29)
 

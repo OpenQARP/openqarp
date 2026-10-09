@@ -9,8 +9,7 @@ plan and that doc disagree, that doc wins.
 
 The plans behind the code as first published are not carried into this
 repository; the code, its tests and `qarp_conventions.md` are the record.
-This directory therefore starts with the scaffold and a worked example only —
-the first plan filed after the release is the first row in the index.
+The index starts with the first plan filed after the release.
 
 ## The loop
 
@@ -63,11 +62,11 @@ unticked box.  A box that does not apply is ticked with its text struck
 through and a word of reason, never deleted, so a skipped item and a
 non-applicable one look different.
 
-The reviewer is the code owner GitHub requests from `CODEOWNERS`, or the
-reviewer named at the sit-down.  A sit-down reviewer owns the reviewer
-checks.  The branch ruleset requires the code owner's Approve either way, so
-an owner who is not the sit-down reviewer gives a second Approve, not a
-replacement.
+Reviewers are assigned on the PR, not in the plan: the code owners GitHub
+requests from `CODEOWNERS`, plus anyone the author or an owner requests for
+the change at hand.  Any of them may post the green-light and run the
+reviewer checks; the branch ruleset still requires a code owner's Approve at
+Gate 2.
 
 ### Promotion
 
@@ -136,7 +135,7 @@ something else, parked until they are picked up.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
-| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | 🚧 | OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool`; the PR's three-mode table pending |
+| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | ✅ | OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool`; bare-metal timings in `to_do.md` |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | ✅ | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | ✅ | Same PR as `sampler_distribution_plan.md`; no convention edit |
 | [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels | Stefano Scali | ✅ | Structural: §13/§14 edits; replaces the structured-QPE fast path (`prepare_structured_qpe` removed) |

@@ -2,7 +2,6 @@
 
 **Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
-**Reviewer:** <to be named>
 **Date:** 2026-09-25
 **Tier:** Structural
 **Branch:** improvement/sampler-exact-speed

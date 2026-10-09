@@ -1,8 +1,7 @@
 # Execute block structure as typed kernels instead of flattened gates
 
 **Status:** Landed
-**Author:** Stefano Scali
-**Reviewer:** to be named at the sit-down
+**Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-09-28
 **Tier:** Structural
 **Branch:** feature/structured-execution
