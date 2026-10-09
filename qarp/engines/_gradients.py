@@ -9,8 +9,8 @@ fixed coefficients, so parameter shift, finite differences and SPSA share
 one batched evaluation path.
 
 Layering: this module sees primitives only through the ``Runnable`` protocol
-(``target.name`` matched by string, ``gradient_kind`` read as a plain
-attribute) — never ``qarp.algorithms``.
+(``target`` compared by identity against ``qarp._types.Target``,
+``gradient_kind`` read as a plain attribute) — never ``qarp.algorithms``.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import numpy as np
 import qarpx as qx
 from qarp.operators import QubitOperator
 
+from .._types import Target
 from ..errors import CapabilityError
 from ._engine import _coerce_params, _operator_n_qubits, _qubit_operator_to_observable
 
@@ -509,7 +510,7 @@ def adjoint_gradients(sim, prims, params: Mapping[str, float], symbol_names: lis
         if psi0 is not None:
             psi0 = np.ascontiguousarray(psi0, dtype=np.complex128)
         circuits = [rebase_differentiable(c) for c in prim.compiled_circuits]
-        if prim.target.name == "EXPECTATION_VALUE":
+        if prim.target is Target.EXPECTATION_VALUE:
             if circuits:
                 cmds = circuits[0]
                 # Pad to the operator width — an observable may act on more

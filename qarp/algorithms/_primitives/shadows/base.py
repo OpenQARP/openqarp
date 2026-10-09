@@ -81,7 +81,7 @@ class ShadowProtocol(PrimitiveAlgorithm):
 
     # --- primitive lifecycle ---------------------------------------------------
 
-    def build(self):
+    def circuits(self) -> list:
         if self._passed_dataset is not None:  # reuse mode
             # Reuse runs no circuits — run() is pure arithmetic on stored snapshots,
             # never touching the engine's simulator or noise.  So the noiseless
@@ -97,9 +97,8 @@ class ShadowProtocol(PrimitiveAlgorithm):
                             f"operator acts on qubit {qubit}, but the passed dataset "
                             f"has only {self.n_qubits} qubits."
                         )
-            self.sub_blocks = []
             self._dataset = self._passed_dataset
-            return self
+            return []
 
         # collect mode
         if self.ket is None:
@@ -107,6 +106,7 @@ class ShadowProtocol(PrimitiveAlgorithm):
                 "PauliShadow in collect mode needs a ket (or pass dataset= to reuse "
                 "an existing campaign)."
             )
+        # ``.symbols`` exists on a built block only, so the ket is built here.
         self.ket.build()
         if self.ket.symbols:
             raise ValueError(
@@ -122,9 +122,8 @@ class ShadowProtocol(PrimitiveAlgorithm):
             )
         rng = np.random.default_rng(self.seed)
         self._settings = self._sample_settings(rng, self.n_settings, self.n_qubits)
-        self.sub_blocks = [self._setting_block(s) for s in self._settings]
         self._dataset = None  # invalidate any previously collected dataset
-        return self
+        return [self._setting_block(s) for s in self._settings]
 
     def run(self, results: list) -> float:
         if self._passed_dataset is not None:  # reuse mode — no circuits ran

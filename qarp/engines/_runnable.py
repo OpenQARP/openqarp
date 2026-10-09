@@ -9,33 +9,35 @@ engines-see-only-Runnable``.
 
 from typing import Any, Optional, Protocol, Union
 
-from .._types import Consumes, Shots
+from .._types import Consumes, Shots, Target
 
 
 class Runnable(Protocol):
-    """Members engines actually touch on an executable item.
+    """Members engines actually touch on an executable item, grouped by what
+    they describe: the quantity, the circuits, the estimator.  A new member
+    joins one group.
 
-    ``target`` / ``operator`` are typed ``Any``: their concrete types
-    (``Target``, ``QubitOperator``) live above this layer, so engines match
-    ``target.name`` by string and duck-type the rest — importing them here
-    would recreate the engines⇄algorithms cycle this protocol removes.
-    ``Consumes`` is importable: it lives in ``qarp._types``, below both layers.
+    ``Target`` and ``Consumes`` are importable: they live in ``qarp._types``,
+    below both layers, and engines compare them by identity.  ``operator``
+    stays ``Any``: ``QubitOperator`` lives above this layer, so engines
+    duck-type it — importing it here would recreate the engines⇄algorithms
+    cycle this protocol removes.
     """
 
+    # The quantity.
+    target: Target
+    operator: Any
+    supported_targets: frozenset
+    # The circuits.
     sub_blocks: list
     compiled_circuits: list[list]
     _n_qubits_list: list[int]
-    n_shots: Optional[Union[int, Shots]]
     # None, or LSB-indexed ket-seeding amplitudes (ndarray — typed Any for the
-    # same layering reason as target/operator).
+    # same layering reason as operator).
     initial_state: Any
-    supported_targets: frozenset
-    target: Any
-    operator: Any
+    n_shots: Optional[Union[int, Shots]]
+    # The estimator.
     consumes: Consumes
-    # True iff the only circuit is the block as given and run() returns the
-    # distribution of its recorded measurements: what a structured run serves.
-    samples_block: bool
     supports_exact: bool
     supports_backprop_gradient: bool
     # Linearity class of run() per compiled circuit — see _gradients.GRADIENT_KINDS.

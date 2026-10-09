@@ -48,15 +48,21 @@ def test_dosqpe_ladder_as_controlled_powers_matches_the_analytic_spectrum(n_shot
     u.build()
     shots = qarp.EXACT if n_shots == "exact" else n_shots
     dos = DOSQPE(unitary=u, n_ancilla=3, engine=QarpEngine(seed=0, n_shots=shots)).build()
-    assert dos.block is None
-    assert dos._structured_run._program.kinds().count("controlled_powers") == 1
+    assert not dos.block.is_built
+    program = dos.engine._programs[id(dos.primitive)][0]
+    assert program.kinds().count("controlled_powers") == 1
     dist = dos.run()
     expected = {(0, 0, 0): 0.5, (1, 1, 0): 0.5}
-    if n_shots == "exact":
-        assert dict(dist) == pytest.approx(expected, abs=1e-10)
-    else:
-        keys = set(dist) | set(expected)
-        assert 0.5 * sum(abs(dist.get(k, 0.0) - expected.get(k, 0.0)) for k in keys) < 0.05
+
+    def close(d):
+        if n_shots == "exact":
+            return dict(d) == pytest.approx(expected, abs=1e-10)
+        keys = set(d) | set(expected)
+        return 0.5 * sum(abs(d.get(k, 0.0) - expected.get(k, 0.0)) for k in keys) < 0.05
+
+    assert close(dist)
+    # batch_run serves the planned block too, one distribution per set.
+    assert all(close(dists[0]) for dists in dos.engine.batch_run([dos.primitive], [{}, {}]))
 
 
 def test_dosqpe_recovers_synthesized_spectrum():
@@ -206,7 +212,7 @@ def test_dosqpe_noisy_engine_keeps_the_gate_path():
         n_ancilla=2,
         engine=QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
-    assert dosqpe._structured_run is None and dosqpe.block.is_built
+    assert dosqpe.block.is_built
     assert dosqpe.engine._programs[id(dosqpe.primitive)] == [None]
     dist = dosqpe.run()
     assert sum(dist.values()) == pytest.approx(1.0)

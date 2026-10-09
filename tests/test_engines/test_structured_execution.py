@@ -13,10 +13,13 @@ from qarp import _program
 from qarp.algorithms import PauliAveraging, Sampler, StateVector
 from qarp.blocks import (
     CompositeBlock,
+    ComputationalBasisStateBlock,
     ConditionalBlock,
     ControlledBlock,
+    HnBlock,
     ModularMultiplicationBlock,
     OrderFindingBlock,
+    QPEBlock,
     ResetBlock,
     SimpleBlock,
 )
@@ -1185,3 +1188,46 @@ def test_a_child_with_a_pending_substitution_stays_an_opaque_span():
         np.asarray(parent.unitary_matrix()) @ psi,
         atol=1e-12,
     )
+
+
+def _p_u(phi: float = 0.375) -> SimpleBlock:
+    u = SimpleBlock(1, name="U")
+    u.p(0, 2 * np.pi * phi)
+    return u
+
+
+def test_pauli_averaging_over_a_declaring_block_is_planned():
+    """QPE of P(2π·3/8) from |1⟩ leaves the ancilla register in |3⟩ = 011
+    exactly, so ⟨Z0⟩ = −1 and ⟨Z2⟩ = +1 (analytic); the group circuit is
+    planned from the ket's declaration and never builds the ladder.  The
+    amplitude path (never planned) is the additional reference."""
+    operator = QubitOperator("Z0") + 2.0 * QubitOperator("Z2")
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    ket = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False)
+    averaging = PauliAveraging(ket=ket, operator=operator)
+    engine.build([averaging])
+    assert not ket.is_built
+    assert "controlled_powers" in engine._programs[id(averaging)][0].kinds()
+    assert engine.run()[0] == pytest.approx(1.0, abs=1e-10)
+    exact = StateVector(
+        ket=QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False),
+        operator=operator,
+    )
+    engine.build([exact])
+    assert engine.run()[0] == pytest.approx(1.0, abs=1e-10)
+
+
+def test_a_second_build_of_the_same_circuit_does_not_replan(monkeypatch):
+    calls: list = []
+    real = _program.plan
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_program, "plan", spy)
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    sampler = Sampler(HnBlock(14))
+    engine.build([sampler])
+    engine.build([sampler])
+    assert len(calls) == 1

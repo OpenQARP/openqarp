@@ -3,7 +3,7 @@ a :class:`~qarp.SamplingDistribution`: probabilities normalised by n_shots,
 keyed by LSB-first bit tuples over the measured qubits.
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
 from ..._sampling_distribution import SamplingDistribution, distribution_from_result
 from ..._types import Shots
@@ -34,7 +34,6 @@ class Sampler(PrimitiveAlgorithm):
 
     supported_targets = frozenset({Target.SAMPLING})
     accepts_initial_state = True
-    samples_block = True
 
     def __init__(
         self,
@@ -48,16 +47,14 @@ class Sampler(PrimitiveAlgorithm):
         self.initial_state = initial_state
         self.result: Optional[SamplingDistribution] = None
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         if self.ket is None:
             raise ValueError("Sampler requires a ket Block.")
-        self.ket.build()
-        # The ket is itself a Block, so it becomes this sampler's sole sub-block.
-        self.sub_blocks = [self.ket]
+        # The ket is itself a Block, so it is this sampler's sole circuit.
         self.n_qubits = self.ket.n_qubits
         if self.measured_qubits is None:
             self.measured_qubits = list(range(self.n_qubits))
-        return self
+        return [self.ket]
 
     def run(self, results: list) -> SamplingDistribution:
         """Marginal of the first result (``qx.SamplingResult``, or the

@@ -1,12 +1,12 @@
 # Derive primitive circuits lazily and plan declared structure inside `Engine.build`
 
-**Status:** Draft
+**Status:** Landed
 **Author:** Stefano Scali
-**Reviewer:** to be named at the sit-down
+**Reviewer:** Stefano Scali
 **Date:** 2026-10-07
 **Tier:** Structural
 **Branch:** improvement/lazy-circuit-derivation
-**Green-lit:** —
+**Green-lit:** 68831f4 (2026-10-09), plan blob aa0f219c5fb305e2fda24fa0259776cd048dfdc9
 **Scope:** `qarp/_types.py`; `qarp/algorithms/_primitives/target.py` (re-export only),
 `__init__.py` (docstring), `primitive_algorithm.py`, `sampler.py`, `pauli_averaging.py`,
 `basis_rotation_averaging.py`, `hadamard_test.py`, `termwise_hadamard_test.py`,
@@ -90,14 +90,7 @@ Conventions: §14 *Structured execution* loses the `prepare_structured` paragrap
 gate path builds it only when planning refuses"; §13 is unchanged; `Runnable`'s member
 list is documented by boundary.
 
-Open decisions for the sit-down, not guessed here:
-
-- Whether `circuits()` is public (`PrimitiveAlgorithm.circuits`) or `_circuits`.
-- Whether `returns_probability` becomes a fifth `Target` member (`OVERLAP_PROBABILITY`) in
-  Phase 1 or stays a flag.
-- Whether `Sampler(ket=...)` must still accept a built ket whose structure cannot be planned
-  (yes by default: a built block is planned from its tree as today).
-- Whether `prepare_structured` gets a one-release deprecation shim or the hard break.
+The questions left open at drafting are settled under *Decisions* below.
 
 ## API sketch
 
@@ -170,18 +163,55 @@ def _compile_one(self, block, prim) -> _Compiled:
 
 ### Phase 1 — `Target` below the layer line
 
-- [ ] `Target` in `qarp._types`, re-exported from `qarp.algorithms._primitives.target`; engines compare by identity; lint gate extended
-- [ ] `samples_block` retired for `target is Target.SAMPLING and consumes is Consumes.COUNTS`; §14 wording
-- [ ] `Runnable` docstring grouped by boundary
+- [x] `Target` in `qarp._types`, re-exported from `qarp.algorithms._primitives.target`; engines compare by identity; lint gate extended *(2026-10-09)*
+- [x] `samples_block` retired for `target is Target.SAMPLING and consumes is Consumes.COUNTS`; §14 wording *(2026-10-09)*
+- [x] `Runnable` docstring grouped by boundary *(2026-10-09)*
 
 ### Phase 2 — Lazy circuits
 
-- [ ] `PrimitiveAlgorithm.circuits()`; every primitive derives from unbuilt inputs; `build()` builds nothing
-- [ ] `plan_structure` descends an unbuilt composite's constructor list
-- [ ] `Engine.build()` plans before building; programs cached on the engine path
-- [ ] `prepare_structured`, `StructuredRun` and the QPE/DOSQPE special case removed; §14 rewritten
-- [ ] Tests per the table; the structured-execution notebook shows the pipeline without the hook
+- [x] `PrimitiveAlgorithm.circuits()`; every primitive derives from unbuilt inputs; `build()` builds nothing *(2026-10-09)*
+- [x] `plan_structure` descends an unbuilt composite's constructor list *(2026-10-09)*
+- [x] `Engine.build()` plans before building; programs cached on the engine path *(2026-10-09)*
+- [x] `prepare_structured`, `StructuredRun` and the QPE/DOSQPE special case removed; §14 rewritten *(2026-10-09)*
+- [x] Tests per the table; the structured-execution notebook shows the pipeline without the hook *(2026-10-09)*
+
+## Decisions (green-light, 2026-10-09)
+
+- `circuits()` is public: every primitive overrides it, a third-party one included, so it is
+  the extension point `build()` is today.
+- `returns_probability` stays a flag.  Composites alone read it, outside the engine boundary,
+  and Phase 1 stays a move of `Target` with no behaviour change.
+- A primitive accepts a block built or not.  Its own `build()` builds nothing; the engine
+  plans what it is handed and builds only what planning refuses.  A built block is planned
+  from its tree with its declaration checked by digest, as today; handing `QPEBlock` unbuilt
+  is what avoids the ladder, and building it first costs the build once and still ends in
+  the kernel.  `.symbols` exists only on a built block, so every parameter flow builds first.
+- `prepare_structured`, `StructuredRun` and `samples_block` are removed outright: 0.2.0 is
+  tagged after this plan lands, so none of them reaches a release.
 
 ## Deviations log
 
-- (empty)
+- **No removal-gate test.**  The test row asserting `prepare_structured` and `StructuredRun`
+  raise `AttributeError` is not written: a removal is a one-time change, and a standing
+  "must not appear" test is not kept after it.
+- **Two primitives build their ket in `circuits()`.**  `CuttingPrimitive` cuts the ket's gate
+  stream, which exists only once built, and `PauliShadow` refuses a ket with free symbols,
+  which `.symbols` reports only on a built block.  Both say so in their docstrings; every
+  other primitive leaves its inputs unbuilt.
+- **The unbuilt hook serves every `Consumes.COUNTS` primitive**, not `Target.SAMPLING` alone:
+  the engine runs each circuit's program and hands the results to `run()` in order, as on
+  the built path, so the restriction the side door needed (it handed the bare block's counts
+  to the primitive) no longer applies.
+- **Programs of the built path are cached on the engine** by `(stream digest, width, fusion
+  width, level)`, bounded to 64 entries; the unbuilt path is not cached, having no stream to
+  digest and costing milliseconds.
+- **`batch_run` with finite shots evaluates a lowered circuit per parameter set** through
+  `program_run`, with one seed stream per circuit stepped per set, since the C++ sweep needs
+  a gate stream; built circuits keep the C++ sweep.  `compiled_circuits` holds an empty list
+  for a lowered circuit.
+- **`Runnable.target` is typed `Target`**, not `Any`: the type is importable below the layer
+  line now.
+- **`plan_structure` reads an unbuilt `CompositeBlock` through its `blocks` list** (the
+  constructor list it wires at build) and composes placements through nested frames with
+  `Command.remap_qubits`; a block whose children are not readable before build (a composite
+  subclass populating itself in `build_vanilla`) is a plain part, built on its own.

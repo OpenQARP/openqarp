@@ -65,7 +65,7 @@ def test_mirror_test_build_single_composite_subblock():
     assert len(mt.sub_blocks) == 1
     composite = mt.sub_blocks[0]
     assert mt.n_qubits == 3
-    assert composite.n_cbits == 3
+    assert composite.build().n_cbits == 3
 
 
 def test_mirror_test_build_n_qubits_is_max_of_widths():
@@ -77,7 +77,7 @@ def test_mirror_test_build_n_qubits_is_max_of_widths():
     mt.build()
 
     assert mt.n_qubits == 4
-    assert mt.sub_blocks[0].n_cbits == 4
+    assert mt.sub_blocks[0].build().n_cbits == 4
 
 
 def test_mirror_test_build_with_operator_completes():

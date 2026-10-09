@@ -14,15 +14,14 @@ needs the tensors, which is why this is a primitive and not a
 truncation bias on the energy, not statistical noise.
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
 import numpy as np
 
 import qarpx as qx
 
 from ..._types import Shots
-from ...blocks import AnyBlock, SimpleBlock
-from ...blocks._block import CompositeBlockBase
+from ...blocks import AnyBlock, CompositeBlock, SimpleBlock
 from ...blocks._primitives import OrbitalRotationBlock
 from ...operators import (
     basis_rotation_grouping,
@@ -92,9 +91,8 @@ class BasisRotationAveraging(PrimitiveAlgorithm):
             )
         return one_electron, two_electron
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         one_electron, two_electron = self._validate_inputs()
-        self.ket.build()
         n_qubits = self.ket.n_qubits
         if n_qubits != 2 * one_electron.shape[0]:
             raise ValueError(
@@ -105,17 +103,17 @@ class BasisRotationAveraging(PrimitiveAlgorithm):
         self._coefficients, self._groups, self._rotations = basis_rotation_grouping(
             one_electron, two_electron, self.tolerance
         )
-        self.sub_blocks = []
+        circuits = []
         self._group_constants = []
         self._group_masks = []
         for group, rotation in zip(self._groups, self._rotations, strict=True):
             group_constant, masks = diagonal_group_to_masks(group, n_qubits)
             self._group_constants.append(group_constant)
             self._group_masks.append(masks)
-            self.sub_blocks.append(self._build_group_circuit(n_qubits, rotation))
-        return self
+            circuits.append(self._group_circuit(n_qubits, rotation))
+        return circuits
 
-    def _build_group_circuit(self, n_qubits: int, rotation: np.ndarray) -> AnyBlock:
+    def _group_circuit(self, n_qubits: int, rotation: np.ndarray) -> AnyBlock:
         """One group's circuit: prepare the ket, apply the adjoint orbital
         rotation, then measure every qubit.
 
@@ -128,24 +126,19 @@ class BasisRotationAveraging(PrimitiveAlgorithm):
         readout measures the whole group.
         """
         full_qubits = list(range(n_qubits))
-        composite = CompositeBlockBase(n_qubits=n_qubits, name="BRGGroup")
-
-        ket_built = self.ket.build()
-        ket_built.target_qubits = full_qubits
-        composite.add_child(ket_built)
+        self.ket.target_qubits = full_qubits
 
         basis_change = OrbitalRotationBlock(rotation, dagger=True)
         basis_change.target_qubits = full_qubits
-        composite.add_wired_child(basis_change)
 
         # Measure every qubit into cbit i — one nanobind crossing.
         measure_layer = SimpleBlock(n_qubits, name="measure")
         measure_layer.measure([(q, q) for q in range(n_qubits)])
         measure_layer.target_qubits = full_qubits
-        composite.add_wired_child(measure_layer)
 
-        composite.build()
-        return composite
+        return CompositeBlock(
+            [self.ket, basis_change, measure_layer], n_qubits=n_qubits, name="BRGGroup"
+        )
 
     def run(self, results: list) -> float:
         """``constant + Σ_ℓ c_ℓ · (const_ℓ + Σ_masks coeff · ⟨Z-parity⟩)``.

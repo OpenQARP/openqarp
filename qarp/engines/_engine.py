@@ -18,7 +18,7 @@ import numpy as np
 
 import qarpx as qx
 
-from .._sampling_distribution import SamplingDistribution, pack_bits
+from .._sampling_distribution import pack_bits
 from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._runnable import Runnable
@@ -171,49 +171,13 @@ def _coerce_params(params: Mapping) -> dict[str, float]:
     return {str(k): float(v) for k, v in params.items()}
 
 
-class StructuredRun:
-    """A block's declared structure lowered to a program before the block is
-    built (§14 *Structured execution*), from :meth:`Engine.prepare_structured`.
-
-    Shots and ``initial_state`` are read from the primitive at ``sample()``
-    time, so a per-primitive override keeps winning over the engine default as
-    on the ordinary path, and the result is the primitive's own ``run()`` of
-    the block's counts.
-    """
-
-    def __init__(self, engine, program, n_qubits: int, primitive: Runnable):
-        self._engine = engine
-        self._program = program
-        self._n_qubits = n_qubits
-        self._primitive = primitive
-
-    def sample(self) -> SamplingDistribution:
-        """Sample the program, or evaluate it exactly under ``EXACT`` readout."""
-        engine, prim = self._engine, self._primitive
-        engine._pre_run()
-        engine._validate_primitive(prim)
-        shots = engine._resolve_shots(prim)
-        psi = prim.initial_state
-        if psi is not None:
-            psi = np.ascontiguousarray(psi, dtype=np.complex128)
-        if shots is Shots.EXACT:
-            sr = _exact_program_result(
-                engine._sim, self._program, self._n_qubits, initial_state=psi
-            )
-        else:
-            sr = engine._sim.program_run(
-                self._program, self._n_qubits, shots, engine._circuit_seed(0), initial_state=psi
-            )
-        return prim.run([sr])
-
-
 class Engine(ABC):
     """Common surface implemented by all concrete engines.
 
-    Concrete engines own a transpiler + simulator, compile each primitive's
-    ``sub_blocks`` once on ``build()``, then dispatch one or many parameter
-    sets through ``run()`` / ``batch_run()`` keeping the per-shot loop in
-    C++ (no Python round-trip per shot).
+    Concrete engines own a transpiler + simulator, plan or compile each
+    primitive's circuits once on ``build()``, then dispatch one or many
+    parameter sets through ``run()`` / ``batch_run()`` keeping the per-shot
+    loop in C++ (no Python round-trip per shot).
     """
 
     # True iff the engine's simulator accepts caller-supplied initial-state
@@ -366,17 +330,6 @@ class Engine(ABC):
     def provides_amplitudes(self) -> bool:
         return True
 
-    def prepare_structured(self, block, primitive: Runnable) -> Optional[StructuredRun]:
-        """Lower ``block``'s declared ``structure()`` to a runnable program
-        without building the block (§14 *Structured execution*).
-
-        ``block`` is constructed, not built.  Returns a :class:`StructuredRun`
-        when this engine can run the declaration, else None and the caller
-        builds the block and takes the ordinary ``build()``/``run()`` path.
-        The hook knows no algorithm and no block class; base default: None.
-        """
-        return None
-
     def resource_modeler(self) -> "Optional[ResourceModeler]":
         """Modeler for ``qarp.resources.ResourceEstimator``, or None.
 
@@ -451,6 +404,12 @@ class Engine(ABC):
         """Engine-specific per-call rejection before dispatch (no-op)."""
         return
 
+    def _plan_unbuilt(self, prim: Runnable, blk) -> "Optional[qx.Program]":
+        """Program for a circuit's composition before it is built (§14
+        *Structured execution*), or None to build it; no engine plans by
+        default."""
+        return None
+
     def _plan_one(self, prim: Runnable, blk, flat) -> "Optional[qx.Program]":
         """Structured program for one freshly compiled block, or None to run
         its gate stream (§14 *Structured execution*; no engine plans by
@@ -491,13 +450,14 @@ class Engine(ABC):
     ) -> None:
         """Compile all primitives (template method).
 
-        Per primitive: ``prim.build()`` → ``_validate_primitive`` → per block:
-        flatten → substitute → ``_validate_flat_commands`` →
+        Per primitive: ``prim.build()`` (derives its circuits, builds nothing)
+        → ``_validate_primitive`` → per circuit: ``_plan_unbuilt``, else
+        build → flatten → substitute → ``_validate_flat_commands`` →
         ``_warn_uninitialised_conditions`` → ``_compile_one`` →
-        ``_post_compile_check``.  The reuse path (``rebuild=False`` with
-        compiled circuits present) re-validates — capability-relevant state
-        may have changed — and keeps prior routing maps, so results stay in
-        logical qubit order.
+        ``_post_compile_check`` → ``_plan_one``.  The reuse path
+        (``rebuild=False`` with compiled circuits present) re-validates —
+        capability-relevant state may have changed — and keeps prior routing
+        maps, so results stay in logical qubit order.
         """
         params = _coerce_params(params)
         # Gradient plans are cached per build; a rebuilt (or re-validated)
@@ -520,25 +480,31 @@ class Engine(ABC):
                     id(prim), [None] * len(prim.compiled_circuits)
                 )
                 continue
-            prim.sub_blocks.clear()
-            prim.compiled_circuits.clear()
-            prim._n_qubits_list.clear()
             prim.build()
             self._validate_primitive(prim)
+            prim.compiled_circuits.clear()
+            prim._n_qubits_list.clear()
             l2p_list: list = []
             programs: list = []
             for blk in prim.sub_blocks:
-                flat = blk.flatten()
-                if params:
-                    flat = qx.substitute_all(flat, params)
-                self._validate_flat_commands(prim, flat)
-                self._warn_uninitialised_conditions(flat)
-                compiled, sim_n, l2p = self._compile_one(flat, blk.n_qubits)
-                self._post_compile_check(prim, compiled, l2p)
+                program = self._plan_unbuilt(prim, blk)
+                if program is not None:
+                    # Lowered from its composition: no gate stream to compile.
+                    compiled, sim_n, l2p = [], blk.n_qubits, None
+                else:
+                    blk.build()
+                    flat = blk.flatten()
+                    if params:
+                        flat = qx.substitute_all(flat, params)
+                    self._validate_flat_commands(prim, flat)
+                    self._warn_uninitialised_conditions(flat)
+                    compiled, sim_n, l2p = self._compile_one(flat, blk.n_qubits)
+                    self._post_compile_check(prim, compiled, l2p)
+                    program = self._plan_one(prim, blk, flat)
                 prim.compiled_circuits.append(compiled)
                 prim._n_qubits_list.append(sim_n)
                 l2p_list.append(l2p)
-                programs.append(self._plan_one(prim, blk, flat))
+                programs.append(program)
             self._l2p_per_primitive.append(l2p_list)
             self._programs[id(prim)] = programs
 

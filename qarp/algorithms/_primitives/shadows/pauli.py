@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ....blocks import AnyBlock, SimpleBlock
-from ....blocks._block import CompositeBlockBase
+from ....blocks import AnyBlock, CompositeBlock, SimpleBlock
 from .base import ShadowProtocol
 from .kernels import PauliKernel
 
@@ -52,18 +51,14 @@ class PauliShadow(ShadowProtocol):
     def _setting_block(self, setting) -> AnyBlock:
         n = self.n_qubits
         full = list(range(n))
-        composite = CompositeBlockBase(n_qubits=n, name="PauliShadowSetting")
-
-        ket_built = self.ket.build()
-        ket_built.target_qubits = full
-        composite.add_child(ket_built)
-
-        composite.add_child(self._basis_change_block(setting))
+        self.ket.target_qubits = full
 
         measure = SimpleBlock(n, name="measure")
         measure.measure([(qubit, qubit) for qubit in range(n)])
         measure.target_qubits = full
-        composite.add_wired_child(measure)
 
-        composite.build()
-        return composite
+        return CompositeBlock(
+            [self.ket, self._basis_change_block(setting), measure],
+            n_qubits=n,
+            name="PauliShadowSetting",
+        )

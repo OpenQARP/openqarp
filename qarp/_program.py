@@ -698,9 +698,63 @@ def _finish(kernels: list, cmds: list) -> Optional[Plan]:
     return Plan(kernels, cmds)
 
 
+def _composition(node) -> Optional[list]:
+    """What an unbuilt block is made of, in order: its ``structure()``
+    declaration, or the children an unbuilt ``CompositeBlock`` wires at
+    build.  None for a block whose parts are not readable before build."""
+    if _has_pending_ops(node):
+        return None
+    if _declares_structure(node):
+        return node.structure()
+    blocks = getattr(node, "blocks", None)
+    if blocks is not None and not node.is_built:
+        return list(blocks)
+    return None
+
+
+def _collect_parts(node, qmap: list[int], cmds: list, entries: list, repeated: set[int]) -> bool:
+    """Append ``node``'s parts to ``entries`` as planner entries in the root
+    frame (``qmap`` places the node there), appending each plain part's
+    stream to ``cmds``; a part with its own composition descends.  False
+    when a part cannot be planned unbuilt."""
+    parts = _composition(node)
+    if parts is None:
+        return False
+    nested = qmap != list(range(len(qmap)))
+    for part in parts:
+        if isinstance(part, Repeat):
+            if not part.block.is_built:
+                return False
+            repeated.add(len(entries))
+            kid_map = [qmap[t] for t in _placement(part.block)]
+            entries.append((part.block, len(cmds), len(cmds), kid_map, part.count, False))
+            continue
+        kid_map = [qmap[t] for t in _placement(part)]
+        if _composition(part) is not None:
+            if not _collect_parts(part, kid_map, cmds, entries, repeated):
+                return False
+            continue
+        # A plain part is built on its own: its stream is placed in the
+        # node's frame by flatten(), then moved to the root frame.
+        if not part.is_built:
+            part.build()
+        kid_cmds = list(part.flatten())
+        if any(c.is_parametric() for c in kid_cmds):
+            return False
+        if nested:
+            kid_cmds = [c.remap_qubits(qmap) for c in kid_cmds]
+        start = len(cmds)
+        cmds.extend(kid_cmds)
+        entries.append((part, start, len(cmds), kid_map, 1, False))
+    return True
+
+
 def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) -> Optional[Plan]:
-    """A plan from ``block.structure()`` without the block's gate stream, so
-    the block is never built (§14).
+    """A plan from the block's composition without the block's gate stream,
+    so the block is never built (§14): its ``structure()`` declaration, or
+    the children an unbuilt ``CompositeBlock`` wires at build, descended
+    recursively, a declaring part lowered from its declaration and a plain
+    part built on its own.
 
     The planned stream holds the plain parts only; every ``Repeat`` must be a
     built ladder step (one control on |1⟩, a concrete ``U`` within
@@ -710,10 +764,7 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
     minimum applies.  None when any of that fails, or without a structured
     kernel.
     """
-    if not _declares_structure(block) or _has_pending_ops(block):
-        return None
-    parts = block.structure()
-    if parts is None:
+    if _composition(block) is None:
         return None
     tq = getattr(block, "target_qubits", None)
     if tq is not None and list(tq) != list(range(block.n_qubits)):
@@ -724,21 +775,10 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
     planner = _Planner(cmds, n_qubits, fusion_width)
     entries: list = []
     repeated: set[int] = set()
-    for part in parts:
-        if isinstance(part, Repeat):
-            if not part.block.is_built:
-                return None
-            repeated.add(len(entries))
-            entries.append(
-                (part.block, len(cmds), len(cmds), _placement(part.block), part.count, False)
-            )
-            continue
-        kid_cmds = list(part.flatten())
-        if any(c.is_parametric() for c in kid_cmds):
-            return None
-        start = len(cmds)
-        cmds.extend(kid_cmds)
-        entries.append((part, start, len(cmds), _placement(part), 1, False))
+    if not _collect_parts(block, list(range(block.n_qubits)), cmds, entries, repeated):
+        return None
+    if not entries:
+        return None
     for _, s, e, _, _, _ in entries[:-1]:
         if any(_needs_trajectory(c) for c in cmds[s:e]):
             return None

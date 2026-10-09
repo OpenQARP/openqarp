@@ -79,6 +79,30 @@ def outcome_arrays(result) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
+class Target(Enum):
+    """The quantity a primitive computes.
+
+    Lives here, below both layers, so engines can dispatch on it without
+    importing from ``qarp.algorithms``; ``qarp.algorithms.Target`` is this
+    class.
+
+    Attributes:
+        SAMPLING: The measurement distribution of the circuit, keyed by
+            LSB-first bit tuples.
+        EXPECTATION_VALUE: ``⟨ket|operator|ket⟩``.
+        OVERLAP: ``⟨bra|ket⟩``.
+        TRANSITION_AMPLITUDE: ``⟨bra|operator|ket⟩``.
+    """
+
+    SAMPLING = 0
+    EXPECTATION_VALUE = 1
+    OVERLAP = 2
+    TRANSITION_AMPLITUDE = 3
+
+    def __str__(self):
+        return self.name
+
+
 class Consumes(Enum):
     """What raw engine output a primitive's estimator consumes.
 

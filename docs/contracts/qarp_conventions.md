@@ -714,18 +714,27 @@ How circuits run.
   so a cached call materialises no commands in Python; a block with a pending dagger,
   substitution or replacement always flattens.  A program samples through
   `run`'s own sample-once code, so a program whose final state equals the gate path's
-  draws the same shots for the same seed.  A declared structure is also lowered **before
-  the block is built**: `Engine.prepare_structured(block, primitive)` returns a
-  `StructuredRun` (`sample()` resolves shots, `EXACT` and `initial_state` from the
-  primitive per call and hands the block's counts to the primitive's `run()`) when the
-  engine can run it — `QarpEngine` with structured on, no device, a primitive that samples
-  the block as given (`samples_block`, set by `Sampler` alone), every `Repeat` a ladder step of one
-  control on |1⟩ over a concrete `U` of at most 12 qubits or a permutation block (its table
-  raised to the count), no parametric part, a recorded
-  measurement only in the last part — and None otherwise, with no register minimum.  The
-  hook knows no algorithm and no block class.  `QPE` and `DOSQPE` offer their block this way
-  and build it only when refused, so their build cost no longer grows with the ancilla
-  count; on that path the algorithm's `block` is None.
+  draws the same shots for the same seed.  A declared structure is also planned **before
+  the block is built**, inside `Engine.build`: a primitive's `circuits()` returns block
+  trees over its inputs as given and its `build()` builds nothing, so the engine sees each
+  circuit unbuilt; `QarpEngine` (structured on, no device, a `Consumes.COUNTS` primitive)
+  lowers it from its composition — a `structure()` declaration, or the children an unbuilt
+  `CompositeBlock` wires at build, descended recursively with a declaring part lowered from
+  its declaration and a plain part built on its own — when every `Repeat` is a ladder step
+  of one control on |1⟩ over a concrete `U` of at most 12 qubits or a permutation block (its
+  table raised to the count), no part is parametric and a recorded measurement sits only in
+  the last part, with no register minimum; otherwise it builds, flattens, transpiles and
+  plans the built block as above.  A circuit lowered this way has no compiled gate stream
+  (`compiled_circuits` holds an empty list for it); `run`, `EXACT` readout and `batch_run`
+  serve it through its program, the finite-shot sweep per parameter set.  The engine knows
+  no algorithm and no block class: `QPE` and `DOSQPE` hand their block to a `Sampler` and
+  the ladder is never built, so their build cost does not grow with the ancilla count and
+  `block` stays unbuilt on that path; `PauliAveraging` over such a block is planned the
+  same way.  A built block handed in is planned from its tree as above; handing it unbuilt
+  is what avoids the ladder.  Two primitives build their ket in `circuits()`:
+  `CuttingPrimitive`, whose cut reads the gate stream, and `PauliShadow`, whose symbol
+  check needs a built block.  Programs of the built path are cached on the engine by the
+  stream's digest, so a rebuild of the same circuit (every `batch_run`) never plans twice.
 
 ## 15. Project & repository conventions
 

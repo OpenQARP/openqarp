@@ -41,9 +41,16 @@ All notable changes to OpenQARP are recorded here. The format follows
   instead of a `dict`, and `SamplingDictionary` is a read-only `Mapping`
   alias.  `isinstance(result, dict)` and mutating a result no longer work;
   `to_dict()` returns a plain dict.  Keys and probabilities are unchanged.
+- A primitive implements `circuits()`, the block trees it runs over its
+  inputs as given, in place of `build()`; `PrimitiveAlgorithm.build()`
+  builds nothing, and the engine plans a declared structure before building
+  it.  A primitive that populated `sub_blocks` in its own `build()` moves
+  that code to `circuits()`.
 - `QPE` and `DOSQPE` on a `QarpEngine` without a device no longer build
-  their controlled-U ladder; the run goes through one controlled-powers
-  kernel whatever the ancilla count.
+  their controlled-U ladder: the run goes through one controlled-powers
+  kernel whatever the ancilla count and `block` stays unbuilt.  Any
+  primitive over such a block is planned the same way, `PauliAveraging`
+  included.
 - OpenBLAS's thread count in numpy and scipy is lowered to qarp's
   (`QARP_NUM_THREADS`) at the first simulation, so a BLAS call no longer
   leaves a worker spinning on every logical CPU against the next simulator

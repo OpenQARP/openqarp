@@ -277,11 +277,13 @@ contract.
 amplitude-consuming primitives and gradients always run the gate path.
 
 A block can also declare how it is composed with ``structure()``: its parts
-in order, where a part is a block or ``Repeat(block, count)``.  The engine
-reads that before the block is built, so ``QPE`` and ``DOSQPE``, whose
-blocks declare their controlled-U ladder, never build the ladder on a
-``QarpEngine`` without a device: their ``block`` stays ``None`` and the run
-goes through one controlled-powers kernel whatever the ancilla count.
+in order, where a part is a block or ``Repeat(block, count)``.  A primitive
+hands its circuits to the engine unbuilt, and the engine plans a
+declaration before building, so ``QPE`` and ``DOSQPE``, whose blocks declare
+their controlled-U ladder, never build the ladder on a ``QarpEngine``
+without a device: their ``block`` stays unbuilt and the run goes through one
+controlled-powers kernel whatever the ancilla count.  The same holds for any
+primitive over such a block, ``PauliAveraging`` included.
 ``QarpEngine(structured=False)`` builds the full circuit instead.
 
 MPI

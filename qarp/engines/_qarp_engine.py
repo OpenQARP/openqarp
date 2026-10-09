@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import List, NamedTuple, Optional, Union
 
 import numpy as np
@@ -11,7 +12,6 @@ from .._types import Consumes, ExactResult, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
-    StructuredRun,
     _exact_program_result,
     _exact_result,
     _reindex_exact,
@@ -78,6 +78,10 @@ def _build_effective_device(
         gate_set=gate_set,
         directedness=directedness,
     )
+
+
+# Programs kept per engine for the built path; beyond this the oldest goes.
+_PLAN_CACHE_SIZE = 64
 
 
 class _Layout(NamedTuple):
@@ -208,9 +212,8 @@ class QarpEngine(Engine):
                 "optimization_level applies to the standalone transpiler; "
                 "a device compiles its own pipeline"
             )
-        self._opt_level = _program.opt_level(
-            1 if optimization_level is None else optimization_level
-        )
+        self._opt_level_number = 1 if optimization_level is None else optimization_level
+        self._opt_level = _program.opt_level(self._opt_level_number)
 
         if n_shots is Shots.EXACT and not self.provides_amplitudes:
             raise CapabilityError(
@@ -221,6 +224,9 @@ class QarpEngine(Engine):
         self._seed = seed
         self._structured = _program.resolve(structured)
         self._programs = {}
+        # Programs of the built path by stream digest, so a rebuild of the
+        # same circuit (every batch_run) never plans twice.
+        self._plan_cache: OrderedDict[tuple, Optional[qx.Program]] = OrderedDict()
         self._primitives: list[Runnable] = []
         # Parallel to each prim.compiled_circuits[i]: logical→physical map
         # (or None when no routing happened).  Used by run()/batch_run() to
@@ -305,28 +311,6 @@ class QarpEngine(Engine):
 
     # ── Engine API ──────────────────────────────────────────────────────────
 
-    def prepare_structured(self, block, primitive: Runnable) -> Optional[StructuredRun]:
-        # A device means "simulate what the device runs" (and is the only
-        # carrier of noise), so it keeps the gate path; amplitude primitives
-        # contract the gate-path statevector.
-        if not self._structured or self._device is not None:
-            return None
-        # The run hands the block's own counts to the primitive, which only
-        # one that samples the block as given can read.
-        if primitive.consumes is not Consumes.COUNTS or not getattr(
-            primitive, "samples_block", False
-        ):
-            return None
-        self._validate_primitive(primitive)
-        n = block.n_qubits
-        found = _program.plan_structure(
-            block, n, fusion_width=_program.fusion_width_of(self._sim, n)
-        )
-        if found is None:
-            return None
-        program = found.program(compile_gates=self._compile_gates)
-        return StructuredRun(self, program, n, primitive)
-
     # ── Template hooks (build()/run() live on the base Engine) ─────────────
 
     def _post_compile_check(self, prim: Runnable, compiled, layout: Optional[_Layout]) -> None:
@@ -351,22 +335,34 @@ class QarpEngine(Engine):
         for layout in layouts:
             _reject_routed_initial_state(prim, layout)
 
-    def _plan_one(self, prim: Runnable, blk, flat) -> Optional["qx.Program"]:
+    def _plans(self, prim: Runnable) -> bool:
         # A device means "simulate what the device runs" (and is the only
-        # carrier of noise), so it keeps the gate path.
-        if not self._structured or self._device is not None:
+        # carrier of noise), so it keeps the gate path; amplitude primitives
+        # contract the gate-path statevector.
+        return self._structured and self._device is None and prim.consumes is Consumes.COUNTS
+
+    def _plan_unbuilt(self, prim: Runnable, blk) -> Optional["qx.Program"]:
+        if not self._plans(prim):
             return None
-        if prim.consumes is not Consumes.COUNTS:
+        n = blk.n_qubits
+        found = _program.plan_structure(blk, n, fusion_width=_program.fusion_width_of(self._sim, n))
+        return None if found is None else found.program(compile_gates=self._compile_gates)
+
+    def _plan_one(self, prim: Runnable, blk, flat) -> Optional["qx.Program"]:
+        if not self._plans(prim):
             return None
-        found = _program.plan(
-            blk,
-            blk.n_qubits,
-            list(flat),
-            fusion_width=_program.fusion_width_of(self._sim, blk.n_qubits),
-        )
-        if found is None:
-            return None
-        return found.program(compile_gates=self._compile_gates)
+        n = blk.n_qubits
+        width = _program.fusion_width_of(self._sim, n)
+        key = (qx._commands_digest(list(flat)), n, width, self._opt_level_number)
+        if key in self._plan_cache:
+            self._plan_cache.move_to_end(key)
+            return self._plan_cache[key]
+        found = _program.plan(blk, n, list(flat), fusion_width=width)
+        program = None if found is None else found.program(compile_gates=self._compile_gates)
+        self._plan_cache[key] = program
+        if len(self._plan_cache) > _PLAN_CACHE_SIZE:
+            self._plan_cache.popitem(last=False)
+        return program
 
     def _programs_for(self, prim: Runnable, params) -> list:
         programs = self._programs.get(id(prim)) or [None] * len(prim.compiled_circuits)
@@ -436,8 +432,10 @@ class QarpEngine(Engine):
         primitives sweep in C++ (``sim.batch_run``); EXACT and
         amplitude-consuming primitives evaluate per parameter set."""
         # Sampled primitives batch in C++; None marks per-set evaluation below
-        # (AMPLITUDES consumers and EXACT readouts).
+        # (AMPLITUDES consumers, EXACT readouts, and a circuit lowered from
+        # its composition, which has no gate stream for the C++ sweep).
         prim_batch: list[Optional[list]] = []
+        first_ordinal: dict[int, int] = {}
         ordinal = 0
         for prim_idx, prim in enumerate(primitives):
             # rebuild=False reuses compiled circuits and skips the compile
@@ -448,8 +446,16 @@ class QarpEngine(Engine):
                 prim_batch.append(None)
                 continue
             shots = self._resolve_shots(prim, shots_override)
-            if shots is Shots.EXACT:
+            lowered = circuits_per_prim[prim_idx] is prim.compiled_circuits and any(
+                prog is not None and not cmds
+                for cmds, prog in zip(
+                    prim.compiled_circuits, self._programs_for(prim, {}), strict=True
+                )
+            )
+            if shots is Shots.EXACT or lowered:
                 prim_batch.append(None)
+                first_ordinal[prim_idx] = ordinal
+                ordinal += len(circuits_per_prim[prim_idx])
                 continue
             if prim.initial_state is not None:
                 # C++ batch_run has no initial_state (deferred — see plan);
@@ -489,32 +495,46 @@ class QarpEngine(Engine):
                 substituted = [qx.substitute_all(cmds, ps) if ps else cmds for cmds in circuits]
                 if prim.consumes is Consumes.AMPLITUDES:
                     set_results.append(prim.run_from_amplitudes(substituted, simulator=self._sim))
-                else:  # EXACT readout
-                    # Programs mirror the built circuits only; a caller that
-                    # hands in rewritten circuits (gradients) keeps the gate path.
-                    programs = (
-                        self._programs_for(prim, ps)
-                        if circuits is prim.compiled_circuits
-                        else [None] * len(circuits)
+                    continue
+                # Programs mirror the built circuits only; a caller that
+                # hands in rewritten circuits (gradients) keeps the gate path.
+                programs = (
+                    self._programs_for(prim, ps)
+                    if circuits is prim.compiled_circuits
+                    else [None] * len(circuits)
+                )
+                shots = self._resolve_shots(prim, shots_override)
+                psi = prim.initial_state
+                if psi is not None:
+                    psi = np.ascontiguousarray(psi, dtype=np.complex128)
+                sampling_results = []
+                for k, (cmds, prog, n_q, l2p) in enumerate(
+                    zip(
+                        substituted,
+                        programs,
+                        prim._n_qubits_list,
+                        l2p_per_prim[prim_idx],
+                        strict=True,
                     )
-                    sampling_results = [
-                        self._maybe_reindex(
-                            _exact_result(self._sim, cmds, n_q, initial_state=prim.initial_state)
+                ):
+                    if shots is Shots.EXACT:
+                        sr = (
+                            _exact_result(self._sim, cmds, n_q, initial_state=psi)
                             if prog is None
-                            else _exact_program_result(
-                                self._sim, prog, n_q, initial_state=prim.initial_state
-                            ),
-                            l2p,
+                            else _exact_program_result(self._sim, prog, n_q, initial_state=psi)
                         )
-                        for cmds, prog, n_q, l2p in zip(
-                            substituted,
-                            programs,
-                            prim._n_qubits_list,
-                            l2p_per_prim[prim_idx],
-                            strict=True,
+                    else:
+                        # One seed stream per circuit, stepped per set as the
+                        # C++ sweep steps its own.
+                        seed = self._circuit_seed(first_ordinal[prim_idx] + k)
+                        seed = None if seed is None else (seed + set_idx) % 2**32
+                        sr = (
+                            self._sim.run(cmds, n_q, shots, seed, initial_state=psi)
+                            if prog is None
+                            else self._sim.program_run(prog, n_q, shots, seed, initial_state=psi)
                         )
-                    ]
-                    set_results.append(prim.run(sampling_results))
+                    sampling_results.append(self._maybe_reindex(sr, l2p))
+                set_results.append(prim.run(sampling_results))
             results_by_set.append(set_results)
 
         return results_by_set

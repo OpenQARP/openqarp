@@ -23,7 +23,7 @@ from typing import Optional, Union
 import qarpx as qx
 from qarp.operators import QubitOperator
 
-from .._types import Consumes, PrimitiveResult, Shots
+from .._types import Consumes, PrimitiveResult, Shots, Target
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
@@ -43,14 +43,10 @@ def _is_gpu_expectation(prim) -> bool:
     (OVERLAP, TRANSITION_AMPLITUDE, non-QubitOperator) falls back to
     ``run_from_amplitudes`` with the GPU simulator injected.
 
-    ``target`` is matched by name string (not by importing the ``Target`` enum)
-    to avoid an import cycle: ``qarp.algorithms`` imports back from
-    ``qarp.engines`` — the same reason ``_gradients`` compares
-    ``prim.target.name``.
     """
     return (
         getattr(prim, "consumes", None) is Consumes.AMPLITUDES
-        and getattr(getattr(prim, "target", None), "name", None) == "EXPECTATION_VALUE"
+        and getattr(prim, "target", None) is Target.EXPECTATION_VALUE
         and isinstance(getattr(prim, "operator", None), QubitOperator)
     )
 
