@@ -15,17 +15,7 @@ the same window.
 
 - **`CHANGELOG.md` carries each PR's lines.**  Every PR into `develop`
   before the release adds its entries under `[Unreleased]`; the release PR
-  only moves them.  The structured-execution PR's lines.  Removed:
-  `Engine.prepare_structured_qpe`, `StructuredQPEPlan`, the
-  `simulate_qpe_structured` and `simulate_dosqpe_structured` bindings.
-  Changed: `Sampler` and `PostSelection.apply` return a read-only
-  `SamplingDistribution` and `SamplingDictionary` is a `Mapping` alias, so
-  `isinstance(result, dict)` and mutating a result break; OpenBLAS's thread
-  count follows `QARP_NUM_THREADS`.  Added: `Repeat`, `structure()`,
-  `classical_action`, `Block.kernels`, `structured` and `optimization_level`
-  on `Block.statevector` and `QarpEngine`, `QARP_STRUCTURED`,
-  `QARP_BLAS_THREADS`.  `Engine.prepare_structured` and `StructuredRun` are
-  not listed: the lazy-circuits PR removes them before the release.
+  only moves them.
 - **`PrimitiveResult` is a public annotation without an export.**
   `qarp/_types.py` defines it and `PrimitiveAlgorithm.run`, `Engine.run` and
   `Engine.batch_run` return it, but `qarp.__all__` exports only
