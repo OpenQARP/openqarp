@@ -3,7 +3,7 @@
 Plan-first home for OpenQARP contributions.  Every standard- or structural-tier
 contribution starts as a plan file here, green-lit in a **Draft PR** before
 implementation begins — plan and implementation then land together in that
-same PR.  The [index below](#index) tracks every plan.  Conventions are
+same PR.  The [index below](#index) lists every plan.  Conventions are
 governed by [`qarp_conventions.md`](../contracts/qarp_conventions.md); when a
 plan and that doc disagree, that doc wins.
 
@@ -17,21 +17,23 @@ One PR per contribution, with two review gates inside it.
 
 1. **Plan** — contributor + reviewer sit down, generate and refine the plan
    with AI.  Copy [`_template.md`](_template.md) to `<topic>_plan.md`, fill
-   it, add the index row below (📋 Planned).  Branch per CONTRIBUTING
-   conventions and open a **Draft PR** whose first commit is the plan.
+   it (Status: Planned) and add its row to the index below.  Branch per
+   CONTRIBUTING conventions and open a **Draft PR** whose first commit is the
+   plan.
 2. **Green-light** — the reviewer posts a PR **comment** headed
    `Green-lit at <sha>` (the plan commit) with the Gate 1 reviewer checks
    pasted from the PR template and ticked.  **That comment is the design
    approval** — implementation does not start before it.  It is a comment,
    never a GitHub *Approve* review: Approve reviews are given at Gate 2
-   only.  The author then fills the plan's `**Green-lit:**` header — the
-   sha, the date, and the plan file's blob id from
-   `git rev-parse <sha>:docs/contributions/<topic>_plan.md` — and flips the
-   index row to 🚧 In progress, in one commit.
+   only.  A design agreed elsewhere, at a sit-down or in a chat, is
+   green-lit by that comment once the Draft PR is open.  The author then
+   fills the plan's `**Green-lit:**` header — the date and the plan file's
+   blob id from `git rev-parse <sha>:docs/contributions/<topic>_plan.md` —
+   and sets its Status to In progress, in one commit.
 3. **Implement** — same branch, same PR.  Deviations from the green-lit plan
    go in the PR's "Deviations from plan" section as they happen.
 4. **Review** — fold deviations back into the plan file, date the phase
-   boxes, flip status and index row to ✅ Landed, tick the Gate 2 boxes,
+   boxes, set the plan's Status to Landed, tick the Gate 2 boxes,
    then mark the PR ready.  The reviewer posts the `/plan-review` report
    (an AI conformance diff against the green-lit blob) as a PR comment, so
    the author sees the same findings, then gives the GitHub *Approve* with
@@ -43,12 +45,12 @@ One PR per contribution, with two review gates inside it.
 Deviating from the plan is fine — *silent* drift is the violation.  The
 green-light is a point in time: measure drift against the plan as it stood
 when it was approved, not against the version you just edited.  That
-revision is pinned by the plan file's **blob id** in the header, not by the
+revision is pinned by the plan file's **blob id** in the header, not by a
 commit: the blob survives rebases and the squash on landing, so the branch
-may be rebased freely.  The reviewer trusts the sha in their own comment,
-and `git rev-parse <sha>:<plan file>` must reproduce the header's blob; a
-rewritten commit can still be fetched from GitHub by sha while the PR is
-open.
+may be rebased freely and the header is never re-pinned.  The sha lives only
+in the reviewer's comment, and `git rev-parse <sha>:<plan file>` must
+reproduce the header's blob.  That sha is a pushed commit of an open PR, so
+GitHub keeps it fetchable after a rebase rewrites the branch.
 
 ### Who ticks what
 
@@ -120,23 +122,25 @@ A plan not tied to one of these windows lands when its own two gates clear.
 
 ## Index
 
-One row per plan file, open work first (🚧, 📋, then ✅, 🗄️; alphabetical
-within each group).  Every plan also carries a matching `**Status:**` header.
-Not a row: [`_template.md`](_template.md), the plan scaffold, and
+One row per plan file, alphabetical, added with the plan and not edited
+after.  A plan's state lives in its own `**Status:**` header:
+
+| Status | Meaning |
+|--------|---------|
+| Planned | Filed, not yet green-lit. |
+| In progress | Green-lit; implementation under way. |
+| Landed | Implemented, tested, merged.  The doc is now a reference/contract. |
+| Superseded | Historical snapshot; a newer doc or the code is now authoritative. |
+
+`grep -H '^\*\*Status:' docs/contributions/*_plan.md` lists them all.  Not a
+row: [`_template.md`](_template.md), the plan scaffold, and
 [`to_do.md`](to_do.md), the side quests: fixes found while working on
 something else, parked until they are picked up.
 
-| Badge | Meaning |
-|-------|---------|
-| ✅ **Landed** | Implemented, tested, in production.  The doc is now a reference/contract. |
-| 🚧 **In progress** | Partially landed; named work still pending. |
-| 📋 **Planned** | Backlog.  Little or nothing implemented yet. |
-| 🗄️ **Superseded** | Historical snapshot; a newer doc or the code is now authoritative. |
-
-| Plan | Theme | Author | Status | Notes |
-|---|---|---|:---:|---|
-| [`lazy_circuit_derivation_plan.md`](lazy_circuit_derivation_plan.md) | Primitives derive circuits lazily; declared structure planned inside `Engine.build`; `Target` below the engine layer | Stefano Scali | ✅ | Structural: §14 edit, `Runnable` protocol; removes `prepare_structured`/`StructuredRun`; after `structured_execution_plan.md` lands |
-| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | ✅ | OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool`; bare-metal timings in `to_do.md` |
-| [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | ✅ | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
-| [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | ✅ | Same PR as `sampler_distribution_plan.md`; no convention edit |
-| [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels | Stefano Scali | ✅ | Structural: §13/§14 edits; replaces the structured-QPE fast path (`prepare_structured_qpe` removed) |
+| Plan | Theme |
+|---|---|
+| [`lazy_circuit_derivation_plan.md`](lazy_circuit_derivation_plan.md) | Primitives derive circuits lazily; declared structure planned inside `Engine.build`; `Target` below the engine layer |
+| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator |
+| [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` |
+| [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` |
+| [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels |

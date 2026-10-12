@@ -5,7 +5,7 @@
 **Date:** 2026-10-07
 **Tier:** Structural
 **Branch:** improvement/lazy-circuit-derivation
-**Green-lit:** 277c58b (2026-10-09), plan blob aa0f219c5fb305e2fda24fa0259776cd048dfdc9
+**Green-lit:** 2026-10-09, plan blob aa0f219c5fb305e2fda24fa0259776cd048dfdc9
 **Scope:** `qarp/_types.py`; `qarp/algorithms/_primitives/target.py` (re-export only),
 `__init__.py` (docstring), `primitive_algorithm.py`, `sampler.py`, `pauli_averaging.py`,
 `basis_rotation_averaging.py`, `hadamard_test.py`, `termwise_hadamard_test.py`,
