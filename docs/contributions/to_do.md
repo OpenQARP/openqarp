@@ -30,10 +30,6 @@ the same window.
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
   `prepare_structured_qpe`; the counter is 14 after structured execution and
   the hook is gone.  Fix when each branch rebases.
-- **No shim for `prepare_structured`.**  The lazy-circuits plan asks whether
-  the hook gets a one-release shim; the release order answers it: the hook
-  never reaches a release, so it is a plain removal.  Record that in the
-  plan's decisions at the sit-down.
 
 ## Breaking changes waiting for a minor release
 
@@ -73,11 +69,9 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   it as a `SimpleBlock` leaf; its layers are a composition that a
   `CompositeBlockBase` tree expresses.  `isinstance` answers change; ships
   with the symbol-contract regression test.
-- **One `Runnable` change for the engine boundary.**  The lazy-circuits plan
-  groups `Runnable` by boundary and moves `Target` below the engine layer;
-  `pauli_engine_plan.md` adds `Consumes.OBSERVABLE` and makes
-  `StateVector.consumes` a property.  Settle both at one sit-down so a
-  third-party engine adapts once.
+- **`Consumes.OBSERVABLE` on the engine boundary.**
+  `pauli_engine_plan.md` adds the member and makes `StateVector.consumes` a
+  property, so a third-party engine that dispatches on `consumes` adapts.
 
 ## Additive, no window needed
 

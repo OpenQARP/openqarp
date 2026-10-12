@@ -51,6 +51,8 @@ All notable changes to OpenQARP are recorded here. The format follows
   kernel whatever the ancilla count and `block` stays unbuilt.  Any
   primitive over such a block is planned the same way, `PauliAveraging`
   included.
+- `MirrorTest` accepts an input narrower than its working register and
+  places it on the low qubits; it raised before.
 - OpenBLAS's thread count in numpy and scipy is lowered to qarp's
   (`QARP_NUM_THREADS`) at the first simulation, so a BLAS call no longer
   leaves a worker spinning on every logical CPU against the next simulator

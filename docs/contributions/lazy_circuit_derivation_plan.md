@@ -5,7 +5,7 @@
 **Date:** 2026-10-07
 **Tier:** Structural
 **Branch:** improvement/lazy-circuit-derivation
-**Green-lit:** 68831f4 (2026-10-09), plan blob aa0f219c5fb305e2fda24fa0259776cd048dfdc9
+**Green-lit:** 277c58b (2026-10-09), plan blob aa0f219c5fb305e2fda24fa0259776cd048dfdc9
 **Scope:** `qarp/_types.py`; `qarp/algorithms/_primitives/target.py` (re-export only),
 `__init__.py` (docstring), `primitive_algorithm.py`, `sampler.py`, `pauli_averaging.py`,
 `basis_rotation_averaging.py`, `hadamard_test.py`, `termwise_hadamard_test.py`,
@@ -162,7 +162,7 @@ def _compile_one(self, block, prim) -> _Compiled:
 
 ### Phase 1 — `Target` below the layer line
 
-- [x] `Target` in `qarp._types`, re-exported from `qarp.algorithms._primitives.target`; engines compare by identity; lint gate extended *(2026-10-09)*
+- [x] `Target` in `qarp._types`, re-exported from `qarp.algorithms._primitives.target`; engines compare by identity; the two imports tested identical *(2026-10-09)*
 - [x] `samples_block` retired for `target is Target.SAMPLING and consumes is Consumes.COUNTS`; §14 wording *(2026-10-09)*
 - [x] `Runnable` docstring grouped by boundary *(2026-10-09)*
 
