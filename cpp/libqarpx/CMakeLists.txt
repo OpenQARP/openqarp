@@ -107,12 +107,14 @@ add_library(qarpx
     src/synthesis/diagonal.cpp
     src/synthesis/unitary.cpp
     src/synthesis/pauli_exponential.cpp
+    src/parallel/blas_threads.cpp
     src/parallel/cpu_budget.cpp
     src/parallel/thread_pool.cpp
     src/parallel/mpi_utils.cpp
     src/simulator/dense_kernel.cpp
     src/simulator/fusion.cpp
     src/simulator/pauli_expectation.cpp
+    src/simulator/program.cpp
     src/simulator/qarp_simulator.cpp
     # Throwing stubs with available()==false unless QARP_WITH_CUDAQ is set
     # (see below); no CUDA dependency in the default build.

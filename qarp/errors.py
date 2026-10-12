@@ -8,8 +8,8 @@ class CapabilityError(ValueError):
     the ``Engine`` template's validation hooks at ``build()``, ``run()`` and
     ``batch_run()`` time (targets, exactness, noise×amplitudes, mid-circuit
     operations, ``initial_state`` support/routing), by engine constructors for
-    self-contradictory configuration, by ``StructuredQPEPlan.sample()``, and by
-    primitives whose own construction detects an unsupported combination.
+    self-contradictory configuration, and by primitives whose own construction
+    detects an unsupported combination.
 
     Also the rejection type of the emit/absorb SDK boundary: an emitter whose
     declared gate set or ``EmitterCapabilities`` cannot represent a command

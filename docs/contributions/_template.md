@@ -6,7 +6,6 @@
 
 **Status:** Draft
 **Author:** <contributor> (+ <AI assistant, if used>)
-**Reviewer:** <named reviewer — their green-light on this plan in the Draft PR is the design approval>
 **Date:** <YYYY-MM-DD>
 **Tier:** <Standard | Structural>
 **Branch:** <type/name-of-branch>

@@ -34,7 +34,10 @@ a commit that CI has already passed on `develop`.
 
 [Semantic Versioning](https://semver.org/).  While on `0.x`, a patch release
 (`0.1.1`) carries fixes only; anything that adds or changes public API is a
-minor release (`0.2.0`).
+minor release (`0.2.0`), and a minor release may remove or change a public
+name with no deprecation shim, listing it under *Removed* or *Changed* in
+`CHANGELOG.md`.  From 1.0, a removal is preceded by one minor release in
+which the old name still works and emits a `DeprecationWarning`.
 
 ## Steps
 

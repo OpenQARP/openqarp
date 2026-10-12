@@ -9,8 +9,7 @@ plan and that doc disagree, that doc wins.
 
 The plans behind the code as first published are not carried into this
 repository; the code, its tests and `qarp_conventions.md` are the record.
-This directory therefore starts with the scaffold and a worked example only —
-the first plan filed after the release is the first row in the index.
+The index starts with the first plan filed after the release.
 
 ## The loop
 
@@ -63,11 +62,11 @@ unticked box.  A box that does not apply is ticked with its text struck
 through and a word of reason, never deleted, so a skipped item and a
 non-applicable one look different.
 
-The reviewer is the code owner GitHub requests from `CODEOWNERS`, or the
-reviewer named at the sit-down.  A sit-down reviewer owns the reviewer
-checks.  The branch ruleset requires the code owner's Approve either way, so
-an owner who is not the sit-down reviewer gives a second Approve, not a
-replacement.
+Reviewers are assigned on the PR, not in the plan: the code owners GitHub
+requests from `CODEOWNERS`, plus anyone the author or an owner requests for
+the change at hand.  Any of them may post the green-light and run the
+reviewer checks; the branch ruleset still requires a code owner's Approve at
+Gate 2.
 
 ### Promotion
 
@@ -109,10 +108,13 @@ before any layout move.  Type stubs for the compiled backend, then the
 configuration and agent-guide tidy-up.
 
 **The 0.2 cycle** — layout, so paths break once rather than twice.  The `src/`
-source root and the `cpp/` flattening.
+source root and the `cpp/` flattening.  `Sampler` also returns a read-only
+`SamplingDistribution` from this cycle
+([`sampler_distribution_plan.md`](sampler_distribution_plan.md)), which breaks
+`isinstance(result, dict)` and mutating a result.
 
-**The 1.0 item** — the only change on this roadmap that breaks user code.  One
-public import name, with `qarpx` kept as a deprecating shim for a full release.
+**The 1.0 item** — one public import name, with `qarpx` kept as a deprecating
+shim for a full release.
 
 A plan not tied to one of these windows lands when its own two gates clear.
 
@@ -120,7 +122,9 @@ A plan not tied to one of these windows lands when its own two gates clear.
 
 One row per plan file, open work first (🚧, 📋, then ✅, 🗄️; alphabetical
 within each group).  Every plan also carries a matching `**Status:**` header.
-Not a row: [`_template.md`](_template.md), the plan scaffold.
+Not a row: [`_template.md`](_template.md), the plan scaffold, and
+[`to_do.md`](to_do.md), the side quests: fixes found while working on
+something else, parked until they are picked up.
 
 | Badge | Meaning |
 |-------|---------|
@@ -131,4 +135,7 @@ Not a row: [`_template.md`](_template.md), the plan scaffold.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
-| [`example_plan.md`](example_plan.md) | Worked example of a plan | OpenQARP maintainers | 🗄️ | Illustrates the format only: a filled-in `_template.md` for a small standard-tier feature.  Not implemented; delete this row when the first real plan lands |
+| [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | ✅ | OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool`; bare-metal timings in `to_do.md` |
+| [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | ✅ | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
+| [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | ✅ | Same PR as `sampler_distribution_plan.md`; no convention edit |
+| [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels | Stefano Scali | ✅ | Structural: §13/§14 edits; replaces the structured-QPE fast path (`prepare_structured_qpe` removed) |

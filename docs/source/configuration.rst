@@ -89,13 +89,14 @@ in ``qarp/_types.py``.
 SamplingDictionary
 ------------------
 
-A type alias for dictionary structures representing sampling results:
+A read-only type alias for sampling results.  Both a :class:`~qarp.SamplingDistribution`
+(what :class:`~qarp.algorithms.Sampler` returns) and a plain dict satisfy it:
 
 .. code-block:: python
 
    from qarp import SamplingDictionary
 
-   # SamplingDictionary is defined as: dict[tuple[int, ...], float]
+   # SamplingDictionary is defined as: Mapping[tuple[int, ...], float]
 
    # Example usage
    results: SamplingDictionary = {
@@ -105,8 +106,8 @@ A type alias for dictionary structures representing sampling results:
        (1, 1, 1): 0.25,
    }
 
-The keys are tuples of integers representing measurement outcomes, and values are floats 
-representing probabilities or counts.
+The keys are LSB-first bit tuples representing measurement outcomes, and values are
+probabilities.  Annotate results you only read with it; build a new dict to change one.
 
 ----
 
@@ -134,7 +135,9 @@ scheduler CPU binding are honoured), capped one below its logical CPUs: a
 spinning OpenMP worker on each hardware thread starves the process.  A
 container CPU limit (``docker run --cpus``, a Kubernetes ``limits.cpu``, any
 cgroup v1 or v2 CPU quota) counts as the logical CPUs when it is fewer,
-rounded up to whole CPUs.  Where the topology is unreadable (outside Linux)
+rounded up to whole CPUs.  OpenMP binding (``OMP_PROC_BIND``, ``OMP_PLACES``)
+pins the main thread to one place; the CPUs counted are then those of all
+the places, so binding does not shrink the count.  Where the topology is unreadable (outside Linux)
 the count is the logical CPUs minus one.  The physical cores are those the
 kernel reports: under WSL and some virtual machines the virtual topology
 pairs CPUs that are separate cores on the hardware and so undercounts them;
@@ -158,6 +161,50 @@ threads can drive it concurrently.  Below the kernel layer's parallel
 threshold (16 qubits, see *Gate fusion*) two threads overlap almost fully;
 above it each call already occupies every core, so threading buys little
 there.
+
+numpy and scipy wheels each bundle their own OpenBLAS, with its own thread
+pool sized to every logical CPU.  After a multi-threaded BLAS call (a
+complex ``np.linalg.norm``, a matrix product, a solve) its workers keep
+spinning for 100–200 ms, and a simulator call started in that window
+competes with them for the cores: a 16-qubit ``statevector`` right after a
+norm took 108 ms instead of 5 ms.  The penalty is oversubscription, so by
+default qarp lowers each bundled copy's thread count to its own
+(``QARP_NUM_THREADS``) at the first simulation, and numpy and scipy keep
+that count for the rest of the process.  BLAS stays multi-threaded.  A
+count set in ``OPENBLAS_NUM_THREADS`` or ``GOTO_NUM_THREADS`` stays, and so
+does a lower limit set in code before the first simulation
+(``threadpoolctl``); one set inside a ``with`` block that the first
+simulation runs in is restored by ``threadpoolctl`` to OpenBLAS's own count
+when the block ends.
+
+``QARP_BLAS_THREADS`` selects what that first simulation does:
+
+.. code-block:: bash
+
+    QARP_BLAS_THREADS=limit  python my_script.py   # the default: the count alone
+    QARP_BLAS_THREADS=pool   python my_script.py   # the count, plus qarpx's pool
+    QARP_BLAS_THREADS=native python my_script.py   # OpenBLAS untouched
+
+Lowering the count stops helping where qarpx's threads and as many BLAS
+threads no longer fit the logical CPUs: a budget close to the logical count
+(no hyper-threading, or ``QARP_NUM_THREADS`` raised).  ``pool`` covers that
+case too.  It hands each OpenBLAS copy a threading callback that runs its
+parallel jobs on a small pool of qarpx's own, whose idle workers sleep the
+moment a call ends.  The pool's workers run on every CPU the process may
+use, even when the thread that made the first call is pinned to one, and a
+child created with ``fork`` starts a fresh pool, so numpy work before a
+fork never affects the child's simulations.  It costs: BLAS calls from
+several Python threads run one at a time, because OpenBLAS's per-job
+scratch buffers are shared between calls, and factorisation loops run
+1.4–1.7× slower than on OpenBLAS's own pool at the lowered count.  Any
+other value warns and counts as unset.
+
+The mode is applied at the first simulation: the first ``QarpEngine``
+built, or the first ``Block.statevector`` or ``Block.unitary_matrix``.  A
+process that imports qarp but never simulates keeps OpenBLAS exactly as it
+was.  scipy's copy is covered at the first simulation after scipy is
+imported; qarp never loads scipy itself.  Other BLAS libraries (MKL,
+Accelerate, a conda OpenBLAS) are left alone.
 
 Gate fusion
 ===========
@@ -202,6 +249,40 @@ The same import also exports ``QULACS_PARALLEL_NQUBIT_THRESHOLD=16`` to
 the kernel layer unless you set it: csim's own per-kernel default of 13
 forks an OpenMP team where the fork costs more than the gate, which is
 where a 13-qubit circuit used to run 11× its 12-qubit twin.
+
+Structured execution
+====================
+
+Fusion folds gates it can see; it cannot see that a thousand gates only
+permute basis states.  ``Block.statevector`` and ``QarpEngine``'s sampling
+paths therefore read the block tree first and run each piece as the
+cheapest exact kernel: a basis-state permutation as one gather (declared by
+``classical_action``, or found from the gates), a small block as one dense
+matrix, a ladder of the same controlled block as one controlled-powers
+kernel, and everything else as its fused gates.  A circuit with no such
+structure runs exactly as before.  See §14 of the conventions for the full
+contract.
+
+.. code-block:: python
+
+    from qarp.blocks import XnBlock
+    from qarp.engines import QarpEngine
+
+    block = XnBlock(14).build()
+    block.statevector(structured=False)   # the gate stream as-is
+    QarpEngine(structured=False)          # same, for every primitive it builds
+
+``QARP_STRUCTURED`` sets the process-wide default, read once; ``0``,
+``false``, ``off`` and ``no`` turn it off.  Engines with a ``device``,
+amplitude-consuming primitives and gradients always run the gate path.
+
+A block can also declare how it is composed with ``structure()``: its parts
+in order, where a part is a block or ``Repeat(block, count)``.  The engine
+reads that before the block is built, so ``QPE`` and ``DOSQPE``, whose
+blocks declare their controlled-U ladder, never build the ladder on a
+``QarpEngine`` without a device: their ``block`` stays ``None`` and the run
+goes through one controlled-powers kernel whatever the ancilla count.
+``QarpEngine(structured=False)`` builds the full circuit instead.
 
 MPI
 ===

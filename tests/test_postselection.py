@@ -5,11 +5,14 @@ statevector index bit q = qubit q, fixed-bit specs remove the selected
 qubits from the output, sector specs keep full register width.
 """
 
+from itertools import product
+from math import cos, prod, sin
+
 import numpy as np
 import pytest
 
 import qarp
-from qarp import PostSelection
+from qarp import PostSelection, SamplingDistribution
 from qarp.algorithms import Sampler
 from qarp.blocks import SimpleBlock
 from qarp.engines import QarpEngine
@@ -206,3 +209,107 @@ def test_sampled_vs_exact_agreement():
     assert out_sampled.success_rate == pytest.approx(0.5, abs=0.05)
     # Bell correlations: conditioning q0=0 forces q1=0.
     assert out_sampled.distribution == {(0,): 1.0}
+
+
+# ── SamplingDistribution input against analytic conditionals ────────────
+
+_THETAS = (0.3, 1.1, 2.0, 0.7)
+
+
+class _RyProduct(SimpleBlock):
+    """``⊗_q Ry(θ_q)|0⟩``: qubit ``q`` reads 1 with probability ``sin²(θ_q/2)``."""
+
+    def __init__(self, thetas):
+        super().__init__(len(thetas))
+        self._thetas = thetas
+
+    def build_vanilla(self):
+        for q, theta in enumerate(self._thetas):
+            self.ry(q, theta)
+
+
+def _product_probs(thetas):
+    one = [sin(t / 2) ** 2 for t in thetas]
+    zero = [cos(t / 2) ** 2 for t in thetas]
+    return {
+        bits: prod(one[q] if b else zero[q] for q, b in enumerate(bits))
+        for bits in product((0, 1), repeat=len(thetas))
+    }
+
+
+def _exact_product():
+    s = Sampler(ket=_RyProduct(_THETAS), n_shots=qarp.EXACT)
+    eng = QarpEngine()
+    eng.build([s])
+    return eng.run()[0]
+
+
+def test_fixed_bit_on_distribution_gives_the_analytic_conditional():
+    """Conditioning a product state on q0 = 1 leaves the product of the rest."""
+    out = PostSelection({0: 1}).apply(_exact_product())
+    assert isinstance(out.distribution, SamplingDistribution)
+    assert out.distribution.n_bits_measured == 3
+    assert out.success_rate == pytest.approx(sin(_THETAS[0] / 2) ** 2, abs=1e-12)
+    expected = _product_probs(_THETAS[1:])
+    assert out.distribution.keys() == expected.keys()
+    for bits, p in expected.items():
+        assert out.distribution[bits] == pytest.approx(p, abs=1e-12)
+    assert list(out.distribution) == sorted(
+        expected, key=lambda b: sum(x << i for i, x in enumerate(b))
+    )
+
+
+def test_hamming_weight_on_distribution_gives_the_analytic_sector():
+    """Exactly one of q1, q3 set: full-width keys, renormalised by the sector mass."""
+    out = PostSelection.hamming_weight([1, 3], 1).apply(_exact_product())
+    full = _product_probs(_THETAS)
+    kept = {bits: p for bits, p in full.items() if bits[1] + bits[3] == 1}
+    success = sum(kept.values())
+    assert out.success_rate == pytest.approx(success, abs=1e-12)
+    assert out.distribution.n_bits_measured == 4
+    assert out.distribution.keys() == kept.keys()
+    for bits, p in kept.items():
+        assert out.distribution[bits] == pytest.approx(p / success, abs=1e-12)
+
+
+def test_impossible_condition_gives_an_empty_distribution_of_the_reduced_width():
+    dist = SamplingDistribution([0b00, 0b10], [0.5, 0.5], 2)
+    out = PostSelection({0: 1}).apply(dist)
+    assert out.success_rate == 0.0
+    assert out.distribution == {}
+    assert out.distribution.n_bits_measured == 1
+
+
+def test_integer_keyed_dict_is_rejected_with_a_clear_message():
+    with pytest.raises(ValueError, match="is not a tuple of 0/1 bits"):
+        PostSelection({0: 1}).apply({0: 0.5, 3: 0.5})
+
+
+def test_mixed_width_dict_is_rejected():
+    with pytest.raises(ValueError, match="mixed widths"):
+        PostSelection({0: 1}).apply({(1,): 0.5, (1, 0): 0.5})
+
+
+def test_empty_dict_gives_an_empty_distribution():
+    out = PostSelection({0: 1}).apply({})
+    assert out.success_rate == 0.0
+    assert out.distribution == {}
+
+
+def test_tuple_key_with_a_non_bit_entry_is_rejected():
+    with pytest.raises(ValueError, match="is not a tuple of 0/1 bits"):
+        PostSelection({0: 1}).apply({(1, 2): 0.5, (0, 0): 0.5})
+
+
+def test_post_selection_keeps_the_kept_shot_count():
+    # Outcomes 1 and 3 have bit 0 set: 2 + 4 of the 10 shots survive.
+    sampled = SamplingDistribution([0, 1, 2, 3], [0.1, 0.2, 0.3, 0.4], 2, n_shots=10)
+    assert PostSelection({0: 1}).apply(sampled).distribution.n_shots == 6
+    exact = SamplingDistribution([0, 1, 2, 3], [0.1, 0.2, 0.3, 0.4], 2)
+    assert PostSelection({0: 1}).apply(exact).distribution.n_shots is None
+
+
+def test_kept_shot_count_rounds_rather_than_truncates():
+    # 100 × 0.29 is 28.999999999999996 in floating point; 29 shots were kept.
+    sampled = SamplingDistribution([0, 1], [0.71, 0.29], 1, n_shots=100)
+    assert PostSelection({0: 1}).apply(sampled).distribution.n_shots == 29

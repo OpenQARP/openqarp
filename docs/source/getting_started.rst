@@ -109,7 +109,7 @@ circuit — here, the distribution of measured bitstrings.  The *engine* runs it
    results = engine.run()
 
    print(results[0])
-   # {(0, 0): 0.48875, (1, 1): 0.51125}   ← a Bell state, up to shot noise
+   # SamplingDistribution({(0, 0): 0.48875, (1, 1): 0.51125})   ← a Bell state, up to shot noise
 
 Keys are tuples of bits indexed by qubit: position ``q`` is qubit ``q``.  OpenQARP
 is least-significant-bit-first everywhere.  Values are probabilities, not raw

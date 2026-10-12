@@ -1,6 +1,6 @@
 """Composite amplitude-amplification algorithm."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Optional, Self, cast
 
@@ -124,7 +124,7 @@ class AmplitudeAmplification(CompositeAlgorithm):
             raise ValueError("Circuit not built. Call build() before run().")
 
         result = self.engine.run()[0]
-        if not isinstance(result, dict):
+        if not isinstance(result, Mapping):
             raise TypeError("AmplitudeAmplification requires a sampling primitive")
         self.distribution = cast(SamplingDictionary, result)
 

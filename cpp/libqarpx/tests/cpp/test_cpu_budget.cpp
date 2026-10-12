@@ -6,6 +6,12 @@
 #include <string>
 #include <vector>
 
+#ifdef __linux__
+#include <sched.h>
+
+#include "qarpx/parallel/thread_pool.h"
+#endif
+
 namespace fs = std::filesystem;
 using qarpx::detail::cgroup_cpu_limit;
 using qarpx::detail::CpuBudget;
@@ -191,3 +197,42 @@ TEST(CgroupCpuLimit, NothingReadableIsZero) {
     FakeRoot root;
     EXPECT_EQ(cgroup_cpu_limit(root.str()), 0u);
 }
+
+#ifdef __linux__
+TEST(ProcessCpus, MatchTheMaskTheProcessStartedWith) {
+    cpu_set_t all;
+    CPU_ZERO(&all);
+    ASSERT_EQ(sched_getaffinity(0, sizeof(all), &all), 0);
+    std::vector<int> expected;
+    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+        if (CPU_ISSET(cpu, &all)) expected.push_back(cpu);
+    }
+    EXPECT_EQ(qarpx::detail::process_cpus(), expected);
+}
+
+TEST(ProcessCpus, ThreadPoolWorkersOfAPinnedCreatorRunOnEveryProcessCpu) {
+    cpu_set_t all;
+    CPU_ZERO(&all);
+    ASSERT_EQ(sched_getaffinity(0, sizeof(all), &all), 0);
+    if (CPU_COUNT(&all) < 2) GTEST_SKIP() << "needs two usable CPUs";
+    int first = 0;
+    while (!CPU_ISSET(first, &all)) ++first;
+    cpu_set_t one;
+    CPU_ZERO(&one);
+    CPU_SET(first, &one);
+
+    ASSERT_EQ(sched_setaffinity(0, sizeof(one), &one), 0);
+    qarpx::ThreadPool pool(3);
+    ASSERT_EQ(sched_setaffinity(0, sizeof(all), &all), 0);
+
+    for (int task = 0; task < 12; ++task) {
+        const int usable = pool.submit([] {
+                                   cpu_set_t mask;
+                                   CPU_ZERO(&mask);
+                                   sched_getaffinity(0, sizeof(mask), &mask);
+                                   return CPU_COUNT(&mask);
+                               }).get();
+        EXPECT_EQ(usable, CPU_COUNT(&all));
+    }
+}
+#endif

@@ -9,7 +9,12 @@
 #include <utility>
 
 #ifdef __linux__
+#include <pthread.h>
 #include <sched.h>
+#endif
+
+#ifdef _OPENMP
+#include <omp.h>
 #endif
 
 namespace qarpx::detail {
@@ -126,6 +131,15 @@ CpuBudget read_cpu_budget() {
 std::vector<int> affinity_cpus() {
     std::vector<int> cpus;
 #ifdef __linux__
+#ifdef _OPENMP
+    std::set<int> places;
+    for (int p = 0; p < omp_get_num_places(); ++p) {
+        std::vector<int> ids(static_cast<std::size_t>(omp_get_place_num_procs(p)));
+        omp_get_place_proc_ids(p, ids.data());
+        places.insert(ids.begin(), ids.end());
+    }
+    if (!places.empty()) return {places.begin(), places.end()};
+#endif
     cpu_set_t mask;
     CPU_ZERO(&mask);
     if (sched_getaffinity(0, sizeof(mask), &mask) != 0) return cpus;
@@ -134,6 +148,29 @@ std::vector<int> affinity_cpus() {
     }
 #endif
     return cpus;
+}
+
+const std::vector<int>& process_cpus() {
+    static const std::vector<int> cpus = affinity_cpus();
+    return cpus;
+}
+
+namespace {
+// Read at load, on the loading thread, before any thread of the process can
+// have been pinned through this library.
+const bool g_process_cpus_read = (process_cpus(), true);
+}  // namespace
+
+void use_process_cpus() {
+#ifdef __linux__
+    (void)g_process_cpus_read;
+    cpu_set_t mask;
+    CPU_ZERO(&mask);
+    for (const int cpu : process_cpus()) {
+        if (cpu >= 0 && cpu < CPU_SETSIZE) CPU_SET(cpu, &mask);
+    }
+    if (CPU_COUNT(&mask) > 0) pthread_setaffinity_np(pthread_self(), sizeof(mask), &mask);
+#endif
 }
 
 std::size_t physical_cores(const std::vector<int>& cpus, const std::string& root) {

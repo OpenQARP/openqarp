@@ -22,11 +22,6 @@ Closes #<!-- the issue, if there is one; delete this line otherwise -->
 Tier: <!-- trivial / standard / structural — the author proposes, the
            reviewer confirms; "this needs a plan" converts the PR to Draft
            and adds one (see "Promotion" in the README) -->
-Reviewer: @<!-- the code owner CODEOWNERS requests, or the reviewer named at
-                the sit-down.  A sit-down reviewer owns the reviewer checks;
-                the ruleset still requires the code owner's Approve, so an
-                owner who is not the sit-down reviewer is a second Approve,
-                not a replacement. -->
 
 ## Trivial PR
 
@@ -62,8 +57,8 @@ Sit-down held: <!-- yes / no — structural tier requires yes -->
 
 <!-- Author: tick these, then request the green-light. -->
 
-- [ ] House-format header complete (Status / Author / Reviewer / Date /
-      Tier / Scope / Branch; Green-lit stays empty until Gate 1 clears)
+- [ ] House-format header complete (Status / Author / Date / Tier /
+      Scope / Branch; Green-lit stays empty until Gate 1 clears)
 - [ ] Scope is an explicit file list
 - [ ] Test plan table has the oracle column filled (independent references
       named BEFORE implementation exists)

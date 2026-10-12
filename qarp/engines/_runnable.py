@@ -33,6 +33,9 @@ class Runnable(Protocol):
     target: Any
     operator: Any
     consumes: Consumes
+    # True iff the only circuit is the block as given and run() returns the
+    # distribution of its recorded measurements: what a structured run serves.
+    samples_block: bool
     supports_exact: bool
     supports_backprop_gradient: bool
     # Linearity class of run() per compiled circuit — see _gradients.GRADIENT_KINDS.

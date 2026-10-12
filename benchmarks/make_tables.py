@@ -870,7 +870,7 @@ column would measure our porting skill, not the SDK:
 | algorithm | qarp | qiskit | pennylane | cirq | qulacs |
 |---|---|---|---|---|---|
 | AdaptVQE | native (`qarp.algorithms`) | `qiskit-algorithms` (separate package) | `AdaptiveOptimizer` | — | — |
-| QPE (composite) | native, structured fast path | tutorial circuits | tutorial circuits | tutorial circuits | — |
+| QPE (composite) | native, structured run | tutorial circuits | tutorial circuits | tutorial circuits | — |
 | QSE / QMEGS | native | paper ports only | — | — | — |
 | SSVQE / VQD / PCE / DOS-QPE | native | partial (`VQD` in qiskit-algorithms) | — | — | — |
 

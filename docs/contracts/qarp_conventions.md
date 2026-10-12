@@ -542,6 +542,26 @@ above.
   land on the generic branch — so a wrong `α` on those two branches leaves an entire QSD suite
   green while `exp(-iHt)` for a Hubbard Hamiltonian comes out with an arbitrary per-`t` phase.
   Testing rule in §18.
+- **`classical_action` declares a basis-state permutation.** A block may override
+  `classical_action(indices)` to return the images of its local basis indices (int64, LSB)
+  under its unitary.  The override promises `U|x⟩ = |f(x)⟩` exactly, global phase included —
+  the block may sit under `ControlledBlock` — and structured execution (§14) trusts it at run
+  time for the gates the block was built with: a declaring block edited after `build()` is
+  planned from its gates.  Every overriding class is registered in `tests/test_blocks/test_classical_action.py`,
+  whose completeness guard fails on an unregistered one, and is checked there against its
+  `unitary_matrix()`.
+- **`structure` declares a composition.** A block may override `structure()` to return itself
+  as a sequence of parts — a block placed in the declaring block's frame by its own
+  `target_qubits`, or `qarp.blocks.Repeat(block, count)` — and must do so before `build()`,
+  building only the parts.  The override promises that the parts in order are the block's
+  gate stream; `QPEBlock` and `DOSQPEBlock` declare theirs and add their children from the
+  same list.  Structured execution (§14) lowers a declaration without the block's gate stream
+  and plans a built block from it in place of its children.  An unbuilt block's declaration
+  is trusted as lowered; a built block's is checked against its gates (the parts' placed
+  streams, a `Repeat` that many times, digest like the block's span in its own frame) and
+  ignored when it differs or names an unbuilt part.  Every overriding class is registered in
+  `tests/test_blocks/test_structure.py`, whose completeness guard fails on an unregistered
+  one, and is checked there against its `unitary_matrix()`.
 
 ## 14. Engine, device & execution conventions
 
@@ -580,7 +600,10 @@ How circuits run.
   Idle channels are rejected at injection.
 - **One result contract.** `QarpSimulator` and `CudaqSimulator` both return the
   same `SamplingResult` (`run` / `batch_run` / `statevector`); sampler keys are LSB bitstrings
-  (§1); mid-circuit measurement adds `n_cbits` and `cbit_history` (`[n_shots][n_cbits]`,
+  (§1).  `Sampler` (and `PostSelection.apply`) return a `qarp.SamplingDistribution`: a
+  read-only mapping from LSB-first bit tuples over the measured qubits to probabilities,
+  iterating in ascending order of the packed integer `Σ_i b_i·2^i`, with the aligned read-only
+  arrays `outcomes` (those integers) and `probabilities` for bulk access; mid-circuit measurement adds `n_cbits` and `cbit_history` (`[n_shots][n_cbits]`,
   end-of-shot register). An engine that does not consume `device.noise_model` must **raise**
   `CapabilityError` at construction rather than drop it silently (F3); no engine in the tree
   does so today — `QarpEngine` consumes it, `CudaqEngine` takes no `device=`.
@@ -600,9 +623,9 @@ How circuits run.
   `NotImplementedError` — so callers handle every capability failure with one except clause
   and can fall back programmatically.
 - **Capability checks re-validate at run time.** Mutable state that affects eligibility
-  (e.g. `noise_model.enabled`) is re-checked per `run()`, not only at `build()`: a structured
-  plan prepared noise-free refuses to run once noise is enabled
-  (`test_structured_plan_refuses_late_enabled_noise`). Engines copy the noise model at
+  (e.g. `noise_model.enabled`) is re-checked per `run()`, not only at `build()`: an
+  amplitude primitive built noise-free refuses to run once noise is enabled
+  (`test_run_revalidates_after_noise_toggle`). Engines copy the noise model at
   construction — the live handle is `engine.noise_model`, not the object passed in.
 - **Per-circuit seeds are prime-stride derived.** `Engine._circuit_seed(ordinal)` =
   `(seed + 100_003 · ordinal) mod 2³²` (`None` stays `None`). Circuits within one call —
@@ -622,10 +645,11 @@ How circuits run.
   needs a shared qubit (a 2^k-wide pass costs 2^k multiplies per amplitude).  Symbolic gates,
   `Barrier` (listed wires; a qubit-less one fences everything), `Measure`, `Reset` and the
   branch markers are never fused and fence their wires; `GPhase` passes through on the global
-  wire.  Applied by `statevector`, `run`'s terminal fast path and the noise-free trajectory
-  prefix/suffix (`batch_run` inherits it); **not** applied by `unitary_matrix` (the oracle),
-  the adjoint gradient (`run_gradient*`, one gate at a time), the structured QPE paths, any
-  noise-active path (each source gate carries its own channel) or `CudaqSimulator`.  The knob
+  wire.  Applied by `statevector`, `run`'s terminal fast path, the noise-free trajectory
+  prefix/suffix (`batch_run` inherits it) and each `Gates` kernel of a structured program;
+  **not** applied by `unitary_matrix` (the oracle), the adjoint gradient (`run_gradient*`,
+  one gate at a time), any noise-active path (each source gate carries its own channel) or
+  `CudaqSimulator`.  The knob
   is `QarpSimulator.fusion_max_qubits`: `0` = raw per-gate dispatch, `1` = the single-qubit
   pass only (`fuse_single_qubit_gates`, which also fences a conditional gate at the `Measure`
   writing its cbit), `k ≥ 2` = dense blocks; the constructor default is
@@ -635,6 +659,73 @@ How circuits run.
   never reaches rebase totality (§16).  Amplitudes differ across widths only by floating-point
   reassociation, so a seeded run is bit-identical at every width on the pinned fixtures
   (`test_simulation_fusion.py`).
+- **Structured execution.**  `Block.statevector` and `QarpEngine`'s sampling paths (the
+  sample-once `run` path and `EXACT` readout, including `batch_run`'s per-set `EXACT`
+  evaluation) lower a block tree to a `qx.Program` of typed kernels where that is cheaper
+  than its gates (`qarp/_program.py`, `simulator/program.cpp`).  Kernels:
+  `Gates` (a verbatim slice of the gate stream, dispatched and fused as above),
+  `Permutation` (`|x⟩ → |table[x]⟩` on listed qubits, one gather; adjacent ones compose
+  into one table up to 26 qubits, and two on the same qubits merge across kernels on other
+  qubits, as do two `Dense` kernels), `Dense` (a block's unitary on at most 8 touched qubits,
+  and more than the fusion width in force — fusion covers any other span itself, merging it
+  with its neighbours and its own repeats, and a kernel would fence it off)
+  and `ControlledPowers` (`U^e_j` on the targets under control `j`).  Every subtree owns a
+  contiguous span of the gate stream, so remaps, pending ops and measurements match the gate
+  path by construction.  Per node the planner tries, in order: a declared
+  `classical_action` (§13); a declared `structure()` (§13), whose parts are planned in order
+  in place of the node's span and children, a `Repeat` counting as that many applications,
+  or as one table raised to the count when its block is a permutation;
+  a `ControlledBlock` whose inner is a permutation, lifted by §6.1;
+  the span's permutation table, unless a descendant declares (the node is then walked into
+  its children, with neither a derivation attempt nor a dense kernel above them) — classical gates (`X, CX, CCX, SWAP, CSWAP`, the `H·MCZ·H`
+  that `mcx` emits) evaluated on integers at any width, otherwise derived by restriction: the
+  qubits no command couples (controls, phase partners, or moved by classical gates among
+  themselves) are enumerated and tracked, every other command is sliced at their value, and
+  the at most 10 remaining qubits are simulated, accepted only when every column is a basis
+  state with amplitude 1, both within `1e-10` (phase included, EQ-2) — a span closer than
+  that to a permutation runs as the exact permutation; a `Dense` kernel; its children, where a run
+  of the same single-controlled `C-U` becomes one `ControlledPowers` kernel; else `Gates`.
+  A daggered node is walked as its children in reverse with each span daggered: a declared
+  `classical_action` and a lifted controlled inner give their inverse tables, a ladder's `U`
+  is the daggered inner stream, and a `structure()` declaration is not read under a dagger.
+  A daggered child is folded into a flat block when wired into its parent; the planner walks
+  the block it came from, so the rule holds inside a tree as at the root.
+  `Block.kernels()` lists the kernels `statevector` would run on a built block, in order, or
+  None when the gate path runs; it takes `structured` and `optimization_level` as
+  `statevector` does and leaves the program cached.  The derivation budget is paid once per
+  distinct program and never amortises for a one-off run of a block that is not a
+  permutation; `structured=False` skips it.
+  A program with no structured kernel is never built — that circuit runs the unchanged
+  gate path bit for bit — and neither are registers under 12 qubits, spans of fewer than
+  three gates, or a program with a measurement or classical condition outside its last
+  `Gates` kernel.  **Not** applied by `unitary_matrix` (the oracle), amplitude-consuming
+  primitives, `batch_run`'s C++ sampled sweep, gradients, an engine with any `device`
+  (routed or not — a device means "simulate what the device runs", and carries the
+  noise model), or `CudaqEngine`.  The knob is `QarpEngine(structured=)` and
+  `Block.statevector(structured=)`; `None` follows `QARP_STRUCTURED` (read once per
+  process, default on; `0`/`false`/`off`/`no` turn it off).  A gate-level optimizer runs
+  **after** planning, on the gate slices only: `Block.statevector(optimization_level=)` (0, 1
+  or 2 as `Block.optimize`; `None` runs the slices as they are; the whole stream on the gate
+  path; part of the program cache key) and `QarpEngine(optimization_level=)` (its standalone
+  transpiler's level for compiled circuits and gate slices, default 1; a device compiles its
+  own pipeline and refuses a level).  `Block.optimize` flattens the tree the planner reads,
+  so it is not the way to combine the two.  `Block.statevector` keeps its
+  program on the block and checks it by a C++ digest of the stream (`qx._flatten_digest`),
+  so a cached call materialises no commands in Python; a block with a pending dagger,
+  substitution or replacement always flattens.  A program samples through
+  `run`'s own sample-once code, so a program whose final state equals the gate path's
+  draws the same shots for the same seed.  A declared structure is also lowered **before
+  the block is built**: `Engine.prepare_structured(block, primitive)` returns a
+  `StructuredRun` (`sample()` resolves shots, `EXACT` and `initial_state` from the
+  primitive per call and hands the block's counts to the primitive's `run()`) when the
+  engine can run it — `QarpEngine` with structured on, no device, a primitive that samples
+  the block as given (`samples_block`, set by `Sampler` alone), every `Repeat` a ladder step of one
+  control on |1⟩ over a concrete `U` of at most 12 qubits or a permutation block (its table
+  raised to the count), no parametric part, a recorded
+  measurement only in the last part — and None otherwise, with no register minimum.  The
+  hook knows no algorithm and no block class.  `QPE` and `DOSQPE` offer their block this way
+  and build it only when refused, so their build cost no longer grows with the ancilla
+  count; on that path the algorithm's `block` is None.
 
 ## 15. Project & repository conventions
 

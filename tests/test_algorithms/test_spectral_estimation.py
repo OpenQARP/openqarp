@@ -6,6 +6,7 @@ import pytest
 # raises and the module fails to *collect* rather than skipping.
 pytest.importorskip("cvxpy")
 
+from qarp import SamplingDistribution
 from qarp.algorithms import SpectrumEstimator
 
 
@@ -154,6 +155,22 @@ def test_integer_degeneracies_sum_preserved():
     )
     assert np.all(degeneracies == np.round(degeneracies))  # integer-valued
     assert int(np.sum(degeneracies)) == optimizer.hilbert_dim
+
+
+def test_estimate_from_a_sampling_distribution():
+    """DOS-QPE hands the estimator a SamplingDistribution over the ancilla bits;
+    tuple key k reads as frequency k / 2**n_ancilla."""
+    dist, freqs = _synthetic_dos_distribution([0.25, 0.5], [3, 1], n_ancilla=3)
+    sampled = SamplingDistribution(range(8), [dist[f] for f in freqs], 3)
+    kwargs = {"cluster": False, "debias": True, "threshold": 0.2}
+    est = SpectrumEstimator(n_qubits=2, n_ancilla=3, mode="l2", verbose=False)
+    phases, degeneracies = est.estimate(sampled, **kwargs)
+    assert np.isclose(np.sum(degeneracies), est.hilbert_dim, atol=1e-6)
+    assert np.any(np.isclose(phases, 0.25, atol=1.0 / 2**3))
+    ref = SpectrumEstimator(n_qubits=2, n_ancilla=3, mode="l2", verbose=False)
+    ref_phases, ref_degeneracies = ref.estimate(dist, freqs=freqs, **kwargs)
+    np.testing.assert_allclose(phases, ref_phases)
+    np.testing.assert_allclose(degeneracies, ref_degeneracies)
 
 
 # Data preparation tests

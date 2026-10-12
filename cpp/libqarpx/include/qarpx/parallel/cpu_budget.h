@@ -9,7 +9,7 @@ namespace qarpx::detail {
 /// The CPUs a process may use.  ``logical``/``physical`` are 0 when unknown,
 /// ``limit`` is 0 when there is none.
 struct CpuBudget {
-    std::size_t logical = 0;   // CPUs in the affinity mask
+    std::size_t logical = 0;   // CPUs the process may use
     std::size_t physical = 0;  // distinct cores among them
     std::size_t limit = 0;     // cgroup CPU bandwidth limit, whole CPUs
 };
@@ -24,8 +24,17 @@ std::size_t default_thread_count(const CpuBudget& budget);
 /// logical count where there is no affinity mask.
 CpuBudget read_cpu_budget();
 
-/// CPU ids in this process's affinity mask; empty where unavailable.
+/// CPU ids this process may use: the union of the OpenMP places where
+/// binding defines them (binding narrows the calling thread's own mask), else
+/// the calling thread's affinity mask; empty where unavailable.
 std::vector<int> affinity_cpus();
+
+/// ``affinity_cpus()`` as read when the library was loaded.
+const std::vector<int>& process_cpus();
+
+/// Lets the calling thread run on every CPU of ``process_cpus()``.  A new
+/// thread inherits its creator's mask, which may be pinned to one CPU.
+void use_process_cpus();
 
 /// Distinct (package, core) pairs of ``cpus`` in the sysfs topology; 0 when
 /// any is unreadable.  ``root`` prefixes every path read.

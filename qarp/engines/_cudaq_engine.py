@@ -23,7 +23,7 @@ from typing import Optional, Union
 import qarpx as qx
 from qarp.operators import QubitOperator
 
-from .._types import Consumes, SamplingDictionary, Shots
+from .._types import Consumes, PrimitiveResult, Shots
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
@@ -225,7 +225,7 @@ class CudaqEngine(Engine):
             reason=("The CUDA-Q lowerer handles unitary gates plus end-of-circuit sampling only."),
         )
 
-    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int):
+    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int, params):
         if prim.consumes is Consumes.AMPLITUDES:
             if _is_gpu_expectation(prim):
                 # Pad to the operator width (idle qubits stay |0>).
@@ -259,7 +259,7 @@ class CudaqEngine(Engine):
         l2p_per_prim,
         param_sets,
         shots_override,
-    ) -> list[list[Union[float, complex, SamplingDictionary]]]:
+    ) -> list[list[PrimitiveResult]]:
         """GPU inner loop: the parameter sweep stays on-device in
         ``CudaqSimulator.batch_run`` / ``batch_expectation`` — no Python
         round-trip per parameter set.  This is the VQE inner loop and the main
@@ -303,9 +303,9 @@ class CudaqEngine(Engine):
                 ordinal += len(circ_batch)
                 prim_data.append(("sample", circ_batch))
 
-        results_by_set: list[list[Union[float, complex, SamplingDictionary]]] = []
+        results_by_set: list[list[PrimitiveResult]] = []
         for set_idx, ps in enumerate(param_sets):
-            set_results: list[Union[float, complex, SamplingDictionary]] = []
+            set_results: list[PrimitiveResult] = []
             for prim_idx, prim in enumerate(primitives):
                 kind, data = prim_data[prim_idx]
                 circuits = circuits_per_prim[prim_idx]
