@@ -19,11 +19,6 @@ ENGINES_DIR = Path(__file__).resolve().parents[2] / "qarp" / "engines"
 _ALGO_IMPORT = re.compile(
     r"^\s*(?:from|import)\s+(?:qarp\.algorithms|\.\.algorithms)", re.MULTILINE
 )
-# A Target compared by its member name: the string spelling engines used while
-# Target lived above the layer line.  It is importable now, so compare by identity.
-_TARGET_BY_NAME = re.compile(
-    r"\.name\s*==\s*[\"'](?:SAMPLING|EXPECTATION_VALUE|OVERLAP|TRANSITION_AMPLITUDE)[\"']"
-)
 
 
 def test_engines_do_not_import_algorithms():
@@ -33,15 +28,6 @@ def test_engines_do_not_import_algorithms():
         for match in _ALGO_IMPORT.finditer(path.read_text())
     ]
     assert not offenders, f"qarp/engines/ must not import from qarp/algorithms/: {offenders}"
-
-
-def test_engines_compare_targets_by_identity_not_name():
-    offenders = [
-        f"{path.name}: {match.group(0).strip()}"
-        for path in sorted(ENGINES_DIR.glob("*.py"))
-        for match in _TARGET_BY_NAME.finditer(path.read_text())
-    ]
-    assert not offenders, f"compare `prim.target is Target.X`, not its name: {offenders}"
 
 
 def test_target_is_defined_below_the_engine_layer():

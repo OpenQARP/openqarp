@@ -698,17 +698,28 @@ def _finish(kernels: list, cmds: list) -> Optional[Plan]:
     return Plan(kernels, cmds)
 
 
+def _owner(cls: type, name: str) -> Optional[type]:
+    return next((k for k in cls.__mro__ if name in vars(k)), None)
+
+
 def _composition(node) -> Optional[list]:
     """What an unbuilt block is made of, in order: its ``structure()``
     declaration, or the children an unbuilt ``CompositeBlock`` wires at
-    build.  None for a block whose parts are not readable before build."""
-    if _has_pending_ops(node):
+    build.  None for a built block (planned from its tree, its declaration
+    checked by digest) and for one whose parts are not readable before build."""
+    from .blocks._composite_block import CompositeBlock
+
+    if node.is_built or _has_pending_ops(node):
         return None
+    builder = _owner(type(node), "build_vanilla")
     if _declares_structure(node):
-        return node.structure()
-    blocks = getattr(node, "blocks", None)
-    if blocks is not None and not node.is_built:
-        return list(blocks)
+        # Unbuilt, a declaration has no stream to be checked against: it is
+        # trusted only from a class that also defines how the block is built.
+        declarer = _owner(type(node), "structure")
+        trusted = builder is None or declarer is None or issubclass(declarer, builder)
+        return node.structure() if trusted else None
+    if isinstance(node, CompositeBlock) and builder is CompositeBlock:
+        return list(node.blocks)
     return None
 
 

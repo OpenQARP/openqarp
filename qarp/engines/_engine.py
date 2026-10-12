@@ -480,16 +480,20 @@ class Engine(ABC):
                     id(prim), [None] * len(prim.compiled_circuits)
                 )
                 continue
-            prim.build()
-            self._validate_primitive(prim)
             prim.compiled_circuits.clear()
+            prim.build()
             prim._n_qubits_list.clear()
+            # Validated with the circuits cleared: a rejected primitive keeps
+            # no stale circuits for a later rebuild=False to reuse.
+            self._validate_primitive(prim)
             l2p_list: list = []
             programs: list = []
             for blk in prim.sub_blocks:
                 program = self._plan_unbuilt(prim, blk)
                 if program is not None:
                     # Lowered from its composition: no gate stream to compile.
+                    # The empty stream is symbol-free with terminal measurements
+                    # only, so gradient stencils and mid-circuit checks read it safely.
                     compiled, sim_n, l2p = [], blk.n_qubits, None
                 else:
                     blk.build()

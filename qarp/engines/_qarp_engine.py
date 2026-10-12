@@ -454,8 +454,11 @@ class QarpEngine(Engine):
             )
             if shots is Shots.EXACT or lowered:
                 prim_batch.append(None)
-                first_ordinal[prim_idx] = ordinal
-                ordinal += len(circuits_per_prim[prim_idx])
+                # An EXACT readout draws no seed, as in run(), so the seeds of
+                # the primitives after it match run()'s.
+                if shots is not Shots.EXACT:
+                    first_ordinal[prim_idx] = ordinal
+                    ordinal += len(circuits_per_prim[prim_idx])
                 continue
             if prim.initial_state is not None:
                 # C++ batch_run has no initial_state (deferred — see plan);

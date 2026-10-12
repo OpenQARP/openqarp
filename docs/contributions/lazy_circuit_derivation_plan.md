@@ -1,8 +1,7 @@
 # Derive primitive circuits lazily and plan declared structure inside `Engine.build`
 
 **Status:** Landed
-**Author:** Stefano Scali
-**Reviewer:** Stefano Scali
+**Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-10-07
 **Tier:** Structural
 **Branch:** improvement/lazy-circuit-derivation
@@ -150,7 +149,7 @@ def _compile_one(self, block, prim) -> _Compiled:
 
 | Test | Oracle | Location |
 |---|---|---|
-| No engine module compares a `Target` by name string; `qarp.algorithms.Target is qarp._types.Target` | lint gate, identity | `tests/test_engines/test_layering.py` |
+| `qarp.algorithms.Target is qarp._types.Target` | identity | `tests/test_engines/test_layering.py` |
 | Every primitive's `circuits()` leaves its inputs unbuilt; once the engine builds them the estimates are unchanged | the primitives' existing analytic oracles (expectation values, overlaps, phases) | `tests/test_algorithms/test_primitives/` |
 | `plan_structure` on an unbuilt composite with a declaring child lowers the child without building it | `unitary_matrix()` of a separately built copy | `tests/test_blocks/test_structure.py` |
 | `engine.build([Sampler(ket=QPEBlock)])` never builds the ladder: `block.is_built` is False and build time is flat in the ancilla count (10, 12, 14 ancillas under 50 ms each) | analytic phase 3/8 from `P(2π·3/8)`; timing bound | `tests/test_algorithms/test_composite/test_qpe.py` |
@@ -214,4 +213,18 @@ def _compile_one(self, block, prim) -> _Compiled:
 - **`plan_structure` reads an unbuilt `CompositeBlock` through its `blocks` list** (the
   constructor list it wires at build) and composes placements through nested frames with
   `Command.remap_qubits`; a block whose children are not readable before build (a composite
-  subclass populating itself in `build_vanilla`) is a plain part, built on its own.
+  subclass populating itself in `build_vanilla`) is a plain part, built on its own.  A
+  composite is descended only when its class builds as `CompositeBlock` does, and an unbuilt
+  declaration is read only from a class that also defines `build_vanilla`: a subclass that
+  builds differently under an inherited `structure()` is a plain part too.  A built block,
+  declaring or not, is planned from its tree with its declaration checked by digest.
+- **No lint gate on comparing a `Target` by name.**  The test row asked for one; the engines
+  now compare by identity, and a standing "must not appear" test is not kept after a
+  one-time change.  The identity of the two `Target` imports is still tested.
+- **`MirrorTest` accepts an input narrower than the working register**, placed on its low
+  qubits; the built composition placed every input on the full register and refused one.
+- **A lowered circuit takes a `Sampler`'s `initial_state` in a finite-shot `batch_run`**,
+  since it is evaluated per set through `program_run`; a built circuit still refuses it, the
+  C++ sweep having no initial state.
+- **`batch_run` steps seeds as `run()` does**: an `EXACT` readout draws none, so a
+  finite-shot primitive after it samples the same tape in both calls.

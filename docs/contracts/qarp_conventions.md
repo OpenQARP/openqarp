@@ -720,7 +720,9 @@ How circuits run.
   circuit unbuilt; `QarpEngine` (structured on, no device, a `Consumes.COUNTS` primitive)
   lowers it from its composition — a `structure()` declaration, or the children an unbuilt
   `CompositeBlock` wires at build, descended recursively with a declaring part lowered from
-  its declaration and a plain part built on its own — when every `Repeat` is a ladder step
+  its declaration and a plain part built on its own (a composite subclass with its own
+  `build_vanilla`, or a declaration inherited by a class that builds differently, is
+  plain) — when every `Repeat` is a ladder step
   of one control on |1⟩ over a concrete `U` of at most 12 qubits or a permutation block (its
   table raised to the count), no part is parametric and a recorded measurement sits only in
   the last part, with no register minimum; otherwise it builds, flattens, transpiles and
