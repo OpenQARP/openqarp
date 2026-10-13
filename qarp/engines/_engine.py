@@ -409,7 +409,7 @@ class Engine(ABC):
         default."""
         return None
 
-    def _plan_one(self, prim: Runnable, blk, flat) -> "Optional[qx.Program]":
+    def _plan_built(self, prim: Runnable, blk, flat) -> "Optional[qx.Program]":
         """Structured program for one freshly compiled block, or None to run
         its gate stream (§14 *Structured execution*; no engine plans by
         default)."""
@@ -453,7 +453,7 @@ class Engine(ABC):
         → ``_validate_primitive`` → per circuit: ``_plan_unbuilt``, else
         build → flatten → substitute → ``_validate_flat_commands`` →
         ``_warn_uninitialised_conditions`` → ``_compile_one`` →
-        ``_post_compile_check`` → ``_plan_one``.  The reuse path
+        ``_post_compile_check`` → ``_plan_built``.  The reuse path
         (``rebuild=False`` with compiled circuits present) re-validates —
         capability-relevant state may have changed — and keeps prior routing
         maps, so results stay in logical qubit order.
@@ -503,7 +503,7 @@ class Engine(ABC):
                     self._warn_uninitialised_conditions(flat)
                     compiled, sim_n, l2p = self._compile_one(flat, blk.n_qubits)
                     self._post_compile_check(prim, compiled, l2p)
-                    program = self._plan_one(prim, blk, flat)
+                    program = self._plan_built(prim, blk, flat)
                 prim.compiled_circuits.append(compiled)
                 prim._n_qubits_list.append(sim_n)
                 l2p_list.append(l2p)

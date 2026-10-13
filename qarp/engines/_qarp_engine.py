@@ -348,7 +348,7 @@ class QarpEngine(Engine):
         found = _program.plan_structure(blk, n, fusion_width=_program.fusion_width_of(self._sim, n))
         return None if found is None else found.program(compile_gates=self._compile_gates)
 
-    def _plan_one(self, prim: Runnable, blk, flat) -> Optional["qx.Program"]:
+    def _plan_built(self, prim: Runnable, blk, flat) -> Optional["qx.Program"]:
         if not self._plans(prim):
             return None
         n = blk.n_qubits
@@ -370,7 +370,7 @@ class QarpEngine(Engine):
             return programs
         return [None if p is None else p.substituted(params) for p in programs]
 
-    def _sample(self, prim: Runnable, circuits, programs, layouts, n_shots, seeds) -> list:
+    def _circuit_results(self, prim: Runnable, circuits, programs, layouts, n_shots, seeds) -> list:
         """One result per circuit, through its program where it has one."""
         # Ket-seeding: only Sampler carries initial_state among COUNTS
         # primitives (single circuit), so every circuit gets the seed.
@@ -400,7 +400,7 @@ class QarpEngine(Engine):
         n_shots = self._resolve_shots(prim)
         seeds = [self._circuit_seed(ordinal + k) for k in range(len(substituted))]
         programs = self._programs_for(prim, params)
-        results = self._sample(prim, substituted, programs, l2p_list, n_shots, seeds)
+        results = self._circuit_results(prim, substituted, programs, l2p_list, n_shots, seeds)
         if n_shots is not Shots.EXACT:
             ordinal += len(results)
         return prim.run(results), ordinal
@@ -424,8 +424,8 @@ class QarpEngine(Engine):
         """Each parameter set evaluates as ``run()`` does, with shots resolved
         as ``shots_override`` (sweep-wide, ``qarp.EXACT`` allowed) >
         ``prim.n_shots`` > engine default."""
-        shots: list = []
-        first_ordinal: list[int] = []
+        shots_per_prim: list = []
+        first_ordinals: list[int] = []
         ordinal = 0
         for prim, circuits, layouts in zip(
             primitives, circuits_per_prim, l2p_per_prim, strict=True
@@ -435,8 +435,8 @@ class QarpEngine(Engine):
             for layout in layouts:
                 _reject_routed_initial_state(prim, layout)
             n_shots = self._resolve_shots(prim, shots_override)
-            shots.append(n_shots)
-            first_ordinal.append(ordinal)
+            shots_per_prim.append(n_shots)
+            first_ordinals.append(ordinal)
             # An EXACT readout draws no seed, as in run().
             if prim.consumes is not Consumes.AMPLITUDES and n_shots is not Shots.EXACT:
                 ordinal += len(circuits)
@@ -445,7 +445,12 @@ class QarpEngine(Engine):
         for set_idx, ps in enumerate(param_sets):
             set_results: list[PrimitiveResult] = []
             for prim, circuits, layouts, n_shots, first in zip(
-                primitives, circuits_per_prim, l2p_per_prim, shots, first_ordinal, strict=True
+                primitives,
+                circuits_per_prim,
+                l2p_per_prim,
+                shots_per_prim,
+                first_ordinals,
+                strict=True,
             ):
                 substituted = [qx.substitute_all(cmds, ps) if ps else cmds for cmds in circuits]
                 if prim.consumes is Consumes.AMPLITUDES:
@@ -463,7 +468,9 @@ class QarpEngine(Engine):
                     None if seed is None else (seed + set_idx) % 2**32
                     for seed in (self._circuit_seed(first + k) for k in range(len(circuits)))
                 ]
-                sampled = self._sample(prim, substituted, programs, layouts, n_shots, seeds)
-                set_results.append(prim.run(sampled))
+                results = self._circuit_results(
+                    prim, substituted, programs, layouts, n_shots, seeds
+                )
+                set_results.append(prim.run(results))
             results_by_set.append(set_results)
         return results_by_set

@@ -234,3 +234,4 @@ def _compile_one(self, block, prim) -> _Compiled:
   a gate-path circuit, `RuntimeError` for any other primitive.  Whether a block handed over
   unbuilt was lowered could be read only from the engine's private programs; the tests read
   the accessor, and §14, the configuration page and the notebook name it.
+- **The built-block hook is `_plan_built`**, not `_plan_one`, paired with `_plan_unbuilt`.
