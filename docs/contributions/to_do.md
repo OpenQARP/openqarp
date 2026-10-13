@@ -85,3 +85,12 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   `success_rate` without breaking the dict return; `SamplingDistribution`
   carries `n_shots` the same way.  Post-selected qubits must be measured and
   leave the key.
+- **Engine `l2p_*` names hold layouts.**  `_l2p_per_primitive`,
+  `l2p_per_prim`, `l2p_list` and `l2p` in `qarp/engines/` (`_engine.py`,
+  `_qarp_engine.py`, `_gradients.py`, `_cudaq_engine.py`) carry one
+  `_Layout` per circuit, or None, not a logical-to-physical list, and sit
+  beside `layouts` in the same signatures.  Rename them to `layouts*`,
+  including the base `_sweep` and `_dispatch_one` hooks, the stub engine in
+  `tests/conftest.py` and the `_sweep` spy in `test_gradient_registry.py`.
+  The `l2p` names in `_reindex_exact` and the routing tests are real maps
+  and stay.
