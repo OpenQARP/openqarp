@@ -1217,6 +1217,26 @@ def test_pauli_averaging_over_a_declaring_block_is_planned():
     assert engine.run()[0] == pytest.approx(1.0, abs=1e-10)
 
 
+@pytest.mark.parametrize("method", ["parameter-shift", "finite-diff"])
+def test_gradients_beside_a_lowered_circuit_match_the_analytic_value(method):
+    """A lowered circuit has an empty gate stream and no symbols, so its
+    gradient is 0; Ry(φ) beside it keeps d⟨Z0⟩/dφ = −sin φ (analytic)."""
+    ket = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False)
+    lowered = PauliAveraging(ket=ket, operator=QubitOperator("Z0") + 2.0 * QubitOperator("Z2"))
+    rotated = PauliAveraging(
+        ket=CompositeBlock([_Rotate(1, target_qubits=[0])], n_qubits=12),
+        operator=QubitOperator("Z0"),
+    )
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    engine.build([lowered, rotated])
+    assert not ket.is_built and lowered.compiled_circuits == [[]]
+    phi = 0.8
+    assert engine.run({Symbol("phi"): phi}) == pytest.approx([1.0, np.cos(phi)], abs=1e-10)
+    grads = engine.run_gradient({Symbol("phi"): phi}, method=method)
+    assert grads[0][0] == pytest.approx(0.0, abs=1e-10)
+    assert grads[1][0] == pytest.approx(-np.sin(phi), abs=1e-6)
+
+
 def test_a_second_build_of_the_same_circuit_does_not_replan(monkeypatch):
     calls: list = []
     real = _program.plan
