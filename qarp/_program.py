@@ -184,6 +184,13 @@ def _measurements_terminal(cmds) -> bool:
     return True
 
 
+def _is_built(block) -> bool:
+    # A raw qx.Block has is_built() as a method, always truthy unread;
+    # the Python blocks shadow it with a property.
+    built = block.is_built
+    return built() if callable(built) else built
+
+
 def _has_pending_ops(node) -> bool:
     return bool(
         getattr(node, "_is_dagger", False)
@@ -443,7 +450,7 @@ class _Planner:
         at = start
         for part in parts:
             kid, count = (part.block, part.count) if isinstance(part, Repeat) else (part, 1)
-            if not kid.is_built:
+            if not _is_built(kid):
                 return None
             cmds = list(kid.flatten())
             kid_map = [qmap[t] for t in _placement(kid)]
@@ -709,7 +716,7 @@ def _composition(node) -> Optional[list]:
     checked by digest) and for one whose parts are not readable before build."""
     from .blocks._composite_block import CompositeBlock
 
-    if node.is_built or _has_pending_ops(node):
+    if _is_built(node) or _has_pending_ops(node):
         return None
     builder = _owner(type(node), "build_vanilla")
     if _declares_structure(node):
@@ -734,7 +741,7 @@ def _collect_parts(node, qmap: list[int], cmds: list, entries: list, repeated: s
     nested = qmap != list(range(len(qmap)))
     for part in parts:
         if isinstance(part, Repeat):
-            if not part.block.is_built:
+            if not _is_built(part.block):
                 return False
             repeated.add(len(entries))
             kid_map = [qmap[t] for t in _placement(part.block)]
@@ -747,7 +754,7 @@ def _collect_parts(node, qmap: list[int], cmds: list, entries: list, repeated: s
             continue
         # A plain part is built on its own: its stream is placed in the
         # node's frame by flatten(), then moved to the root frame.
-        if not part.is_built:
+        if not _is_built(part):
             part.build()
         kid_cmds = list(part.flatten())
         if any(c.is_parametric() for c in kid_cmds):

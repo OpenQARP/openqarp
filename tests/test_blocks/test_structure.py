@@ -368,6 +368,25 @@ def test_a_repeat_naming_an_unbuilt_block_refuses_the_unbuilt_plan():
     assert _program.plan_structure(_Declares([Repeat(unbuilt, 3)], 5), 5) is None
 
 
+def _raw_x_layer(n: int):
+    block = qx.SimpleBlock(n, "raw")
+    for q in range(n):
+        block.x(q)
+    return block
+
+
+def test_an_unbuilt_raw_qx_block_is_read_as_unbuilt():
+    """A raw ``qx.Block`` reports ``is_built`` as a method.  Under a Repeat it
+    refuses the unbuilt plan; as a plain part it is built in place, and X on
+    all 12 qubits sends |0…0⟩ to |1…1⟩ (analytic)."""
+    assert _program.plan_structure(_Declares([Repeat(_raw_x_layer(12), 3)], 12), 12) is None
+    sampler = Sampler(CompositeBlock([_raw_x_layer(12)], n_qubits=12), n_shots=qarp.EXACT)
+    engine = QarpEngine()
+    engine.build([sampler])
+    assert engine.kernels(sampler) == [["permutation"]]
+    assert dict(engine.run()[0]) == {(1,) * 12: 1.0}
+
+
 def test_plan_structure_descends_an_unbuilt_composite():
     """A declaring child of an unbuilt composite is lowered from its
     declaration without being built; the plain tail is built on its own.
