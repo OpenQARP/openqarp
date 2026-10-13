@@ -49,8 +49,7 @@ def test_dosqpe_ladder_as_controlled_powers_matches_the_analytic_spectrum(n_shot
     shots = qarp.EXACT if n_shots == "exact" else n_shots
     dos = DOSQPE(unitary=u, n_ancilla=3, engine=QarpEngine(seed=0, n_shots=shots)).build()
     assert not dos.block.is_built
-    program = dos.engine._programs[id(dos.primitive)][0]
-    assert program.kinds().count("controlled_powers") == 1
+    assert dos.engine.kernels(dos.primitive)[0].count("controlled_powers") == 1
     dist = dos.run()
     expected = {(0, 0, 0): 0.5, (1, 1, 0): 0.5}
 
@@ -213,7 +212,7 @@ def test_dosqpe_noisy_engine_keeps_the_gate_path():
         engine=QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
     assert dosqpe.block.is_built
-    assert dosqpe.engine._programs[id(dosqpe.primitive)] == [None]
+    assert dosqpe.engine.kernels(dosqpe.primitive) == [None]
     dist = dosqpe.run()
     assert sum(dist.values()) == pytest.approx(1.0)
 

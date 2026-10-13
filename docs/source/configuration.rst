@@ -286,6 +286,16 @@ controlled-powers kernel whatever the ancilla count.  The same holds for any
 primitive over such a block, ``PauliAveraging`` included.
 ``QarpEngine(structured=False)`` builds the full circuit instead.
 
+To see what runs, ``block.kernels()`` lists the kernels ``statevector``
+runs on a built block, and ``engine.kernels(primitive)`` lists them for each
+circuit of a primitive after ``engine.build``, with ``None`` for a circuit
+that runs its gates:
+
+.. code-block:: python
+
+    engine.build([sampler])
+    engine.kernels(sampler)    # e.g. [['gates', 'controlled_powers', 'gates']]
+
 MPI
 ===
 

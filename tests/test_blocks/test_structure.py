@@ -389,7 +389,7 @@ def test_plan_structure_descends_an_unbuilt_composite():
 def test_engines_without_the_path_build_the_block():
     def builds(engine, prim):
         engine.build([prim])
-        return prim.sub_blocks[0].is_built and engine._programs[id(prim)] == [None]
+        return prim.sub_blocks[0].is_built and engine.kernels(prim) == [None]
 
     for engine in (QarpEngine(device=Device(4)), QarpEngine(structured=False)):
         block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1)
@@ -406,7 +406,7 @@ def test_the_engine_samples_a_declared_block_without_building_it():
     engine = QarpEngine()
     engine.build([sampler])
     assert not block.is_built
-    assert engine._programs[id(sampler)][0].kinds().count("controlled_powers") == 1
+    assert engine.kernels(sampler)[0].count("controlled_powers") == 1
     dist = engine.run()[0]
     assert dict(dist) == pytest.approx({(1, 1, 0): 1.0}, abs=1e-10)
     assert sampler.result is dist
@@ -424,8 +424,8 @@ def test_a_built_declaring_block_through_a_primitive_plans_its_ladder():
     engine = QarpEngine(structured=True)
     sampler = Sampler(QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 11, 1))
     engine.build([sampler])
-    program = engine._programs[id(sampler)][0]
-    assert program is not None and "controlled_powers" in program.kinds()
+    kinds = engine.kernels(sampler)[0]
+    assert kinds is not None and "controlled_powers" in kinds
 
 
 class _FlipAll(CompositeBlock):
@@ -487,7 +487,7 @@ def test_a_built_declaring_block_is_planned_from_its_stream():
     engine = QarpEngine(structured=True)
     engine.build([sampler])
     assert sampler.compiled_circuits[0]
-    assert "controlled_powers" in engine._programs[id(sampler)][0].kinds()
+    assert "controlled_powers" in engine.kernels(sampler)[0]
 
 
 def test_a_lowered_circuit_sweeps_from_an_initial_state():

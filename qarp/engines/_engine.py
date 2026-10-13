@@ -512,6 +512,22 @@ class Engine(ABC):
             self._l2p_per_primitive.append(l2p_list)
             self._programs[id(prim)] = programs
 
+    def kernels(self, primitive: Runnable) -> "list[list[str] | None]":
+        """The kernels ``run()`` executes for each circuit of ``primitive``,
+        as :meth:`Block.kernels` lists them for one block: one list per
+        circuit, in order, or None where its gate stream runs (§14
+        *Structured execution*).  ``primitive`` must be one the last
+        ``build()`` built.
+        """
+        # Keyed by id, safe: build() resets it to the primitives it holds alive.
+        programs = getattr(self, "_programs", {}).get(id(primitive))
+        if programs is None:
+            raise RuntimeError(
+                f"{type(primitive).__name__} was not built by this engine's last "
+                "build(). Call engine.build() first."
+            )
+        return [None if p is None else list(p.kinds()) for p in programs]
+
     def run(
         self,
         params: Mapping = {},

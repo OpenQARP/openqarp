@@ -692,7 +692,9 @@ How circuits run.
   the block it came from, so the rule holds inside a tree as at the root.
   `Block.kernels()` lists the kernels `statevector` would run on a built block, in order, or
   None when the gate path runs; it takes `structured` and `optimization_level` as
-  `statevector` does and leaves the program cached.  The derivation budget is paid once per
+  `statevector` does and leaves the program cached.  `Engine.kernels(primitive)` gives the
+  same list for each circuit `run()` executes, None for a gate-path circuit, for a primitive
+  the engine's last `build()` built.  The derivation budget is paid once per
   distinct program and never amortises for a one-off run of a block that is not a
   permutation; `structured=False` skips it.
   A program with no structured kernel is never built — that circuit runs the unchanged

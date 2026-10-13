@@ -18,8 +18,10 @@ All notable changes to OpenQARP are recorded here. The format follows
   permutation with `classical_action` (`ModularMultiplicationBlock` does)
   or its composition with `structure()` and `qarp.blocks.Repeat`
   (`QPEBlock` and `DOSQPEBlock` do); `Block.kernels()` lists what
-  `statevector` would run.  See §14 of the conventions and the *Structured
-  execution* section of the configuration page.
+  `statevector` would run, and `Engine.kernels(primitive)` what `run()`
+  executes for each circuit of a built primitive.  See §14 of the
+  conventions and the *Structured execution* section of the configuration
+  page.
 - `optimization_level` on `Block.statevector` and `QarpEngine`: the
   transpiler level applied to the gate slices after planning, or to the
   whole stream on the gate path.

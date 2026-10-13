@@ -228,3 +228,8 @@ def _compile_one(self, block, prim) -> _Compiled:
   C++ sweep having no initial state.
 - **`batch_run` steps seeds as `run()` does**: an `EXACT` readout draws none, so a
   finite-shot primitive after it samples the same tape in both calls.
+- **`Engine.kernels(primitive)` is public**, beside `Block.kernels()`: the kernels `run()`
+  executes for each circuit of a primitive the last `build()` built, None for a gate-path
+  circuit, `RuntimeError` for any other primitive.  Whether a block handed over unbuilt was
+  lowered could be read only from the engine's private programs; the tests read the
+  accessor, and §14, the configuration page and the notebook name it.
