@@ -293,8 +293,18 @@ that runs its gates:
 
 .. code-block:: python
 
+    import numpy as np
+
+    from qarp.algorithms import Sampler
+    from qarp.blocks import ComputationalBasisStateBlock, QPEBlock, SimpleBlock
+    from qarp.engines import QarpEngine
+
+    u = SimpleBlock(1)
+    u.p(0, 2 * np.pi * 0.375)
+    sampler = Sampler(QPEBlock(ComputationalBasisStateBlock([1]), u, 11, 1))
+    engine = QarpEngine()
     engine.build([sampler])
-    engine.kernels(sampler)    # e.g. [['gates', 'controlled_powers', 'gates']]
+    engine.kernels(sampler)    # [['gates', 'controlled_powers', 'gates']]
 
 MPI
 ===
