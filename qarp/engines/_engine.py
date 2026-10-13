@@ -210,8 +210,7 @@ class Engine(ABC):
     ) -> list[list[PrimitiveResult]]:
         """Sweep one set of primitives over multiple parameter dicts.
 
-        The inner simulation loop stays entirely in C++ (no Python round-trip
-        per parameter set).  Template: ``_batch_setup`` then ``_sweep``.
+        Template: ``_batch_setup`` then the engine's ``_sweep``.
 
         Args:
             primitives:  Primitive instances to evaluate.
@@ -357,8 +356,8 @@ class Engine(ABC):
         Structurally similar circuits (measurement groups sharing an ansatz
         prefix) must not draw identical random tapes — summing their results
         would otherwise carry correlated shot noise.  The prime stride also
-        keeps C++ ``batch_run``'s internal per-param-set ``+i`` offsets from
-        colliding across circuits.
+        keeps ``batch_run``'s per-set ``+i`` offsets from colliding across
+        circuits.
         """
         if self._seed is None:
             return None
@@ -513,10 +512,10 @@ class Engine(ABC):
             self._programs[id(prim)] = programs
 
     def kernels(self, primitive: Runnable) -> "list[list[str] | None]":
-        """The kernels ``run()`` executes for each circuit of ``primitive``,
-        as :meth:`Block.kernels` lists them for one block: one list per
-        circuit, in order, or None where its gate stream runs (§14
-        *Structured execution*).  ``primitive`` must be one the last
+        """The kernels ``run()`` and ``batch_run()`` execute for each circuit
+        of ``primitive``, as :meth:`Block.kernels` lists them for one block:
+        one list per circuit, in order, or None where its gate stream runs
+        (§14 *Structured execution*).  ``primitive`` must be one the last
         ``build()`` built.
         """
         # Keyed by id, safe: build() resets it to the primitives it holds alive.

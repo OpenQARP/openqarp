@@ -3,6 +3,8 @@
 Oracles: ``unitary_matrix()`` (the §14 oracle path, never planned) and the
 analytic images of basis states under permutation blocks."""
 
+from collections import Counter
+
 import numpy as np
 import pytest
 from sympy import Symbol
@@ -1231,6 +1233,42 @@ def test_engine_kernels_lists_each_circuit_of_the_last_build():
     engine.build([small])
     with pytest.raises(RuntimeError, match="not built"):
         engine.kernels(averaging)
+
+
+class _CountingSimulator:
+    def __init__(self, sim):
+        self._sim, self.calls = sim, Counter()
+
+    def __getattr__(self, name):
+        self.calls[name] += 1
+        return getattr(self._sim, name)
+
+
+def test_a_finite_shot_sweep_runs_a_built_ladder_through_its_program(monkeypatch):
+    """QPE of P(2π·0.3) on 11 ancillas reads k with P(k) = |Σ_j e^{2πij(φ − k/2¹¹)}|² / 4¹¹
+    (analytic), φ being off the grid; the low three ancillas read k mod 8.  Every set
+    runs the program planned after the build, set 0 on run()'s seeds."""
+    phi, t, shots = 0.3, 11, 20_000
+    block = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(phi), t, 1).build()
+    sampler = Sampler(block, n_shots=shots, measured_qubits=[0, 1, 2])
+    engine = QarpEngine(seed=7)
+    engine.build([sampler])
+    assert "controlled_powers" in engine.kernels(sampler)[0]
+    by_run = dict(engine.run()[0])
+    spy = _CountingSimulator(engine._sim)
+    monkeypatch.setattr(engine, "_sim", spy)
+    sets = engine.batch_run([sampler], [{}] * 3, rebuild=False)
+    assert spy.calls["program_run"] == 3 and spy.calls["run"] == spy.calls["batch_run"] == 0
+
+    k = np.arange(2**t)
+    p_k = np.abs(np.exp(2j * np.pi * np.outer(phi - k / 2**t, k)).sum(axis=1)) ** 2 / 4**t
+    for r in range(8):
+        p = p_k[k % 8 == r].sum()
+        for (dist,) in sets:
+            assert dist.probability_of(r) == pytest.approx(
+                p, abs=5 * np.sqrt(p * (1 - p) / shots) + 1e-12
+            )
+    assert dict(sets[0][0]) == by_run and dict(sets[1][0]) != by_run
 
 
 @pytest.mark.parametrize("method", ["parameter-shift", "finite-diff"])

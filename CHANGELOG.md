@@ -19,7 +19,7 @@ All notable changes to OpenQARP are recorded here. The format follows
   or its composition with `structure()` and `qarp.blocks.Repeat`
   (`QPEBlock` and `DOSQPEBlock` do); `Block.kernels()` lists what
   `statevector` would run, and `Engine.kernels(primitive)` what `run()`
-  executes for each circuit of a built primitive.  See §14 of the
+  and `batch_run` execute for each circuit of a built primitive.  See §14 of the
   conventions and the *Structured execution* section of the configuration
   page.
 - `optimization_level` on `Block.statevector` and `QarpEngine`: the
@@ -53,6 +53,10 @@ All notable changes to OpenQARP are recorded here. The format follows
   kernel whatever the ancilla count and `block` stays unbuilt.  Any
   primitive over such a block is planned the same way, `PauliAveraging`
   included.
+- `QarpEngine.batch_run` evaluates each parameter set as `run()` does: a
+  finite-shot sweep runs a planned circuit's kernels instead of its gates,
+  and accepts a `Sampler`'s `initial_state`; it raised before.  Seeded
+  counts of a circuit with no plan are unchanged.
 - `MirrorTest` accepts an input narrower than its working register and
   places it on the low qubits; it raised before.
 - OpenBLAS's thread count in numpy and scipy is lowered to qarp's

@@ -204,10 +204,14 @@ def _compile_one(self, block, prim) -> _Compiled:
 - **Programs of the built path are cached on the engine** by `(stream digest, width, fusion
   width, level)`, bounded to 64 entries; the unbuilt path is not cached, having no stream to
   digest and costing milliseconds.
-- **`batch_run` with finite shots evaluates a lowered circuit per parameter set** through
-  `program_run`, with one seed stream per circuit stepped per set, since the C++ sweep needs
-  a gate stream; built circuits keep the C++ sweep.  `compiled_circuits` holds an empty list
-  for a lowered circuit.
+- **`QarpEngine.batch_run` evaluates each parameter set as `run()` does**: `program_run`
+  where a circuit has a program, `run` otherwise, set 0 on `run()`'s seeds and each later set
+  stepping every circuit's seed by its index.  `QarpEngine` does not call the C++
+  `sim.batch_run` sweep: it loops over the sets with no work shared between them, and the
+  Python loop measured within 1–5% of it (about 30% on circuits of a few qubits and
+  thousands of gates, under a millisecond per set) with bit-identical counts.  A finite-shot
+  sweep therefore runs a planned circuit's kernels, built or lowered, and accepts a
+  `Sampler`'s `initial_state`.  `compiled_circuits` holds an empty list for a lowered circuit.
 - **`Runnable.target` is typed `Target`**, not `Any`: the type is importable below the layer
   line now.
 - **`plan_structure` reads an unbuilt `CompositeBlock` through its `blocks` list** (the
@@ -223,13 +227,10 @@ def _compile_one(self, block, prim) -> _Compiled:
   one-time change.  The identity of the two `Target` imports is still tested.
 - **`MirrorTest` accepts an input narrower than the working register**, placed on its low
   qubits; the built composition placed every input on the full register and refused one.
-- **A lowered circuit takes a `Sampler`'s `initial_state` in a finite-shot `batch_run`**,
-  since it is evaluated per set through `program_run`; a built circuit still refuses it, the
-  C++ sweep having no initial state.
 - **`batch_run` steps seeds as `run()` does**: an `EXACT` readout draws none, so a
   finite-shot primitive after it samples the same tape in both calls.
 - **`Engine.kernels(primitive)` is public**, beside `Block.kernels()`: the kernels `run()`
-  executes for each circuit of a primitive the last `build()` built, None for a gate-path
-  circuit, `RuntimeError` for any other primitive.  Whether a block handed over unbuilt was
-  lowered could be read only from the engine's private programs; the tests read the
-  accessor, and §14, the configuration page and the notebook name it.
+  and `batch_run` execute for each circuit of a primitive the last `build()` built, None for
+  a gate-path circuit, `RuntimeError` for any other primitive.  Whether a block handed over
+  unbuilt was lowered could be read only from the engine's private programs; the tests read
+  the accessor, and §14, the configuration page and the notebook name it.

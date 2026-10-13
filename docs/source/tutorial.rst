@@ -420,8 +420,8 @@ construction — same seed, same shots:
 Parameter sweeps with ``batch_run``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For many parameter sets over the same circuits, ``batch_run`` keeps the
-simulation loop in C++:
+For many parameter sets over the same circuits, ``batch_run`` builds once
+and evaluates every set as ``run`` would:
 
 .. code-block:: python
 
