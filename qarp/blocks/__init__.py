@@ -18,8 +18,8 @@ from ._block import (
     ConditionalBlock,
     # `CompositeBlockBase` is the bare tree primitive that internal blocks
     # extend and that isinstance checks target; `composite_block.CompositeBlock`
-    # below is the user-facing assembly wrapper (adds measurement-only-at-end
-    # orchestration and qubit-count inference from children).
+    # below is the user-facing assembly wrapper (adds a children list wired at
+    # build and qubit-count inference from children).
     CompositeBlockBase,
 )
 from ._composite_block import CompositeBlock

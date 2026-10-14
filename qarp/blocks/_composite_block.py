@@ -1,10 +1,10 @@
 """User-facing CompositeBlock with measurement / target_qubit handling.
 
 Subclass of ``qarp.blocks.CompositeBlockBase`` (which is
-``qarpx.CompositeBlock`` + Python state).  Adds the high-level orchestration
-that the C++ class doesn't carry: measurement-only-at-end validation and
-qubit-count resolution from children.  Children are wired as given —
-controlisation is explicit through ``ControlledBlock`` (§13).
+``qarpx.CompositeBlock`` + Python state).  Adds what the C++ class doesn't
+carry: a children list wired at build, and qubit-count resolution from the
+children.  Children are wired as given — controlisation is explicit through
+``ControlledBlock`` (§13).
 """
 
 from typing import List, Optional, Sequence
@@ -15,10 +15,11 @@ from ._block import CompositeBlockBase
 
 
 class CompositeBlock(CompositeBlockBase):
-    """Compose a sequence of pre-built sub-blocks into a single circuit.
+    """Compose a sequence of sub-blocks into a single circuit.
 
-    Pattern B (composite) — populates ``self`` via ``self.add_child(...)`` in
-    ``build_vanilla()``.
+    The constructor's ``blocks`` are wired at ``build()``; ``add_child``
+    appends one to wire at the next build.  A block that computes its own
+    children in ``build_vanilla`` extends ``CompositeBlockBase`` instead.
     """
 
     def __init__(
@@ -96,3 +97,17 @@ class CompositeBlock(CompositeBlockBase):
         for block in self.blocks[self._n_wired :]:
             self.add_wired_child(block)
         self._n_wired = len(self.blocks)
+
+    def _post_build_check(self) -> None:
+        # A subclass's own build_vanilla never wires the queue add_child fills,
+        # which would leave the block built and empty.
+        unwired = len(self.blocks) - self._n_wired
+        if unwired:
+            raise TypeError(
+                f"{self.name}: {unwired} child block(s) were added but never wired.  "
+                "CompositeBlock.add_child only queues a child for "
+                "CompositeBlock.build_vanilla; a block that computes its own "
+                "children in build_vanilla extends CompositeBlockBase, whose "
+                "add_child wires at once."
+            )
+        super()._post_build_check()
