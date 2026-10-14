@@ -161,5 +161,4 @@ class ShadowProtocol(PrimitiveAlgorithm):
         After ``release()``, a re-run needs a rebuild.
         """
         self.sub_blocks = []
-        self.compiled_circuits = []
-        self._n_qubits_list = []
+        self.compiled = []

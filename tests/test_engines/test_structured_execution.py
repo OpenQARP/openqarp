@@ -170,7 +170,7 @@ def test_a_reset_or_a_classical_condition_keeps_the_gate_path(tail):
     engine = QarpEngine(seed=5, n_shots=100, structured=True)
     sampler = Sampler(ket)
     engine.build([sampler])
-    assert engine.kernels(sampler) == [None]
+    assert engine.kernels(sampler) == [["gates"]]
     assert sum(engine.run()[0].probabilities) == pytest.approx(1.0)
 
 
@@ -199,7 +199,7 @@ def test_engine_samples_a_permuted_basis_state_deterministically(n_shots):
     sampler = Sampler(ket, n_shots=n_shots, initial_state=psi)
     engine = QarpEngine(seed=7, structured=True)
     engine.build([sampler])
-    assert engine.kernels(sampler)[0] is not None
+    assert engine.kernels(sampler)[0] != ["gates"]
     dist = engine.run()[0]
     image = _increment_image(_increment_image(x, qubits), qubits)
     assert dist.outcomes.tolist() == [image]
@@ -215,7 +215,7 @@ def test_engine_exact_distribution_matches_the_unitary():
     engine = QarpEngine(structured=True)
     sampler = Sampler(ket, n_shots=qarp.EXACT)
     engine.build([sampler])
-    assert engine.kernels(sampler)[0] is not None
+    assert engine.kernels(sampler)[0] != ["gates"]
     dist = engine.run()[0]
     small = CompositeBlock(
         [_Rotations(3, target_qubits=[0, 1, 2]), _Increment(6, target_qubits=[0, 1, 2, 3, 4, 5])],
@@ -294,7 +294,7 @@ def test_gradients_through_a_planned_circuit_match_the_analytic_value(method):
     estimator = PauliAveraging(ket=ket, operator=QubitOperator("Z1"), n_shots=qarp.EXACT)
     engine = QarpEngine(structured=True)
     engine.build([estimator])
-    assert any(p is not None for p in engine.kernels(estimator))
+    assert any(k != ["gates"] for k in engine.kernels(estimator))
     phi = 0.8
     assert engine.run({Symbol("phi"): phi})[0] == pytest.approx(np.cos(phi), abs=1e-12)
     grad = engine.run_gradient({Symbol("phi"): phi}, method=method)[0]
@@ -325,11 +325,11 @@ def test_engine_keeps_the_gate_path_with_a_device_or_amplitude_primitive():
     with_device = QarpEngine(device=Device(n), structured=True)
     sampler = Sampler(ket, n_shots=qarp.EXACT)
     with_device.build([sampler])
-    assert with_device.kernels(sampler) == [None]
+    assert with_device.kernels(sampler) == [["gates"]]
     engine = QarpEngine(structured=True)
     amplitudes = StateVector(operator=QubitOperator("Z0"), ket=ket)
     engine.build([amplitudes])
-    assert engine.kernels(amplitudes) == [None]
+    assert engine.kernels(amplitudes) == [["gates"]]
 
 
 class _Collide(SimpleBlock):
@@ -411,7 +411,7 @@ def test_the_engine_plans_at_its_simulator_fusion_width():
     engine = QarpEngine(structured=True)
     sampler = Sampler(_two_qubit_terms(n), n_shots=qarp.EXACT)
     engine.build([sampler])
-    assert engine.kernels(sampler) == [None]
+    assert engine.kernels(sampler) == [["gates"]]
     engine._sim.fusion_max_qubits = 1
     engine.build([sampler])
     assert set(engine.kernels(sampler)[0]) == {"dense"}
@@ -448,7 +448,7 @@ def test_a_measurement_reused_in_the_last_kernel_keeps_the_gate_path():
     engine = QarpEngine(seed=3, n_shots=200, structured=True)
     sampler = Sampler(ket)
     engine.build([sampler])
-    assert engine.kernels(sampler) == [None]
+    assert engine.kernels(sampler) == [["gates"]]
     assert sum(engine.run()[0].probabilities) == pytest.approx(1.0)
 
 
@@ -1215,24 +1215,26 @@ def test_pauli_averaging_over_a_declaring_block_is_planned():
     assert engine.run()[0] == pytest.approx(1.0, abs=1e-10)
 
 
-def test_engine_kernels_lists_each_circuit_of_the_last_build():
+def test_engine_kernels_lists_each_circuit_compiled_under_its_settings():
     """Z0 and X0 measure in two groups, each lowered from the QPE ket's
     declaration; the ancilla register is |3⟩, so ⟨Z0⟩ + ⟨X0⟩ = −1 + 0
-    (analytic).  The 3-qubit sampler is below the planner minimum."""
+    (analytic).  The 3-qubit sampler is below the planner minimum.  The
+    circuits live on the primitive, so a later build of others keeps them."""
     engine = QarpEngine(n_shots=qarp.EXACT)
     ket = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False)
     averaging = PauliAveraging(ket=ket, operator=QubitOperator("Z0") + QubitOperator("X0"))
     small = Sampler(HnBlock(3), n_shots=qarp.EXACT)
-    with pytest.raises(RuntimeError, match="not built"):
+    with pytest.raises(RuntimeError, match="Call engine.build"):
         engine.kernels(averaging)
     engine.build([averaging, small])
     assert engine.kernels(averaging) == [["gates", "controlled_powers", "gates"]] * 2
     assert averaging.compiled_circuits == [[], []] and not ket.is_built
-    assert engine.kernels(small) == [None]
+    assert engine.kernels(small) == [["gates"]]
     assert engine.run()[0] == pytest.approx(-1.0, abs=1e-10)
     engine.build([small])
-    with pytest.raises(RuntimeError, match="not built"):
-        engine.kernels(averaging)
+    assert engine.kernels(averaging) == [["gates", "controlled_powers", "gates"]] * 2
+    with pytest.raises(RuntimeError, match="compiled under this engine's settings"):
+        QarpEngine(n_shots=qarp.EXACT, structured=False).kernels(averaging)
 
 
 class _CountingSimulator:

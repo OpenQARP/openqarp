@@ -7,9 +7,12 @@ registration, no import in either direction).  Dependency rule, lint-enforced by
 engines-see-only-Runnable``.
 """
 
-from typing import Any, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Union
 
 from .._types import Consumes, Shots, Target
+
+if TYPE_CHECKING:
+    from ._engine import CompiledCircuit
 
 
 class Runnable(Protocol):
@@ -30,8 +33,8 @@ class Runnable(Protocol):
     supported_targets: frozenset
     # The circuits.
     sub_blocks: list
-    compiled_circuits: list[list]
-    _n_qubits_list: list[int]
+    # One per sub-block, written by the engine's build() alone.
+    compiled: "list[CompiledCircuit]"
     # None, or LSB-indexed ket-seeding amplitudes (ndarray — typed Any for the
     # same layering reason as operator).
     initial_state: Any

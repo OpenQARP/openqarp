@@ -89,9 +89,9 @@ class CuttingPrimitive(PrimitiveAlgorithm):
     def circuits(self) -> list:
         """Partition the circuit and build all measurement sub-blocks.
 
-        The cut reads the ket's gate stream, so the ket is built here, the
-        one primitive whose circuits cannot be derived from an unbuilt
-        input.  Uses streaming experiment generation and QWC grouping so
+        The cut reads the ket's gate stream, so the ket is built here, one
+        of two primitives (with ``PauliShadow``) whose circuits cannot be
+        derived from an unbuilt input.  Uses streaming experiment generation and QWC grouping so
         that the circuits number n_experiments × n_subcircuits ×
         n_qwc_groups (instead of × n_obs_terms).
         """

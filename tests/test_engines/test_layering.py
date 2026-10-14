@@ -40,6 +40,6 @@ def test_primitives_satisfy_runnable_structurally():
     # primitive without PrimitiveAlgorithm importing the protocol.
     prim = Sampler()
     members = [n for n in Runnable.__annotations__ if not n.startswith("_")]
-    members += ["_n_qubits_list", "build", "run", "run_from_amplitudes"]
+    members += ["build", "run", "run_from_amplitudes"]
     missing = [n for n in members if not hasattr(prim, n)]
     assert not missing, f"PrimitiveAlgorithm no longer satisfies Runnable: {missing}"

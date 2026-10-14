@@ -33,9 +33,13 @@ class PrimitiveAlgorithm(ABC):
     Attributes:
         sub_blocks:         Set by build() from circuits(); block trees, built
                             by the engine where planning refuses.
-        compiled_circuits:  Set by Engine.build(); one command list per
-                            circuit, empty for one lowered from a declaration.
-        _n_qubits_list:     Set by Engine.build(); n_qubits per circuit.
+        compiled:           Set by Engine.build(); one ``CompiledCircuit``
+                            per circuit.
+        compiled_circuits:  Each circuit's command list, read from
+                            ``compiled``; empty for one lowered from a
+                            declaration.
+        _n_qubits_list:     Each circuit's simulator width, read from
+                            ``compiled``.
 
     Class capability metadata (override on the subclass; class-level so it
     survives the ``deepcopy``-then-mutate pattern QSE/MonteCarlo/QMEGS use):
@@ -108,8 +112,7 @@ class PrimitiveAlgorithm(ABC):
         self.n_shots = n_shots
         self.target = target
         self.sub_blocks: list = []
-        self.compiled_circuits: list[list] = []
-        self._n_qubits_list: list[int] = []
+        self.compiled: list = []
 
     @property
     def bra(self) -> Any:
@@ -182,8 +185,15 @@ class PrimitiveAlgorithm(ABC):
         Returns ``self`` so callers can chain ``primitive.build()``.
         """
         self.sub_blocks = list(self.circuits())
-        self._n_qubits_list = [block.n_qubits for block in self.sub_blocks]
         return self
+
+    @property
+    def compiled_circuits(self) -> list[list]:
+        return [c.commands for c in self.compiled]
+
+    @property
+    def _n_qubits_list(self) -> list[int]:
+        return [c.n_qubits for c in self.compiled]
 
     @abstractmethod
     def run(self, results: list) -> PrimitiveResult:

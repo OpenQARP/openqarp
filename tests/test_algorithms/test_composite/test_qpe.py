@@ -221,7 +221,7 @@ def test_qpe_noisy_engine_keeps_the_gate_path():
         n_ancilla=11,
         engine=QarpEngine(n_qubits=12, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
-    assert _block_path(qpe) and _kernels(qpe) == [None]
+    assert _block_path(qpe) and _kernels(qpe) == [["gates"]]
     qpe.run()
     assert sum(qpe.distribution.values()) == pytest.approx(1.0)
 
@@ -259,7 +259,7 @@ def test_qpe_routed_engine_keeps_the_gate_path():
     )
     qpe.primitive.n_shots = 100
     qpe.build()
-    assert _block_path(qpe) and _kernels(qpe) == [None]
+    assert _block_path(qpe) and _kernels(qpe) == [["gates"]]
 
 
 def test_qpe_seeded_primitive_reads_the_seeded_eigenstate():

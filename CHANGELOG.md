@@ -59,6 +59,12 @@ All notable changes to OpenQARP are recorded here. The format follows
   counts of a circuit with no plan are unchanged.
 - `MirrorTest` accepts an input narrower than its working register and
   places it on the low qubits; it raised before.
+- A primitive keeps its compiled circuits as `CompiledCircuit` records in
+  `prim.compiled`, each stamped with the engine settings it was compiled
+  under; `compiled_circuits` and `_n_qubits_list` are read-only views of
+  them.  `QarpEngine` runs a counts circuit that needs no trajectory as a
+  program and binds each parameter set in C++, which makes a `batch_run`
+  sweep of a narrow, deep circuit about 10% faster.
 - OpenBLAS's thread count in numpy and scipy is lowered to qarp's
   (`QARP_NUM_THREADS`) at the first simulation, so a BLAS call no longer
   leaves a worker spinning on every logical CPU against the next simulator
@@ -76,6 +82,10 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 - `QPEBlock` and `DOSQPEBlock` place a copy of the eigenstate block, so one
   state block can serve two QPE blocks; sharing it corrupted the first.
+- `build(rebuild=False)` and `batch_run(rebuild=False)` reuse a primitive's
+  circuits only when they were compiled under the engine's settings.  Reused
+  on another engine, a routed circuit ran without its layout and returned
+  counts in physical qubit order.
 - The default thread count under OpenMP binding (`OMP_PROC_BIND`,
   `OMP_PLACES`) counts the CPUs of all the places; the bound main thread's
   own place gave a count of 1.

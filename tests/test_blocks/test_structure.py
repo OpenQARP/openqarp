@@ -408,7 +408,7 @@ def test_plan_structure_descends_an_unbuilt_composite():
 def test_engines_without_the_path_build_the_block():
     def builds(engine, prim):
         engine.build([prim])
-        return prim.sub_blocks[0].is_built and engine.kernels(prim) == [None]
+        return prim.sub_blocks[0].is_built and engine.kernels(prim) == [["gates"]]
 
     for engine in (QarpEngine(device=Device(4)), QarpEngine(structured=False)):
         block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1)

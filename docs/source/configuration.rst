@@ -274,7 +274,8 @@ contract.
 
 ``QARP_STRUCTURED`` sets the process-wide default, read once; ``0``,
 ``false``, ``off`` and ``no`` turn it off.  Engines with a ``device``,
-amplitude-consuming primitives and gradients always run the gate path.
+amplitude-consuming primitives and the circuits a parameter-shift gradient
+rewrites always run the gate path.
 
 A block can also declare how it is composed with ``structure()``: its parts
 in order, where a part is a block or ``Repeat(block, count)``.  A primitive
@@ -288,8 +289,8 @@ primitive over such a block, ``PauliAveraging`` included.
 
 To see what runs, ``block.kernels()`` lists the kernels ``statevector``
 runs on a built block, and ``engine.kernels(primitive)`` lists them for each
-circuit of a primitive after ``engine.build``, with ``None`` for a circuit
-that runs its gates:
+circuit of a primitive after ``engine.build``, with ``['gates']`` for a
+circuit that runs its gate stream:
 
 .. code-block:: python
 

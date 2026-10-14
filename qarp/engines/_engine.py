@@ -12,7 +12,8 @@ Primitives build ``Block`` objects and submit them via
 
 import warnings
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Mapping, Optional, Sequence, Union
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Union
 
 import numpy as np
 
@@ -158,6 +159,38 @@ def _operator_n_qubits(qop) -> int:
     return max((q + 1 for term in qop.terms for q, _ in term), default=0)
 
 
+@dataclass(frozen=True)
+class CompiledCircuit:
+    """One circuit of a primitive as an engine compiled it, valid on any
+    engine whose ``_compile_stamp()`` equals ``stamp``."""
+
+    # Transpiled stream; empty when the program alone runs (a lowered circuit).
+    commands: list
+    # Simulator width: the device width once routed, else the block's.
+    n_qubits: int
+    stamp: tuple
+    # Engine-owned routing record, None when the register was not permuted.
+    layout: Any = None
+    program: "Optional[qx.Program]" = None
+    # Free symbols, so a parameter set is substituted; None reads ``commands``.
+    parametric: Optional[bool] = None
+    # A true mid-circuit operation in ``commands``; always read from them.
+    mid_circuit: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.parametric is None:
+            object.__setattr__(self, "parametric", any(c.is_parametric() for c in self.commands))
+        object.__setattr__(self, "mid_circuit", _find_true_mcm(self.commands) is not None)
+
+
+def _substituted(compiled: Sequence[CompiledCircuit], params: Mapping[str, float]) -> list:
+    """Each circuit's stream with ``params`` bound."""
+    return [
+        qx.substitute_all(c.commands, params) if params and c.parametric else c.commands
+        for c in compiled
+    ]
+
+
 def _coerce_params(params: Mapping) -> dict[str, float]:
     """Normalise parameter-dict keys: sympy.Symbol → str, values → float.
 
@@ -188,9 +221,6 @@ class Engine(ABC):
     # methods below type-check against the shared state they orchestrate.
     _seed: Optional[int]
     _primitives: list[Runnable]
-    _l2p_per_primitive: list
-    # id(primitive) -> one structured program (or None) per compiled circuit.
-    _programs: dict[int, list]
 
     # ``build()`` / ``run()`` / ``batch_run()`` / ``run_gradient()`` are
     # template methods defined below; engines implement the ``_compile_one``
@@ -216,36 +246,28 @@ class Engine(ABC):
             primitives:  Primitive instances to evaluate.
             param_sets:  One dict per evaluation point.
             n_shots:     Override engine-default shot count for this sweep.
-            rebuild:     If False, reuse transpilation from a prior ``build()``
-                call when the primitive structure is unchanged.
+            rebuild:     If False, reuse a primitive's circuits when a prior
+                ``build()`` compiled them under this engine's settings.
 
         Returns:
             ``results_by_set[set_idx][prim_idx] = scalar``.
         """
         override, param_sets = self._batch_setup(primitives, param_sets, n_shots, rebuild)
-        return self._sweep(
-            primitives,
-            [p.compiled_circuits for p in primitives],
-            self._l2p_per_primitive,
-            param_sets,
-            override,
-        )
+        return self._sweep(primitives, [p.compiled for p in primitives], param_sets, override)
 
     @abstractmethod
     def _sweep(
         self,
         primitives: Sequence[Runnable],
-        circuits_per_prim: Sequence[list],
-        l2p_per_prim: Sequence,
+        compiled_per_prim: Sequence[Sequence[CompiledCircuit]],
         param_sets: Sequence[Mapping[str, float]],
         shots_override,
     ) -> list[list[PrimitiveResult]]:
         """Evaluate already-built primitives at many parameter points.
 
-        ``circuits_per_prim[j]`` replaces ``primitives[j].compiled_circuits``
-        (the gradient path hands in rewritten copies) and ``l2p_per_prim[j]``
-        is its routing map list.  Never calls ``build()``.
-        Returns ``results[set_idx][j]``.
+        ``compiled_per_prim[j]`` stands in for ``primitives[j].compiled``
+        (the gradient path hands in rewritten copies).  Never calls
+        ``build()``.  Returns ``results[set_idx][j]``.
         """
 
     def run_gradient(
@@ -356,8 +378,8 @@ class Engine(ABC):
         Structurally similar circuits (measurement groups sharing an ansatz
         prefix) must not draw identical random tapes — summing their results
         would otherwise carry correlated shot noise.  The prime stride also
-        keeps ``batch_run``'s per-set ``+i`` offsets from colliding across
-        circuits.
+        keeps ``QarpEngine.batch_run``'s per-set ``+i`` offsets from colliding
+        across circuits.
         """
         if self._seed is None:
             return None
@@ -365,11 +387,12 @@ class Engine(ABC):
 
     # ── Template lifecycle: build / run / batch head ────────────────────
     #
-    # The compile→validate→substitute→dispatch loop lives HERE, once.
+    # The compile→validate→dispatch loop lives HERE, once.
     # Engines supply narrow hooks: ``_compile_one`` (transpile/route one flat
-    # stream), ``_post_compile_check`` (engine-specific compiled-circuit
-    # rejects), ``_pre_run`` (state sync), ``_pre_dispatch_check`` (per-call
-    # rejects) and ``_dispatch_one`` (simulate one primitive's circuits).
+    # stream), ``_compile_stamp`` (the settings it read),
+    # ``_post_compile_check`` (engine-specific compiled-circuit rejects),
+    # ``_pre_run`` (state sync), ``_pre_dispatch_check`` (per-call rejects)
+    # and ``_dispatch_one`` (bind and simulate one primitive's circuits).
 
     def _compile_one(self, flat, block_n_qubits: int):
         """Return ``(compiled_commands, sim_n_qubits, layout)`` for one stream;
@@ -377,7 +400,13 @@ class Engine(ABC):
         engine-owned record the base class only threads through."""
         raise NotImplementedError
 
-    def _post_compile_check(self, prim: Runnable, compiled, l2p) -> None:
+    def _compile_stamp(self) -> tuple:
+        """The settings a ``CompiledCircuit`` depends on: ``build(rebuild=False)``
+        reuses a primitive's circuits only under an equal stamp.  An engine
+        whose compile reads more settings than its class extends it."""
+        return (type(self),)
+
+    def _post_compile_check(self, prim: Runnable, compiled, layout) -> None:
         """Engine-specific rejection of a freshly compiled circuit (no-op)."""
         return
 
@@ -399,7 +428,7 @@ class Engine(ABC):
         """
         return None
 
-    def _pre_dispatch_check(self, prim: Runnable, l2p_list) -> None:
+    def _pre_dispatch_check(self, prim: Runnable) -> None:
         """Engine-specific per-call rejection before dispatch (no-op)."""
         return
 
@@ -416,10 +445,13 @@ class Engine(ABC):
         return None
 
     def _dispatch_one(
-        self, prim: Runnable, substituted, l2p_list, ordinal: int, params: Mapping[str, float]
+        self,
+        prim: Runnable,
+        compiled: Sequence[CompiledCircuit],
+        ordinal: int,
+        params: Mapping[str, float],
     ):
-        """Simulate one primitive's substituted circuits; ``params`` is the
-        run's parameter binding, for structured programs built at ``build()``.
+        """Simulate one primitive's compiled circuits with ``params`` bound.
 
         Returns ``(result, ordinal)`` — ``ordinal`` advanced by the number of
         seed-consuming circuit executions (see ``_circuit_seed``).
@@ -453,79 +485,71 @@ class Engine(ABC):
         → ``_validate_primitive`` → per circuit: ``_plan_unbuilt``, else
         build → flatten → substitute → ``_validate_flat_commands`` →
         ``_warn_uninitialised_conditions`` → ``_compile_one`` →
-        ``_post_compile_check`` → ``_plan_built``.  The reuse path
-        (``rebuild=False`` with compiled circuits present) re-validates —
-        capability-relevant state may have changed — and keeps prior routing
-        maps, so results stay in logical qubit order.
+        ``_post_compile_check`` → ``_plan_built``, into one
+        ``CompiledCircuit`` each on ``prim.compiled``.  ``rebuild=False``
+        reuses a primitive's circuits when all were compiled under this
+        engine's ``_compile_stamp()``, re-validating it — capability-relevant
+        state may have changed — and compiles it afresh otherwise.
         """
         params = _coerce_params(params)
         # Gradient plans are cached per build; a rebuilt (or re-validated)
         # primitive set starts a new generation so no stale plan is reused.
         self._build_generation = getattr(self, "_build_generation", 0) + 1
-        prev_l2p = {
-            id(p): l for p, l in zip(self._primitives, self._l2p_per_primitive, strict=False)
-        }
-        prev_programs = getattr(self, "_programs", {})
-        self._programs = {}
         self._primitives = list(primitives)
-        self._l2p_per_primitive = []
+        stamp = self._compile_stamp()
         for prim in self._primitives:
-            if not rebuild and prim.compiled_circuits:
+            if not rebuild and prim.compiled and all(c.stamp == stamp for c in prim.compiled):
                 self._validate_primitive(prim)
-                self._l2p_per_primitive.append(
-                    prev_l2p.get(id(prim), [None] * len(prim.compiled_circuits))
-                )
-                self._programs[id(prim)] = prev_programs.get(
-                    id(prim), [None] * len(prim.compiled_circuits)
-                )
                 continue
-            prim.compiled_circuits.clear()
-            prim.build()
-            prim._n_qubits_list.clear()
             # Validated with the circuits cleared: a rejected primitive keeps
             # no stale circuits for a later rebuild=False to reuse.
+            prim.compiled = []
+            prim.build()
             self._validate_primitive(prim)
-            l2p_list: list = []
-            programs: list = []
-            for blk in prim.sub_blocks:
-                program = self._plan_unbuilt(prim, blk)
-                if program is not None:
-                    # Lowered from its composition: no gate stream to compile.
-                    # The empty stream is symbol-free with terminal measurements
-                    # only, so gradient stencils and mid-circuit checks read it safely.
-                    compiled, sim_n, l2p = [], blk.n_qubits, None
-                else:
-                    blk.build()
-                    flat = blk.flatten()
-                    if params:
-                        flat = qx.substitute_all(flat, params)
-                    self._validate_flat_commands(prim, flat)
-                    self._warn_uninitialised_conditions(flat)
-                    compiled, sim_n, l2p = self._compile_one(flat, blk.n_qubits)
-                    self._post_compile_check(prim, compiled, l2p)
-                    program = self._plan_built(prim, blk, flat)
-                prim.compiled_circuits.append(compiled)
-                prim._n_qubits_list.append(sim_n)
-                l2p_list.append(l2p)
-                programs.append(program)
-            self._l2p_per_primitive.append(l2p_list)
-            self._programs[id(prim)] = programs
+            prim.compiled = [
+                self._compile_circuit(prim, blk, params, stamp) for blk in prim.sub_blocks
+            ]
 
-    def kernels(self, primitive: Runnable) -> "list[list[str] | None]":
+    def _compile_circuit(self, prim: Runnable, blk, params, stamp: tuple) -> CompiledCircuit:
+        program = self._plan_unbuilt(prim, blk)
+        if program is not None:
+            # Lowered from its composition, no stream: plan_structure refuses a
+            # parametric part, so the program has nothing to bind.
+            return CompiledCircuit([], blk.n_qubits, stamp, program=program)
+        blk.build()
+        flat = blk.flatten()
+        if params:
+            flat = qx.substitute_all(flat, params)
+        self._validate_flat_commands(prim, flat)
+        self._warn_uninitialised_conditions(flat)
+        compiled, sim_n, layout = self._compile_one(flat, blk.n_qubits)
+        self._post_compile_check(prim, compiled, layout)
+        return CompiledCircuit(
+            compiled,
+            sim_n,
+            stamp,
+            layout=layout,
+            program=self._plan_built(prim, blk, flat),
+            # Read from flat: the program is planned from it, and optimisation
+            # can cancel a symbol out of ``compiled`` alone.
+            parametric=any(c.is_parametric() for c in flat),
+        )
+
+    def kernels(self, primitive: Runnable) -> list[list[str]]:
         """The kernels ``run()`` and ``batch_run()`` execute for each circuit
         of ``primitive``, as :meth:`Block.kernels` lists them for one block:
-        one list per circuit, in order, or None where its gate stream runs
-        (§14 *Structured execution*).  ``primitive`` must be one the last
-        ``build()`` built.
+        one list per circuit, in order, ``["gates"]`` where its gate stream
+        runs (§14 *Structured execution*).  ``primitive`` must be compiled
+        under this engine's settings.
         """
-        # Keyed by id, safe: build() resets it to the primitives it holds alive.
-        programs = getattr(self, "_programs", {}).get(id(primitive))
-        if programs is None:
+        stamp = self._compile_stamp()
+        compiled = primitive.compiled
+        if not compiled or any(c.stamp != stamp for c in compiled):
             raise RuntimeError(
-                f"{type(primitive).__name__} was not built by this engine's last "
-                "build(). Call engine.build() first."
+                f"{type(primitive).__name__} has no circuits compiled under this "
+                "engine's settings. Call engine.build() first."
             )
-        return [None if p is None else list(p.kinds()) for p in programs]
+        return [["gates"] if c.program is None else list(c.program.kinds()) for c in compiled]
 
     def run(
         self,
@@ -542,14 +566,10 @@ class Engine(ABC):
         self._pre_run()
         results: list[PrimitiveResult] = []
         ordinal = 0
-        for prim, l2p_list in zip(self._primitives, self._l2p_per_primitive, strict=True):
+        for prim in self._primitives:
             self._validate_primitive(prim)
-            self._pre_dispatch_check(prim, l2p_list)
-            substituted = [
-                qx.substitute_all(cmds, params) if params else cmds
-                for cmds in prim.compiled_circuits
-            ]
-            result, ordinal = self._dispatch_one(prim, substituted, l2p_list, ordinal, params)
+            self._pre_dispatch_check(prim)
+            result, ordinal = self._dispatch_one(prim, prim.compiled, ordinal, params)
             results.append(result)
         return results
 
@@ -563,8 +583,8 @@ class Engine(ABC):
         if override is not None:
             for prim in primitives:
                 self._validate_primitive(prim, shots_override=override)
-                for cmds in prim.compiled_circuits:
-                    self._validate_flat_commands(prim, cmds, shots_override=override)
+                for c in prim.compiled:
+                    self._validate_flat_commands(prim, c.commands, shots_override=override)
         return override, param_sets
 
     def _needs_amplitudes(self, prim: Runnable, shots_override=None) -> bool:

@@ -2,9 +2,13 @@
 execution*): ``build()`` builds nothing, the engine plans what it is handed
 and builds only what planning refuses.
 
-Oracles are analytic: uniform amplitudes of ``H⊗H``, ``⟨+|X|+⟩ = 1`` and
-``⟨+|Z|+⟩ = 0``, a state's overlap with itself.
+Oracles are analytic, on ``|ψ_a⟩ = RY(a)|0⟩ ⊗ |0⟩``, which is no eigenstate of
+the operators used, so a dropped or misplaced operator changes the value:
+``⟨X0⟩ = sin a``, ``⟨Z0⟩ = cos a``, ``⟨ψ_b|ψ_a⟩ = cos((a − b)/2)``,
+``⟨ψ_b|Z0|ψ_a⟩ = cos((a + b)/2)``, and the uniform amplitudes of ``H⊗H``.
 """
+
+import math
 
 import numpy as np
 import pytest
@@ -36,6 +40,15 @@ def _x_on_0() -> SimpleBlock:
 
 def _two_bras():
     return [HnBlock(2), XnBlock(2)]
+
+
+_A, _B = 0.7, 0.2
+
+
+def _ry(angle: float) -> SimpleBlock:
+    block = SimpleBlock(2, name="RY0")
+    block.ry(0, angle)
+    return block
 
 
 # name -> (primitive over unbuilt inputs, the inputs that must stay unbuilt)
@@ -71,7 +84,27 @@ def _cases() -> dict:
     return cases
 
 
-@pytest.mark.parametrize("name", list(_cases()))
+_CASES = (
+    "Sampler",
+    "StateVector",
+    "StateVector overlap",
+    "PauliAveraging",
+    "HadamardTest",
+    "SWAPTest",
+    "MirrorTest",
+    "TermwiseHadamardTest",
+    "TermwiseSWAPTest",
+    "GroupedTransitionHadamardTest",
+    "InterferometricTest",
+    "BasisRotationAveraging",
+)
+
+
+def test_every_case_is_listed():
+    assert set(_cases()) == set(_CASES)
+
+
+@pytest.mark.parametrize("name", _CASES)
 def test_build_leaves_the_inputs_unbuilt(name):
     prim, inputs = _cases()[name]
     prim.build()
@@ -79,23 +112,62 @@ def test_build_leaves_the_inputs_unbuilt(name):
     assert not any(block.is_built for block in inputs)
 
 
+def _x0() -> SimpleBlock:
+    block = SimpleBlock(2, name="X0 bra")
+    block.x(0)
+    return block
+
+
+# name -> (primitive over unbuilt RY inputs, its analytic value)
+def _evaluated(name: str):
+    a, b = _A, _B
+    if name == "Sampler":
+        return Sampler(ket=HnBlock(2)), {(0, 0): 0.25, (0, 1): 0.25, (1, 0): 0.25, (1, 1): 0.25}
+    if name == "StateVector":
+        return StateVector(ket=_ry(a), operator=QubitOperator("Z0")), math.cos(a)
+    if name == "StateVector overlap":
+        return StateVector(ket=_ry(a), bra=_ry(b)), math.cos((a - b) / 2)
+    if name == "PauliAveraging":
+        return PauliAveraging(ket=_ry(a), operator=QubitOperator("X0")), math.sin(a)
+    if name == "HadamardTest":
+        return HadamardTest(ket=_ry(a), operator=_x_on_0()), math.sin(a)
+    if name == "SWAPTest":
+        return SWAPTest(bra=_ry(a), ket=_ry(a), operator=_x_on_0()), math.sin(a) ** 2
+    if name == "MirrorTest":
+        return MirrorTest(bra=_ry(a), ket=_ry(a), operator=_x_on_0()), math.sin(a) ** 2
+    if name == "TermwiseHadamardTest":
+        op = QubitOperator("X0") + QubitOperator("Z1")
+        return TermwiseHadamardTest(ket=_ry(a), operator=op), math.sin(a) + 1.0
+    if name == "TermwiseSWAPTest":
+        # Σ_i |⟨bra_i|ψ_a⟩|²: ⟨ψ_b|ψ_a⟩ and ⟨1,0|ψ_a⟩ = sin(a/2).
+        expected = math.cos((a - b) / 2) ** 2 + math.sin(a / 2) ** 2
+        return TermwiseSWAPTest(bra=[_ry(b), _x0()], ket=_ry(a)), expected
+    assert name == "GroupedTransitionHadamardTest"
+    prim = GroupedTransitionHadamardTest(bra=_ry(b), ket=_ry(a), operator=QubitOperator("Z0"))
+    return prim, math.cos((a + b) / 2)
+
+
 @pytest.mark.parametrize(
-    ("name", "expected"),
+    "name",
     [
-        ("Sampler", {(0, 0): 0.25, (0, 1): 0.25, (1, 0): 0.25, (1, 1): 0.25}),
-        ("PauliAveraging", 1.0),
-        ("HadamardTest", 1.0),
-        ("SWAPTest", 1.0),
-        ("MirrorTest", 1.0),
-        ("StateVector", 0.0),
+        "Sampler",
+        "StateVector",
+        "StateVector overlap",
+        "PauliAveraging",
+        "HadamardTest",
+        "SWAPTest",
+        "MirrorTest",
+        "TermwiseHadamardTest",
+        "TermwiseSWAPTest",
+        "GroupedTransitionHadamardTest",
     ],
 )
-def test_the_engine_builds_what_the_primitive_left_unbuilt(name, expected):
-    prim, inputs = _cases()[name]
+def test_the_engine_builds_what_the_primitive_left_unbuilt(name):
+    prim, expected = _evaluated(name)
     engine = QarpEngine(n_shots=qarp.EXACT)
     engine.build([prim])
     result = engine.run()[0]
     if isinstance(expected, dict):
         assert dict(result) == pytest.approx(expected, abs=1e-12)
     else:
-        assert result == pytest.approx(expected, abs=1e-10)
+        assert complex(result) == pytest.approx(expected, abs=1e-10)

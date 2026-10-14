@@ -59,7 +59,7 @@ def test_batch_run_seeds_match_run_after_an_exact_readout():
     prims = [Sampler(HnBlock(3), n_shots=qarp.EXACT), lowered, Sampler(HnBlock(3), n_shots=50)]
     eng = QarpEngine(seed=5)
     eng.build(prims)
-    assert eng.kernels(lowered)[0] is not None and not lowered.compiled_circuits[0]
+    assert eng.kernels(lowered)[0] != ["gates"] and not lowered.compiled_circuits[0]
     by_run = [dict(r) for r in eng.run()]
     (by_sweep,) = eng.batch_run(prims, [{}])
     assert [dict(r) for r in by_sweep[1:]] == by_run[1:]

@@ -28,6 +28,7 @@ from qarp.engines._cudaq_engine import (
     _STATEVECTOR_HOST_QUBIT_CAP,
     _check_statevector_host,
 )
+from qarp.engines._engine import CompiledCircuit
 from qarp.errors import CapabilityError
 from qarp.operators import QubitOperator
 
@@ -168,7 +169,7 @@ def test_check_statevector_host_cap():
 
     class _Prim:
         def __init__(self, n):
-            self._n_qubits_list = [n]
+            self.compiled = [CompiledCircuit([], n, ())]
 
     _check_statevector_host(_Prim(_STATEVECTOR_HOST_QUBIT_CAP))  # OK
     with pytest.raises(CapabilityError, match="host statevector"):
