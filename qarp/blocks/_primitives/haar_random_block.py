@@ -82,7 +82,8 @@ class HaarRandomBlock(SimpleBlock):
             raise ValueError("depth must be a positive integer (≥ 1).")
         if depth is not None and t_design is None:
             raise ValueError("depth is only relevant when t_design is specified.")
-        self.depth = depth
+        # Not ``depth``: that name is Block.depth(), the built circuit's depth.
+        self.n_layers = depth
 
         if real and t_design is not None:
             raise NotImplementedError(
@@ -130,7 +131,7 @@ class HaarRandomBlock(SimpleBlock):
         return HaarRandomBlock(
             n_qubits=self.n_qubits,
             t_design=self.t_design,
-            depth=self.depth,
+            depth=self.n_layers,
             seed=seed,
             real=self.real,
             target_qubits=list(self.target_qubits) if self.target_qubits is not None else None,
@@ -203,7 +204,7 @@ class HaarRandomBlock(SimpleBlock):
         by π to convert to radians before passing to the qarpx builder.
         """
         n = self.n_qubits
-        depth = self.depth if self.depth is not None else n * self.t_design
+        depth = self.n_layers if self.n_layers is not None else n * self.t_design
 
         for layer_idx in range(depth):
             for q in range(n):
