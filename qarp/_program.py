@@ -709,48 +709,67 @@ def _owner(cls: type, name: str) -> Optional[type]:
     return next((k for k in cls.__mro__ if name in vars(k)), None)
 
 
+def _owns_cbits(block) -> bool:
+    """``block`` takes sequential cbits in its parent (``CompositeBlock::flatten``)."""
+    return getattr(block, "n_cbits", 0) > 0 and getattr(block, "target_cbits", None) is None
+
+
 def _composition(node) -> Optional[list]:
     """What an unbuilt block is made of, in order: its ``structure()``
-    declaration, or the children an unbuilt ``CompositeBlock`` wires at
-    build.  None for a built block (planned from its tree, its declaration
-    checked by digest) and for one whose parts are not readable before build."""
-    from .blocks._composite_block import CompositeBlock
-
+    declaration, or the children a block reports through
+    ``unbuilt_children()``.  None for a built block (planned from its tree,
+    its declaration checked by digest) and for one whose parts are not
+    readable before build."""
     if _is_built(node) or _has_pending_ops(node):
         return None
-    builder = _owner(type(node), "build_vanilla")
     if _declares_structure(node):
         # Unbuilt, a declaration has no stream to be checked against: it is
-        # trusted only from a class that also defines how the block is built.
+        # trusted only from the class that also defines how the block is built.
         declarer = _owner(type(node), "structure")
-        trusted = builder is None or declarer is None or issubclass(declarer, builder)
+        trusted = declarer is not None and declarer is _owner(type(node), "build_vanilla")
         return node.structure() if trusted else None
-    if isinstance(node, CompositeBlock) and builder is CompositeBlock:
-        return list(node.blocks)
-    return None
+    children = getattr(node, "unbuilt_children", None)
+    return children() if children is not None else None
 
 
-def _collect_parts(node, qmap: list[int], cmds: list, entries: list, repeated: set[int]) -> bool:
-    """Append ``node``'s parts to ``entries`` as planner entries in the root
-    frame (``qmap`` places the node there), appending each plain part's
-    stream to ``cmds``; a part with its own composition descends.  False
-    when a part cannot be planned unbuilt."""
-    parts = _composition(node)
-    if parts is None:
+def _collect_parts(
+    node,
+    parts: list,
+    qmap: list[int],
+    cmds: list,
+    entries: list,
+    repeated: dict[int, list],
+    owners: list[int],
+) -> bool:
+    """Append ``node``'s ``parts`` (its composition) to ``entries`` as planner
+    entries in the root frame (``qmap`` places the node there), appending
+    each plain part's stream to ``cmds`` and a Repeat's step stream to
+    ``repeated`` under its entry index; a part with its own composition
+    descends.  ``owners`` records the entry index after each part that takes
+    sequential cbits.  False when a part cannot be planned unbuilt."""
+    # The built stream remaps cbits by the node's target_cbits; unbuilt
+    # commands carry the parts' own.
+    if getattr(node, "target_cbits", None) is not None:
         return False
     nested = qmap != list(range(len(qmap)))
     for part in parts:
         if isinstance(part, Repeat):
             if not _is_built(part.block):
                 return False
-            repeated.add(len(entries))
+            step = list(part.block.flatten())
+            repeated[len(entries)] = [c.remap_qubits(qmap) for c in step] if nested else step
             kid_map = [qmap[t] for t in _placement(part.block)]
-            entries.append((part.block, len(cmds), len(cmds), kid_map, part.count, False))
+            entries.append(
+                (part.block, len(cmds), len(cmds), kid_map, part.count, _is_daggered(part.block))
+            )
             continue
         kid_map = [qmap[t] for t in _placement(part)]
-        if _composition(part) is not None:
-            if not _collect_parts(part, kid_map, cmds, entries, repeated):
+        kid_parts = _composition(part)
+        if kid_parts is not None:
+            if not _collect_parts(part, kid_parts, kid_map, cmds, entries, repeated, owners):
                 return False
+            if _owns_cbits(part):
+                owners.append(len(entries))
             continue
         # A plain part is built on its own: its stream is placed in the
         # node's frame by flatten(), then moved to the root frame.
@@ -763,7 +782,11 @@ def _collect_parts(node, qmap: list[int], cmds: list, entries: list, repeated: s
             kid_cmds = [c.remap_qubits(qmap) for c in kid_cmds]
         start = len(cmds)
         cmds.extend(kid_cmds)
-        entries.append((part, start, len(cmds), kid_map, 1, False))
+        # flatten() applied a pending dagger: the span is the part's own
+        # stream daggered.
+        entries.append((part, start, len(cmds), kid_map, 1, _is_daggered(part)))
+        if _owns_cbits(part):
+            owners.append(len(entries))
     return True
 
 
@@ -778,11 +801,12 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
     built ladder step (one control on |1⟩, a concrete ``U`` within
     ``K_POWERS``) joining a ``ControlledPowers`` kernel or a built permutation
     block, lowered to one table raised to the count; no part may be
-    parametric, and only the last part may record a measurement.  No register
-    minimum applies.  None when any of that fails, or without a structured
-    kernel.
+    parametric, no node may set ``target_cbits``, and only the last part may
+    own cbits or record a measurement.  No register minimum applies.  None
+    when any of that fails, or without a structured kernel.
     """
-    if _composition(block) is None:
+    parts = _composition(block)
+    if parts is None:
         return None
     tq = getattr(block, "target_qubits", None)
     if tq is not None and list(tq) != list(range(block.n_qubits)):
@@ -792,10 +816,16 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
     cmds: list = []
     planner = _Planner(cmds, n_qubits, fusion_width)
     entries: list = []
-    repeated: set[int] = set()
-    if not _collect_parts(block, list(range(block.n_qubits)), cmds, entries, repeated):
+    repeated: dict[int, list] = {}
+    owners: list[int] = []
+    qmap = list(range(block.n_qubits))
+    if not _collect_parts(block, parts, qmap, cmds, entries, repeated, owners):
         return None
     if not entries:
+        return None
+    # A cbit owner before the last entry shifts later cbits in the built
+    # stream; only one ending the composition sits at offset 0.
+    if any(end != len(entries) for end in owners):
         return None
     for _, s, e, _, _, _ in entries[:-1]:
         if any(_needs_trajectory(c) for c in cmds[s:e]):
@@ -808,16 +838,16 @@ def plan_structure(block, n_qubits: int, *, fusion_width: Optional[int] = None) 
             planner._emit(kernel)
             continue
         if i in repeated:
-            kid, _, _, kid_map, count, _ = entries[i]
-            found = planner._repeated(kid, list(kid.flatten()), kid_map, count)
+            kid, _, _, kid_map, count, dagger = entries[i]
+            found = planner._repeated(kid, repeated[i], kid_map, count, dagger)
             if found is None:
                 return None
             planner._emit(found)
             i += 1
             continue
-        kid, s, e, kid_map, _, _ = entries[i]
+        kid, s, e, kid_map, _, dagger = entries[i]
         if n_qubits >= MIN_QUBITS:
-            planner.walk(kid, s, e, kid_map)
+            planner.walk(kid, s, e, kid_map, dagger)
         else:
             planner._emit(Gates(s, e))
         i += 1

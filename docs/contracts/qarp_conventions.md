@@ -630,8 +630,9 @@ How circuits run.
 - **Per-circuit seeds are prime-stride derived.** `Engine._circuit_seed(ordinal)` =
   `(seed + 100_003 · ordinal) mod 2³²` (`None` stays `None`). Circuits within one call —
   measurement groups sharing an ansatz prefix — must not draw identical random tapes, and the
-  prime stride keeps `batch_run`'s per-set `+i` offsets from colliding: set 0 draws `run()`'s
-  seeds, and each later set steps every circuit's seed by its index.
+  prime stride keeps `QarpEngine.batch_run`'s per-set `+i` offsets from colliding: set 0
+  draws `run()`'s seeds, and each later set steps every circuit's seed by its index.
+  `CudaqEngine`'s sweep seeds each circuit once and draws every set from that stream.
 - **`initial_state` support is declared, and enforced in validation.** A primitive carrying
   `initial_state` is rejected in `Engine._validate_primitive` unless the *primitive* declares
   `accepts_initial_state` **and** the engine sets `supports_initial_state` — both guards live
@@ -694,15 +695,16 @@ How circuits run.
   `Block.kernels()` lists the kernels `statevector` would run on a built block, in order, or
   None when the gate path runs; it takes `structured` and `optimization_level` as
   `statevector` does and leaves the program cached.  `Engine.kernels(primitive)` gives the
-  same list for each circuit `run()` and `batch_run` execute, None for a gate-path circuit,
-  for a primitive the engine's last `build()` built.  The derivation budget is paid once per
+  same list for each circuit `run()` and `batch_run` execute, `["gates"]` for a circuit that
+  runs its gate stream, for a primitive compiled under the engine's settings.  The
+  derivation budget is paid once per
   distinct program and never amortises for a one-off run of a block that is not a
   permutation; `structured=False` skips it.
   A program with no structured kernel is never built — that circuit runs the unchanged
   gate path bit for bit — and neither are registers under 12 qubits, spans of fewer than
   three gates, or a program with a measurement or classical condition outside its last
   `Gates` kernel.  **Not** applied by `unitary_matrix` (the oracle), amplitude-consuming
-  primitives, gradients, an engine with any `device`
+  primitives, a circuit a parameter-shift gradient rewrites, an engine with any `device`
   (routed or not — a device means "simulate what the device runs", and carries the
   noise model), or `CudaqEngine`.  The knob is `QarpEngine(structured=)` and
   `Block.statevector(structured=)`; `None` follows `QARP_STRUCTURED` (read once per
@@ -722,16 +724,22 @@ How circuits run.
   trees over its inputs as given and its `build()` builds nothing, so the engine sees each
   circuit unbuilt; `QarpEngine` (structured on, no device, a `Consumes.COUNTS` primitive)
   lowers it from its composition — a `structure()` declaration, or the children an unbuilt
-  `CompositeBlock` wires at build, descended recursively with a declaring part lowered from
+  `CompositeBlock` reports it will wire (`unbuilt_children()`), descended recursively with a declaring part lowered from
   its declaration and a plain part built on its own (a composite subclass with its own
   `build_vanilla`, or a declaration inherited by a class that builds differently, is
   plain) — when every `Repeat` is a ladder step
   of one control on |1⟩ over a concrete `U` of at most 12 qubits or a permutation block (its
-  table raised to the count), no part is parametric and a recorded measurement sits only in
-  the last part, with no register minimum; otherwise it builds, flattens, transpiles and
-  plans the built block as above.  A circuit lowered this way has no compiled gate stream
-  (`compiled_circuits` holds an empty list for it); `run`, `EXACT` readout and `batch_run`
-  serve it through its program.  The engine knows
+  table raised to the count), no part is parametric, a recorded measurement sits only in the
+  last part, and no cbit would move (no node sets `target_cbits`, and a part taking its own
+  cbits ends the composition), with no register minimum; otherwise it builds, flattens, transpiles and
+  plans the built block as above.  Each circuit compiles to one `CompiledCircuit` on its
+  primitive (`prim.compiled`): the gate stream, empty for a circuit lowered this way, its
+  program, the simulator width and the routing layout, stamped with the engine settings it
+  was compiled under; `build(rebuild=False)` reuses a primitive's circuits only under an
+  equal stamp.  `QarpEngine` runs a counts circuit through its program, or its gate stream
+  as one `Gates` kernel when the stream needs no trajectory (no noise, no mid-circuit
+  operation), so `run`, `EXACT` readout and `batch_run` bind a parameter set in C++; a
+  circuit with no free symbol is not substituted.  The engine knows
   no algorithm and no block class: `QPE` and `DOSQPE` hand their block to a `Sampler` and
   the ladder is never built, so their build cost does not grow with the ancilla count and
   `block` stays unbuilt on that path; `PauliAveraging` over such a block is planned the

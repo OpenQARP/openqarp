@@ -140,7 +140,7 @@ def plan_structure(block, n_qubits: int, fusion_width: Optional[int] = None) -> 
 # qarp/engines/_qarp_engine.py
 def _compile_one(self, block, prim) -> _Compiled:
     # plan_structure(block) -> program (cached by digest of the lowered stream);
-    # else block.build(), flatten, transpile, _plan_one as today
+    # else block.build(), flatten, transpile, _plan_built as today
 
 # removed: Engine.prepare_structured, StructuredRun, QPE._structured_run, QPE.block = None
 ```
@@ -151,7 +151,7 @@ def _compile_one(self, block, prim) -> _Compiled:
 |---|---|---|
 | `qarp.algorithms.Target is qarp._types.Target` | identity | `tests/test_engines/test_layering.py` |
 | Every primitive's `circuits()` leaves its inputs unbuilt; once the engine builds them the estimates are unchanged | the primitives' existing analytic oracles (expectation values, overlaps, phases) | `tests/test_algorithms/test_primitives/` |
-| `plan_structure` on an unbuilt composite with a declaring child lowers the child without building it | `unitary_matrix()` of a separately built copy | `tests/test_blocks/test_structure.py` |
+| `plan_structure` on an unbuilt composite with a declaring child lowers the child without building it | `unitary_matrix()` of a separately built copy | `tests/test_blocks/test_structure.py`, `test_unbuilt_planning.py` |
 | `engine.build([Sampler(ket=QPEBlock)])` never builds the ladder: `block.is_built` is False and build time is flat in the ancilla count (10, 12, 14 ancillas under 50 ms each) | analytic phase 3/8 from `P(2π·3/8)`; timing bound | `tests/test_algorithms/test_composite/test_qpe.py` |
 | `engine.run()` and `batch_run` serve a planned QPE and DOSQPE | analytic phase; the Dicke sector DOS (1/4 and 1/2 at half weight) | `test_qpe.py`, `test_dos_qpe.py` |
 | `PauliAveraging` over a declaring block is planned (`controlled_powers` in the program) and its expectation matches `StateVector` | `StateVector` (amplitude path, never planned) | `tests/test_engines/test_structured_execution.py` |
@@ -169,10 +169,10 @@ def _compile_one(self, block, prim) -> _Compiled:
 ### Phase 2 — Lazy circuits
 
 - [x] `PrimitiveAlgorithm.circuits()`; every primitive derives from unbuilt inputs; `build()` builds nothing *(2026-10-09)*
-- [x] `plan_structure` descends an unbuilt composite's constructor list *(2026-10-09)*
-- [x] `Engine.build()` plans before building; programs cached on the engine path *(2026-10-09)*
-- [x] `prepare_structured`, `StructuredRun` and the QPE/DOSQPE special case removed; §14 rewritten *(2026-10-09)*
-- [x] Tests per the table; the structured-execution notebook shows the pipeline without the hook *(2026-10-09)*
+- [x] `plan_structure` descends an unbuilt composite's constructor list *(2026-10-14)*
+- [x] `Engine.build()` plans before building; programs cached on the engine path *(2026-10-14)*
+- [x] `prepare_structured`, `StructuredRun` and the QPE/DOSQPE special case removed; §14 rewritten *(2026-10-14)*
+- [x] Tests per the table; the structured-execution notebook shows the pipeline without the hook *(2026-10-14)*
 
 ## Decisions (green-light, 2026-10-09)
 
@@ -204,34 +204,85 @@ def _compile_one(self, block, prim) -> _Compiled:
 - **Programs of the built path are cached on the engine** by `(stream digest, width, fusion
   width, level)`, bounded to 64 entries; the unbuilt path is not cached, having no stream to
   digest and costing milliseconds.
-- **`QarpEngine.batch_run` evaluates each parameter set as `run()` does**: `program_run`
-  where a circuit has a program, `run` otherwise, set 0 on `run()`'s seeds and each later set
-  stepping every circuit's seed by its index.  `QarpEngine` does not call the C++
-  `sim.batch_run` sweep: it loops over the sets with no work shared between them, and the
-  Python loop measured within 1–5% of it (about 30% on circuits of a few qubits and
-  thousands of gates, under a millisecond per set) with bit-identical counts.  A finite-shot
+- **`QarpEngine.batch_run` evaluates each parameter set as `run()` does**, set 0 on `run()`'s
+  seeds and each later set stepping every circuit's seed by its index.  `QarpEngine` does not
+  call the C++ `sim.batch_run` sweep, which loops over the sets with no work shared between
+  them.  A counts circuit runs as a `qx.Program`: its planned program, or its gate stream as
+  one gates kernel when the stream has no mid-circuit operation and no noise model is
+  active, so a parameter set is bound in C++ (`Program.substituted`) rather than through one
+  Python command per gate; a noisy or mid-circuit stream runs `sim.run`.  A circuit with no
+  free symbol is not substituted at all.  Measured as whole `batch_run` sweeps against the C++
+  sweep, this runs 8–10% faster on 2–4 qubits and 3750–7000 gates and level on 10 qubits
+  and 270 gates, with counts identical to `sim.run` on every set; looping over
+  `substitute_all` and `sim.run` instead ran 32–36% slower on the same circuits here, and
+  65–85% slower in review.  A finite-shot
   sweep therefore runs a planned circuit's kernels, built or lowered, and accepts a
-  `Sampler`'s `initial_state`.  `compiled_circuits` holds an empty list for a lowered circuit.
+  `Sampler`'s `initial_state`.
+- **A compiled circuit is one record on its primitive.**  `prim.compiled` holds a
+  `CompiledCircuit` per circuit: the transpiled stream (empty for a lowered circuit), its
+  planned program or None, the simulator width, the routing layout, whether the stream has
+  free symbols or a mid-circuit operation, and the stamp of the engine settings it was
+  compiled under (engine class, device, optimisation level, structured execution).
+  `build(rebuild=False)` reuses a primitive's records only when every stamp matches this
+  engine and compiles it afresh otherwise, so a lowered circuit's program travels with its
+  primitive and no engine keeps per-build programs or layouts.  `compiled_circuits` and
+  `_n_qubits_list` are read-only views of the records, which the engine alone writes; the
+  engine hooks take records (`_sweep`, `_dispatch_one`, `_pre_dispatch_check`), so the
+  `l2p` lists they took are gone.  Parameter shift replaces the stream of each circuit it
+  rewrites and keeps every other record as compiled.
 - **`Runnable.target` is typed `Target`**, not `Any`: the type is importable below the layer
   line now.
-- **`plan_structure` reads an unbuilt `CompositeBlock` through its `blocks` list** (the
-  constructor list it wires at build) and composes placements through nested frames with
-  `Command.remap_qubits`; a block whose children are not readable before build (a composite
-  subclass populating itself in `build_vanilla`) is a plain part, built on its own.  A
-  composite is descended only when its class builds as `CompositeBlock` does, and an unbuilt
+- **`plan_structure` reads an unbuilt `CompositeBlock` through `unbuilt_children()`**, the
+  list `build()` will wire, which the block reports itself, so `qarp._program` imports no
+  block class; it composes placements through nested frames with `Command.remap_qubits`.  A
+  block whose children are not readable before build (a composite subclass populating itself
+  in `build_vanilla`, for which `unbuilt_children()` is None) is a plain part, built on its
+  own.  A composite is descended only when its class builds as `CompositeBlock` does, and an unbuilt
   declaration is read only from a class that also defines `build_vanilla`: a subclass that
   builds differently under an inherited `structure()` is a plain part too.  A built block,
   declaring or not, is planned from its tree with its declaration checked by digest.
 - **No lint gate on comparing a `Target` by name.**  The test row asked for one; the engines
   now compare by identity, and a standing "must not appear" test is not kept after a
-  one-time change.  The identity of the two `Target` imports is still tested.
+  one-time change.  The identity of the two `Target` imports is still tested, and Phase 1's
+  first box names that test where it named the gate.
 - **`MirrorTest` accepts an input narrower than the working register**, placed on its low
   qubits; the built composition placed every input on the full register and refused one.
 - **`batch_run` steps seeds as `run()` does**: an `EXACT` readout draws none, so a
   finite-shot primitive after it samples the same tape in both calls.
 - **`Engine.kernels(primitive)` is public**, beside `Block.kernels()`: the kernels `run()`
-  and `batch_run` execute for each circuit of a primitive the last `build()` built, None for
-  a gate-path circuit, `RuntimeError` for any other primitive.  Whether a block handed over
-  unbuilt was lowered could be read only from the engine's private programs; the tests read
-  the accessor, and §14, the configuration page and the notebook name it.
+  and `batch_run` execute for each circuit of a primitive compiled under this engine's
+  settings, `["gates"]` where the gate stream runs, `RuntimeError` for a primitive compiled
+  under other settings or not at all.  Whether a block handed over unbuilt was lowered could
+  otherwise be read only from private state; the tests read the accessor, and §14, the
+  configuration page and the notebook name it.
 - **The built-block hook is `_plan_built`**, not `_plan_one`, paired with `_plan_unbuilt`.
+- **The unbuilt path declines a composition whose cbits would move.**  An unbuilt part's
+  commands carry its own cbits, while the built stream relabels them by a node's
+  `target_cbits` and stacks each part's cbits after the earlier parts'.  `plan_structure`
+  therefore returns None when any node of the composition sets `target_cbits`, or when a part
+  taking sequential cbits (`n_cbits > 0`, no `target_cbits`) is followed by another; only a
+  cbit owner ending the composition is planned.  The circuit is then built and planned from
+  its gates.
+- **Planning sits in `Engine.build`, not in `QarpEngine._compile_one`.**  The base build asks
+  the `_plan_unbuilt` hook before building a circuit and `_plan_built` after compiling it;
+  `_compile_one` only transpiles and routes, as before.  A future planning engine overrides
+  the two hooks.
+- **`accepts_initial_state` and `requires_noiseless` stay off `Runnable`.**  The engines read
+  them with `getattr` and a default, so a runnable that does not define them is refused
+  `initial_state` and runs on a noisy engine, as before.
+- **`PauliAveraging` over a QPE block skips the ladder only with `measure=False`.**  With the
+  block's own readout, its measurements sit before the basis change, outside the last part,
+  so planning declines and the block is built.
+- **The QPE build-time bound is 0.5 s**, not 50 ms per case.  The row's oracle is that the
+  ladder stays unbuilt (`is_built`), and a 50 ms wall-clock bound fails on a loaded runner.
+- **§14 gained more than the two edits named.**  Besides the `prepare_structured` paragraph
+  and the `samples_block` wording: `batch_run` among the planned paths and its per-set
+  seeds (scoped to `QarpEngine`), `Engine.kernels`, the rules for reading an unbuilt
+  composition, and the `CompiledCircuit` record.  Each follows an entry above.
+- **Files outside the Scope.**  `CHANGELOG.md`, `docs/contributions/to_do.md`,
+  `docs/source/configuration.rst`, `errors.rst` and `tutorial.rst`,
+  `examples/tutorial_03_engines.ipynb`, `qarp/algorithms/_composite/projected_vqe.py`, and the
+  tests in `tests/test_blocks/test_unbuilt_planning.py` and `tests/test_engines/`
+  (`test_compiled_circuits.py`, `test_initial_state_engine.py`,
+  `test_seed_decorrelation.py`, `test_gradient_registry.py`, `test_cudaq_engine.py`) and
+  `tests/conftest.py`: each documents, follows or tests an entry above.

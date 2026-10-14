@@ -98,6 +98,14 @@ class CompositeBlock(CompositeBlockBase):
             self.add_wired_child(block)
         self._n_wired = len(self.blocks)
 
+    def unbuilt_children(self) -> Optional[List[qx.Block]]:
+        """The children ``build()`` will wire, in order, readable before
+        the block is built; None from a subclass that builds differently,
+        whose stream cannot be read from its list."""
+        if type(self).build_vanilla is not CompositeBlock.build_vanilla:
+            return None
+        return list(self.blocks)
+
     def _post_build_check(self) -> None:
         # A subclass's own build_vanilla never wires the queue add_child fills,
         # which would leave the block built and empty.
