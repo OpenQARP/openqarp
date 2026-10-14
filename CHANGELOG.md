@@ -64,6 +64,15 @@ All notable changes to OpenQARP are recorded here. The format follows
 - The default thread count under OpenMP binding (`OMP_PROC_BIND`,
   `OMP_PLACES`) counts the CPUs of all the places; the bound main thread's
   own place gave a count of 1.
+- `HaarRandomBlock.depth()` returns the circuit depth; the block's layer
+  count, which hid the method, is `n_layers`.  The `depth=` constructor
+  argument is unchanged.
+- A `CompositeBlock` subclass that calls `add_child` from its own
+  `build_vanilla` raises `TypeError` at build; it built an empty block.
+  Such a block extends `CompositeBlockBase`.
+- `RotosolveOptimizer` reports `nit` as the number of iterations run; it
+  was one short.
+- The `FH_ham_and_wf` docs say it builds UCCSD; they said doubles only.
 
 ## [0.1.1] - 2026-09-25
 

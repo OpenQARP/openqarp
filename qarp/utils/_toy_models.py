@@ -9,7 +9,7 @@ from qarp.operators.models import fermi_hubbard
 from qarp.operators.ucc import ucc_singles_and_doubles
 
 
-# Get Fermi-Hubbard Hamiltonian and Trotter wavefunction (only excitation doubles)
+# Get Fermi-Hubbard Hamiltonian and Trotter wavefunction (generalised singles and doubles)
 def FH_ham_and_wf(n: int, t: float = 1.4, U: float = 2.31):
     basis_state = [1] * n + [0] * n
     n_qubits = n * 2
