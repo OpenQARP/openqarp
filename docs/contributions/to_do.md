@@ -86,6 +86,13 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   at 12 threads is slow on its own.  Repeat the Threads measurements of
   `openblas_thread_sharing_plan.md` on bare-metal Linux and revisit the
   default from them.
+- **`check_untyped_defs` for `tests/`.**  `compiled_backend_stubs_plan.md`
+  turns it on for `qarp/` only, so unannotated test bodies, which is nearly
+  every test, are still unchecked.  With the stubs in place at `2167d69` it
+  reported 1832 errors in 202 test files; many share causes that plan removes
+  (`build()`'s return value, floats passed as `Param`, `is_built` read
+  without calling it), so measure again once it lands.  It touches nearly
+  every test file, so it gets its own plan, after the layout move.
 - **`Sampler(postselect=PostSelection(...))`.**  Applying post-selection
   inside `Sampler.run()` waited on a result type that could carry
   `success_rate` without breaking the dict return; `SamplingDistribution`
