@@ -6,8 +6,9 @@ that surface as an ABC, plus the helpers all engines share (parameter
 coercion, observable conversion).  Gradient methods live in ``_gradients``;
 ``run_gradient`` below is the template that dispatches to them.
 
-Primitives build ``Block`` objects and submit them via
-``build()`` / ``run()`` / ``batch_run()``.
+Primitives hand the engine unbuilt circuit trees from ``circuits()``;
+``build()`` plans or compiles each into a ``CompiledCircuit`` record, and
+``run()`` / ``batch_run()`` execute the records.
 """
 
 import warnings
@@ -540,11 +541,11 @@ class Engine(ABC):
         of ``primitive``, as :meth:`Block.kernels` lists them for one block:
         one list per circuit, in order, ``["gates"]`` where its gate stream
         runs (§14 *Structured execution*).  ``primitive`` must be compiled
-        under this engine's settings.
+        under this engine's settings; one with no circuits has no kernels.
         """
         stamp = self._compile_stamp()
         compiled = primitive.compiled
-        if not compiled or any(c.stamp != stamp for c in compiled):
+        if any(c.stamp != stamp for c in compiled):
             raise RuntimeError(
                 f"{type(primitive).__name__} has no circuits compiled under this "
                 "engine's settings. Call engine.build() first."

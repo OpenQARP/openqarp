@@ -127,11 +127,14 @@ class QarpEngine(Engine):
     """Pure Python engine wrapping C++ Transpiler + QarpSimulator.
 
     Pipeline:
-        build(primitives)  — calls primitive.build(), flattens, then runs
-                             the device-aware compilation pipeline
-                             (qx.compile_for_device): check_fits → rebase
-                             → route → re-rebase (whichever stages are
-                             configured on the device).
+        build(primitives)  — reads each primitive's circuits; a declared
+                             composition is planned unbuilt, otherwise the
+                             circuit is built, flattened, run through the
+                             device-aware compilation pipeline
+                             (qx.compile_for_device: check_fits → rebase
+                             → route → re-rebase, whichever stages the
+                             device configures) and then planned from its
+                             flat stream.
         run(params)        — dispatches per primitive on ``consumes``:
                              AMPLITUDES → ``primitive.run_from_amplitudes``;
                              COUNTS → csim sampling (an ``ExactResult``
@@ -297,8 +300,16 @@ class QarpEngine(Engine):
 
     def _compile_stamp(self) -> tuple:
         # Held, not its id: the record keeps the device alive, so the stamp
-        # never matches a later device at a reused address.
-        return (type(self), self._device, self._opt_level_number, self._structured)
+        # never matches a later device at a reused address.  The fusion
+        # fields are part of a planned program's identity (_plan_built's key).
+        return (
+            type(self),
+            self._device,
+            self._opt_level_number,
+            self._structured,
+            int(self._sim.fusion_max_qubits),
+            int(self._sim.fusion_min_qubits),
+        )
 
     def _compile_gates(self, cmds: list) -> list:
         """The gate slices of a structured program, at the engine's level."""

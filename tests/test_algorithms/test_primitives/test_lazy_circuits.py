@@ -142,9 +142,21 @@ def _evaluated(name: str):
         # Σ_i |⟨bra_i|ψ_a⟩|²: ⟨ψ_b|ψ_a⟩ and ⟨1,0|ψ_a⟩ = sin(a/2).
         expected = math.cos((a - b) / 2) ** 2 + math.sin(a / 2) ** 2
         return TermwiseSWAPTest(bra=[_ry(b), _x0()], ket=_ry(a)), expected
-    assert name == "GroupedTransitionHadamardTest"
-    prim = GroupedTransitionHadamardTest(bra=_ry(b), ket=_ry(a), operator=QubitOperator("Z0"))
-    return prim, math.cos((a + b) / 2)
+    if name == "GroupedTransitionHadamardTest":
+        prim = GroupedTransitionHadamardTest(bra=_ry(b), ket=_ry(a), operator=QubitOperator("Z0"))
+        return prim, math.cos((a + b) / 2)
+    if name == "InterferometricTest":
+        # The test reads ⟨ψ|U|ψ⟩ against the reference |00⟩, which U must fix:
+        # P(a) does, and ⟨1|P(a)|1⟩ = exp(i a).
+        u = SimpleBlock(2, name="P0")
+        u.p(0, a)
+        interferometric = InterferometricTest(ket=ComputationalBasisStateBlock([1, 0]), operator=u)
+        return interferometric, complex(math.cos(a), math.sin(a))
+    assert name == "BasisRotationAveraging"
+    # One spatial orbital, h = 0.5, (00|00) = 0.2: H = 0.5 (n↑ + n↓) + 0.2 n↑n↓,
+    # and RY(a)|00⟩ occupies spin orbital 0 with probability sin²(a/2).
+    integrals = (np.array([[0.5]]), np.full((1, 1, 1, 1), 0.2))
+    return BasisRotationAveraging(ket=_ry(a), integrals=integrals), 0.5 * math.sin(a / 2) ** 2
 
 
 @pytest.mark.parametrize(
@@ -160,6 +172,8 @@ def _evaluated(name: str):
         "TermwiseHadamardTest",
         "TermwiseSWAPTest",
         "GroupedTransitionHadamardTest",
+        "InterferometricTest",
+        "BasisRotationAveraging",
     ],
 )
 def test_the_engine_builds_what_the_primitive_left_unbuilt(name):

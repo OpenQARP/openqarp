@@ -1224,8 +1224,7 @@ def test_engine_kernels_lists_each_circuit_compiled_under_its_settings():
     ket = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False)
     averaging = PauliAveraging(ket=ket, operator=QubitOperator("Z0") + QubitOperator("X0"))
     small = Sampler(HnBlock(3), n_shots=qarp.EXACT)
-    with pytest.raises(RuntimeError, match="Call engine.build"):
-        engine.kernels(averaging)
+    assert engine.kernels(averaging) == []
     engine.build([averaging, small])
     assert engine.kernels(averaging) == [["gates", "controlled_powers", "gates"]] * 2
     assert averaging.compiled_circuits == [[], []] and not ket.is_built

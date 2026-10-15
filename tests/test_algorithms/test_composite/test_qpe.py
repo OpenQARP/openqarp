@@ -1,5 +1,3 @@
-import time
-
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -114,18 +112,16 @@ def _phase_of(dist, n_ancilla: int) -> float:
 @pytest.mark.parametrize("n_ancilla", [10, 12, 14])
 def test_engine_build_of_a_declared_qpe_block_never_builds_the_ladder(n_ancilla):
     """The gate path builds 2**n_ancilla - 1 copies of U (seconds at 14);
-    the engine plans the declaration instead, flat in the ancilla count, and
-    reads φ = 3/8 exactly (analytic)."""
+    the engine plans the declaration instead, so the ladder is one kernel
+    whatever the ancilla count, and reads φ = 3/8 exactly (analytic)."""
     import qarp
 
     engine = QarpEngine(n_shots=qarp.EXACT)
     block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), n_ancilla, 1)
     sampler = Sampler(block, measured_qubits=list(range(n_ancilla)))
-    start = time.perf_counter()
     engine.build([sampler])
-    elapsed = time.perf_counter() - start
     assert not block.is_built
-    assert elapsed < 0.5
+    assert engine.kernels(sampler)[0].count("controlled_powers") == 1
     assert _phase_of(engine.run()[0], n_ancilla) == 0.375
 
 

@@ -10,11 +10,12 @@ import pytest
 import qarp
 import qarpx as qx
 from qarp import SamplingDistribution, _program
-from qarp.algorithms import Sampler
+from qarp.algorithms import PauliAveraging, Sampler
 from qarp.blocks import CompositeBlock, ControlledBlock, SimpleBlock
 from qarp.devices import Device, get_nearest_neighbour_architecture
 from qarp.engines import QarpEngine
 from qarp.engines._engine import CompiledCircuit
+from qarp.operators import QubitOperator
 
 
 class _U(SimpleBlock):
@@ -99,6 +100,18 @@ def test_rebuild_false_under_other_settings_compiles_afresh():
     _assert_same_distribution(got, _reference())
     with pytest.raises(RuntimeError, match="compiled under this engine's settings"):
         planned.kernels(s)
+
+
+def test_kernels_of_a_primitive_with_no_circuits_is_empty():
+    # A constant operator needs no circuit: the build succeeds with none,
+    # and the kernel listing is empty rather than "call build() first".
+    ket = SimpleBlock(1)
+    ket.x(0)
+    constant = PauliAveraging(ket=ket, operator=QubitOperator("", 1.5))
+    eng = QarpEngine(n_shots=qarp.EXACT)
+    eng.build([constant])
+    assert eng.kernels(constant) == []
+    assert eng.run()[0] == pytest.approx(1.5)
 
 
 def test_rebuild_false_never_runs_a_routed_stream_without_its_layout():

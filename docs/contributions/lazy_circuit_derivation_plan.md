@@ -152,7 +152,7 @@ def _compile_one(self, block, prim) -> _Compiled:
 | `qarp.algorithms.Target is qarp._types.Target` | identity | `tests/test_engines/test_layering.py` |
 | Every primitive's `circuits()` leaves its inputs unbuilt; once the engine builds them the estimates are unchanged | the primitives' existing analytic oracles (expectation values, overlaps, phases) | `tests/test_algorithms/test_primitives/` |
 | `plan_structure` on an unbuilt composite with a declaring child lowers the child without building it | `unitary_matrix()` of a separately built copy | `tests/test_blocks/test_structure.py`, `test_unbuilt_planning.py` |
-| `engine.build([Sampler(ket=QPEBlock)])` never builds the ladder: `block.is_built` is False and build time is flat in the ancilla count (10, 12, 14 ancillas under 50 ms each) | analytic phase 3/8 from `P(2π·3/8)`; timing bound | `tests/test_algorithms/test_composite/test_qpe.py` |
+| `engine.build([Sampler(ket=QPEBlock)])` never builds the ladder: `block.is_built` is False and the ladder is one `controlled_powers` kernel at 10, 12 and 14 ancillas | analytic phase 3/8 from `P(2π·3/8)`; `Engine.kernels` listing | `tests/test_algorithms/test_composite/test_qpe.py` |
 | `engine.run()` and `batch_run` serve a planned QPE and DOSQPE | analytic phase; the Dicke sector DOS (1/4 and 1/2 at half weight) | `test_qpe.py`, `test_dos_qpe.py` |
 | `PauliAveraging` over a declaring block is planned (`controlled_powers` in the program) and its expectation matches `StateVector` | `StateVector` (amplitude path, never planned) | `tests/test_engines/test_structured_execution.py` |
 | A second `engine.build()` of the same circuit does not re-plan | planner call-count spy | `tests/test_engines/test_structured_execution.py` |
@@ -252,7 +252,9 @@ def _compile_one(self, block, prim) -> _Compiled:
 - **`Engine.kernels(primitive)` is public**, beside `Block.kernels()`: the kernels `run()`
   and `batch_run` execute for each circuit of a primitive compiled under this engine's
   settings, `["gates"]` where the gate stream runs, `RuntimeError` for a primitive compiled
-  under other settings or not at all.  Whether a block handed over unbuilt was lowered could
+  under other settings, and an empty list for one with no circuits, built or not (the engine
+  cannot tell a constant operator from a primitive it never built, and neither has a kernel).
+  Whether a block handed over unbuilt was lowered could
   otherwise be read only from private state; the tests read the accessor, and §14, the
   configuration page and the notebook name it.
 - **The built-block hook is `_plan_built`**, not `_plan_one`, paired with `_plan_unbuilt`.
@@ -273,8 +275,9 @@ def _compile_one(self, block, prim) -> _Compiled:
 - **`PauliAveraging` over a QPE block skips the ladder only with `measure=False`.**  With the
   block's own readout, its measurements sit before the basis change, outside the last part,
   so planning declines and the block is built.
-- **The QPE build-time bound is 0.5 s**, not 50 ms per case.  The row's oracle is that the
-  ladder stays unbuilt (`is_built`), and a 50 ms wall-clock bound fails on a loaded runner.
+- **No QPE build-time bound.**  The row asked for 50 ms per case; a wall-clock bound fails
+  on a loaded runner and never shows flatness.  The row's oracle is that the ladder stays
+  unbuilt (`is_built`) and runs as one `controlled_powers` kernel at every ancilla count.
 - **§14 gained more than the two edits named.**  Besides the `prepare_structured` paragraph
   and the `samples_block` wording: `batch_run` among the planned paths and its per-set
   seeds (scoped to `QarpEngine`), `Engine.kernels`, the rules for reading an unbuilt
