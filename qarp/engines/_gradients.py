@@ -9,12 +9,13 @@ fixed coefficients, so parameter shift, finite differences and SPSA share
 one batched evaluation path.
 
 Layering: this module sees primitives only through the ``Runnable`` protocol
-(``target.name`` matched by string, ``gradient_kind`` read as a plain
-attribute) — never ``qarp.algorithms``.
+(``target`` compared by identity against ``qarp._types.Target``,
+``gradient_kind`` read as a plain attribute) — never ``qarp.algorithms``.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
 
 import numpy as np
@@ -22,6 +23,7 @@ import numpy as np
 import qarpx as qx
 from qarp.operators import QubitOperator
 
+from .._types import Target
 from ..errors import CapabilityError
 from ._engine import _coerce_params, _operator_n_qubits, _qubit_operator_to_observable
 
@@ -73,10 +75,10 @@ def adjoint_eligible(prim) -> bool:
     """The C++ adjoint differentiates ⟨ψ|H|ψ⟩ over a QubitOperator and |⟨bra|ket⟩|²."""
     if not getattr(prim, "supports_backprop_gradient", False):
         return False
-    target = getattr(getattr(prim, "target", None), "name", None)
-    if target == "EXPECTATION_VALUE":
+    target = getattr(prim, "target", None)
+    if target is Target.EXPECTATION_VALUE:
         return isinstance(prim.operator, QubitOperator)
-    return target == "OVERLAP"
+    return target is Target.OVERLAP
 
 
 def resolve_method(engine, prim, method: str) -> str:
@@ -112,10 +114,10 @@ def _validate_options(method: str, options: Mapping) -> None:
 
 def _complex_output(prim) -> bool:
     """dtype by *target*, never by the numeric type of one evaluation."""
-    target = getattr(getattr(prim, "target", None), "name", None)
-    if target == "TRANSITION_AMPLITUDE":
+    target = getattr(prim, "target", None)
+    if target is Target.TRANSITION_AMPLITUDE:
         return True
-    if target == "EXPECTATION_VALUE" and isinstance(getattr(prim, "operator", None), qx.Block):
+    if target is Target.EXPECTATION_VALUE and isinstance(getattr(prim, "operator", None), qx.Block):
         return True
     return getattr(prim, "expectation_type", "real") == "complex"
 
@@ -144,9 +146,9 @@ def compute_gradients(
 
     engine._pre_run()
     prims = list(engine._primitives)
-    for prim, l2p_list in zip(prims, engine._l2p_per_primitive, strict=True):
+    for prim in prims:
         engine._validate_primitive(prim)
-        engine._pre_dispatch_check(prim, l2p_list)
+        engine._pre_dispatch_check(prim)
     resolved = [engine.resolve_gradient_method(prim, method) for prim in prims]
 
     grads: list[np.ndarray] = [
@@ -165,11 +167,8 @@ def compute_gradients(
         assert len(methods) == 1, methods  # one requested method; only "default" branches
         rest_method = methods.pop()
         rest_prims = [prims[i] for i in rest]
-        rest_l2p = [engine._l2p_per_primitive[i] for i in rest]
         if rest_method == "parameter-shift":
-            out = parameter_shift_gradients(
-                engine, rest_prims, rest, rest_l2p, params, symbol_names
-            )
+            out = parameter_shift_gradients(engine, rest_prims, rest, params, symbol_names)
         else:
             stencil_fns: dict[str, Callable[..., list[list[Stencil]]]] = {
                 "finite-diff": finite_difference_stencils,
@@ -177,12 +176,7 @@ def compute_gradients(
             }
             stencils = stencil_fns[rest_method](engine, rest_prims, params, symbol_names, **opts)
             out = evaluate_stencils(
-                engine,
-                rest_prims,
-                [p.compiled_circuits for p in rest_prims],
-                rest_l2p,
-                params,
-                stencils,
+                engine, rest_prims, [p.compiled for p in rest_prims], params, stencils
             )
         for i, g in zip(rest, out, strict=True):
             grads[i] = g
@@ -195,8 +189,7 @@ def compute_gradients(
 def evaluate_stencils(
     engine,
     prims: Sequence,
-    circuits_per_prim: Sequence[list],
-    l2p_per_prim: Sequence,
+    compiled_per_prim: Sequence[Sequence],
     base: Mapping[str, float],
     stencils_per_prim: Sequence[Sequence[Stencil]],
 ) -> list[np.ndarray]:
@@ -220,7 +213,7 @@ def evaluate_stencils(
         [[(point_of(off), coeff) for off, coeff in stencil] for stencil in prim_stencils]
         for prim_stencils in stencils_per_prim
     ]
-    values = engine._sweep(prims, circuits_per_prim, l2p_per_prim, points, None) if points else []
+    values = engine._sweep(prims, compiled_per_prim, points, None) if points else []
 
     out: list[np.ndarray] = []
     for j, prim in enumerate(prims):
@@ -332,10 +325,15 @@ class ShiftPlan:
         # bound at the base point, never shifted.
         self._inert: list[tuple[str, str]] = []
         self.circuits: list[list] = []
-        for ci, cmds in enumerate(prim.compiled_circuits):
-            current = rebase_differentiable(cmds)
+        # prim.compiled with each rewritten stream replaced; a circuit no
+        # tracked symbol appears in keeps its record, program included.
+        self.compiled: list = []
+        for ci, compiled in enumerate(prim.compiled):
+            current = rebase_differentiable(compiled.commands)
+            rewritten = False
             for sym in symbol_names:
                 current, renamed = qx.rename_symbol_occurrences(current, sym, f"{sym}\0{ci}\0")
+                rewritten = rewritten or bool(renamed)
                 for cmd_idx, param_idx, name in renamed:
                     coeffs = qx.affine_coefficients(current[cmd_idx].params[param_idx])
                     if coeffs[name] == 0.0:
@@ -345,6 +343,11 @@ class ShiftPlan:
                         Occurrence(ci, cmd_idx, param_idx, sym, coeffs[name], name)
                     )
             self.circuits.append(current)
+            self.compiled.append(
+                replace(compiled, commands=current, program=None, parametric=None)
+                if rewritten
+                else compiled
+            )
 
     def base_point(self, params: Mapping[str, float]) -> dict[str, float]:
         base = dict(params)
@@ -403,7 +406,7 @@ def _shift_plan(engine, prim, prim_idx: int, symbol_names: Sequence[str]) -> Shi
 
 
 def parameter_shift_gradients(
-    engine, prims, prim_indices, l2p_per_prim, params, symbol_names
+    engine, prims, prim_indices, params, symbol_names
 ) -> list[np.ndarray]:
     """Per-occurrence batched shift: every occurrence of every symbol is
     shifted on its own (2 or 4 points), all points go through one ``_sweep``
@@ -416,9 +419,7 @@ def parameter_shift_gradients(
     for plan in plans:
         base.update(plan.base_point(params))
     stencils = [[plan.stencil(sym) for sym in symbol_names] for plan in plans]
-    return evaluate_stencils(
-        engine, prims, [plan.circuits for plan in plans], l2p_per_prim, base, stencils
-    )
+    return evaluate_stencils(engine, prims, [plan.compiled for plan in plans], base, stencils)
 
 
 # ── finite differences / SPSA (the optimizer helpers' formulas, batched) ──
@@ -508,20 +509,20 @@ def adjoint_gradients(sim, prims, params: Mapping[str, float], symbol_names: lis
         psi0 = prim.initial_state
         if psi0 is not None:
             psi0 = np.ascontiguousarray(psi0, dtype=np.complex128)
-        circuits = [rebase_differentiable(c) for c in prim.compiled_circuits]
-        if prim.target.name == "EXPECTATION_VALUE":
+        circuits = [rebase_differentiable(c.commands) for c in prim.compiled]
+        if prim.target is Target.EXPECTATION_VALUE:
             if circuits:
                 cmds = circuits[0]
                 # Pad to the operator width — an observable may act on more
                 # qubits than the circuit (idle qubits stay |0>).
-                n_q = max(prim._n_qubits_list[0], _operator_n_qubits(prim.operator))
+                n_q = max(prim.compiled[0].n_qubits, _operator_n_qubits(prim.operator))
                 obs = _qubit_operator_to_observable(prim.operator, n_q)
                 grad = np.array(
                     sim.run_gradient(cmds, n_q, obs, params, symbol_names, initial_state=psi0)
                 )
         elif len(circuits) >= 2:  # OVERLAP
             ket_cmds, bra_cmds = circuits[0], circuits[1]
-            n_q = prim._n_qubits_list[0]
+            n_q = prim.compiled[0].n_qubits
             ket_sub = qx.substitute_all(ket_cmds, params) if params else ket_cmds
             bra_sub = qx.substitute_all(bra_cmds, params) if params else bra_cmds
             # initial_state seeds the ket side only — bra stays |0…0⟩-rooted,

@@ -18,8 +18,10 @@ All notable changes to OpenQARP are recorded here. The format follows
   permutation with `classical_action` (`ModularMultiplicationBlock` does)
   or its composition with `structure()` and `qarp.blocks.Repeat`
   (`QPEBlock` and `DOSQPEBlock` do); `Block.kernels()` lists what
-  `statevector` would run.  See §14 of the conventions and the *Structured
-  execution* section of the configuration page.
+  `statevector` would run, and `Engine.kernels(primitive)` what `run()`
+  and `batch_run` execute for each circuit of a built primitive.  See §14 of the
+  conventions and the *Structured execution* section of the configuration
+  page.
 - `optimization_level` on `Block.statevector` and `QarpEngine`: the
   transpiler level applied to the gate slices after planning, or to the
   whole stream on the gate path.
@@ -41,9 +43,28 @@ All notable changes to OpenQARP are recorded here. The format follows
   instead of a `dict`, and `SamplingDictionary` is a read-only `Mapping`
   alias.  `isinstance(result, dict)` and mutating a result no longer work;
   `to_dict()` returns a plain dict.  Keys and probabilities are unchanged.
+- A primitive implements `circuits()`, the block trees it runs over its
+  inputs as given, in place of `build()`; `PrimitiveAlgorithm.build()`
+  builds nothing, and the engine plans a declared structure before building
+  it.  A primitive that populated `sub_blocks` in its own `build()` moves
+  that code to `circuits()`.
 - `QPE` and `DOSQPE` on a `QarpEngine` without a device no longer build
-  their controlled-U ladder; the run goes through one controlled-powers
-  kernel whatever the ancilla count.
+  their controlled-U ladder: the run goes through one controlled-powers
+  kernel whatever the ancilla count and `block` stays unbuilt.  Any
+  primitive over such a block is planned the same way, `PauliAveraging`
+  included.
+- `QarpEngine.batch_run` evaluates each parameter set as `run()` does: a
+  finite-shot sweep runs a planned circuit's kernels instead of its gates,
+  and accepts a `Sampler`'s `initial_state`; it raised before.  Seeded
+  counts of a circuit with no plan are unchanged.
+- `MirrorTest` accepts an input narrower than its working register and
+  places it on the low qubits; it raised before.
+- A primitive keeps its compiled circuits as `CompiledCircuit` records in
+  `prim.compiled`, each stamped with the engine settings it was compiled
+  under; `compiled_circuits` and `_n_qubits_list` are read-only views of
+  them.  `QarpEngine` runs a counts circuit that needs no trajectory as a
+  program and binds each parameter set in C++, which makes a `batch_run`
+  sweep of a narrow, deep circuit about 10% faster.
 - OpenBLAS's thread count in numpy and scipy is lowered to qarp's
   (`QARP_NUM_THREADS`) at the first simulation, so a BLAS call no longer
   leaves a worker spinning on every logical CPU against the next simulator
@@ -61,6 +82,10 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 - `QPEBlock` and `DOSQPEBlock` place a copy of the eigenstate block, so one
   state block can serve two QPE blocks; sharing it corrupted the first.
+- `build(rebuild=False)` and `batch_run(rebuild=False)` reuse a primitive's
+  circuits only when they were compiled under the engine's settings.  Reused
+  on another engine, a routed circuit ran without its layout and returned
+  counts in physical qubit order.
 - The default thread count under OpenMP binding (`OMP_PROC_BIND`,
   `OMP_PLACES`) counts the CPUs of all the places; the bound main thread's
   own place gave a count of 1.

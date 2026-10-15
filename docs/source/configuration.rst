@@ -274,15 +274,38 @@ contract.
 
 ``QARP_STRUCTURED`` sets the process-wide default, read once; ``0``,
 ``false``, ``off`` and ``no`` turn it off.  Engines with a ``device``,
-amplitude-consuming primitives and gradients always run the gate path.
+amplitude-consuming primitives and the circuits a parameter-shift gradient
+rewrites always run the gate path.
 
 A block can also declare how it is composed with ``structure()``: its parts
-in order, where a part is a block or ``Repeat(block, count)``.  The engine
-reads that before the block is built, so ``QPE`` and ``DOSQPE``, whose
-blocks declare their controlled-U ladder, never build the ladder on a
-``QarpEngine`` without a device: their ``block`` stays ``None`` and the run
-goes through one controlled-powers kernel whatever the ancilla count.
+in order, where a part is a block or ``Repeat(block, count)``.  A primitive
+hands its circuits to the engine unbuilt, and the engine plans a
+declaration before building, so ``QPE`` and ``DOSQPE``, whose blocks declare
+their controlled-U ladder, never build the ladder on a ``QarpEngine``
+without a device: their ``block`` stays unbuilt and the run goes through one
+controlled-powers kernel whatever the ancilla count.  The same holds for any
+primitive over such a block, ``PauliAveraging`` included.
 ``QarpEngine(structured=False)`` builds the full circuit instead.
+
+To see what runs, ``block.kernels()`` lists the kernels ``statevector``
+runs on a built block, and ``engine.kernels(primitive)`` lists them for each
+circuit of a primitive after ``engine.build``, with ``['gates']`` for a
+circuit that runs its gate stream:
+
+.. code-block:: python
+
+    import numpy as np
+
+    from qarp.algorithms import Sampler
+    from qarp.blocks import ComputationalBasisStateBlock, QPEBlock, SimpleBlock
+    from qarp.engines import QarpEngine
+
+    u = SimpleBlock(1)
+    u.p(0, 2 * np.pi * 0.375)
+    sampler = Sampler(QPEBlock(ComputationalBasisStateBlock([1]), u, 11, 1))
+    engine = QarpEngine()
+    engine.build([sampler])
+    engine.kernels(sampler)    # [['gates', 'controlled_powers', 'gates']]
 
 MPI
 ===

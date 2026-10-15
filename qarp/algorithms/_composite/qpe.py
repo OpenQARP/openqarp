@@ -45,7 +45,6 @@ class QPE(CompositeAlgorithm):
         self.freqs = [x / (2**self.n_ancilla) for x in range(2 ** (self.n_ancilla))]
 
         self.block = None
-        self._structured_run = None
         self.distribution = None
         self.bitstring = None
         self.result = None
@@ -53,39 +52,25 @@ class QPE(CompositeAlgorithm):
 
     def build(self):
         """
-        Build the Canonical Phase Estimation circuit.
+        Build the Canonical Phase Estimation circuit through the engine.
 
-        The engine is first offered the block's declared structure
-        (``Engine.prepare_structured``, §14 *Structured execution*): an engine
-        that can run it never builds the controlled-U ladder, and ``block``
-        stays None.  Otherwise the full ``QPEBlock`` is built and compiled.
+        ``QPEBlock`` declares its controlled-U ladder (``structure()``), so an
+        engine that plans declarations (§14 *Structured execution*) never
+        builds the ladder and ``block`` stays unbuilt; any other engine
+        builds and compiles it.
 
         Returns:
             self: The instance of the class.
         """
-        # Ensure unitary and state are built so their commands are available.
-        self.unitary.build()
-        self.state.build()
-
-        block = QPEBlock(self.state, self.unitary, self.n_ancilla, self.unitary.n_qubits)
+        self.block = QPEBlock(self.state, self.unitary, self.n_ancilla, self.unitary.n_qubits)
         if isinstance(self.primitive, Sampler) and self.primitive.measured_qubits is None:
             # The block records measurements on the ancilla register only
             # (qubits 0..n_ancilla-1); marginalise the system register out so
             # the phase extraction reads pure ancilla bits — otherwise any
             # eigenstate ≠ |0…0⟩ shifts the result by whole integers.
             self.primitive.measured_qubits = list(range(self.n_ancilla))
-
-        self._structured_run = self.engine.prepare_structured(block, self.primitive)
-        if self._structured_run is not None:
-            self.block = None
-            return self
-
-        self.block = block.build()
         self.primitive.ket = self.block
-        # engine.build() builds the primitive itself — building here too would
-        # compile every circuit twice.
         self.engine.build([self.primitive])
-
         return self
 
     def run(self):
@@ -95,12 +80,9 @@ class QPE(CompositeAlgorithm):
         Returns:
             result: The estimated eigenvalue.
         """
-        if self._structured_run is not None:
-            self.distribution = self._structured_run.sample()
-        else:
-            if self.block is None or not self.block.is_built:
-                raise ValueError("Circuit not built. Call build() before run().")
-            self.distribution = self.engine.run()[0]
+        if self.block is None:
+            raise ValueError("Circuit not built. Call build() before run().")
+        self.distribution = self.engine.run()[0]
 
         self.bitstring = max(self.distribution, key=self.distribution.get)
         self.result_probability = self.distribution[self.bitstring]

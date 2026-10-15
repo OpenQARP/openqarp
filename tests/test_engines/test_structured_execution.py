@@ -3,6 +3,8 @@
 Oracles: ``unitary_matrix()`` (the §14 oracle path, never planned) and the
 analytic images of basis states under permutation blocks."""
 
+from collections import Counter
+
 import numpy as np
 import pytest
 from sympy import Symbol
@@ -13,10 +15,13 @@ from qarp import _program
 from qarp.algorithms import PauliAveraging, Sampler, StateVector
 from qarp.blocks import (
     CompositeBlock,
+    ComputationalBasisStateBlock,
     ConditionalBlock,
     ControlledBlock,
+    HnBlock,
     ModularMultiplicationBlock,
     OrderFindingBlock,
+    QPEBlock,
     ResetBlock,
     SimpleBlock,
 )
@@ -165,7 +170,7 @@ def test_a_reset_or_a_classical_condition_keeps_the_gate_path(tail):
     engine = QarpEngine(seed=5, n_shots=100, structured=True)
     sampler = Sampler(ket)
     engine.build([sampler])
-    assert _programs(engine, sampler) == [None]
+    assert engine.kernels(sampler) == [["gates"]]
     assert sum(engine.run()[0].probabilities) == pytest.approx(1.0)
 
 
@@ -183,10 +188,6 @@ def test_structured_default_follows_the_environment(monkeypatch):
 # ── QarpEngine ──────────────────────────────────────────────────────────────
 
 
-def _programs(engine, prim):
-    return engine._programs[id(prim)]
-
-
 @pytest.mark.parametrize("n_shots", [qarp.EXACT, 256])
 def test_engine_samples_a_permuted_basis_state_deterministically(n_shots):
     n = 12
@@ -198,7 +199,7 @@ def test_engine_samples_a_permuted_basis_state_deterministically(n_shots):
     sampler = Sampler(ket, n_shots=n_shots, initial_state=psi)
     engine = QarpEngine(seed=7, structured=True)
     engine.build([sampler])
-    assert _programs(engine, sampler)[0] is not None
+    assert engine.kernels(sampler)[0] != ["gates"]
     dist = engine.run()[0]
     image = _increment_image(_increment_image(x, qubits), qubits)
     assert dist.outcomes.tolist() == [image]
@@ -214,7 +215,7 @@ def test_engine_exact_distribution_matches_the_unitary():
     engine = QarpEngine(structured=True)
     sampler = Sampler(ket, n_shots=qarp.EXACT)
     engine.build([sampler])
-    assert _programs(engine, sampler)[0] is not None
+    assert engine.kernels(sampler)[0] != ["gates"]
     dist = engine.run()[0]
     small = CompositeBlock(
         [_Rotations(3, target_qubits=[0, 1, 2]), _Increment(6, target_qubits=[0, 1, 2, 3, 4, 5])],
@@ -256,7 +257,7 @@ def test_engine_binds_parameters_into_program_gates():
     engine = QarpEngine(structured=True)
     sampler = Sampler(_bound_ket(theta), n_shots=qarp.EXACT)
     engine.build([sampler])
-    assert "permutation" in _programs(engine, sampler)[0].kinds()
+    assert "permutation" in engine.kernels(sampler)[0]
     for angle in (0.7, 1.9):
         dist = engine.run({theta: angle})[0]
         np.testing.assert_allclose(_dense(dist, 1 << 12)[:32], _born(angle), atol=1e-12)
@@ -268,12 +269,12 @@ def test_batch_run_exact_readout_uses_the_programs():
     sampler = Sampler(_bound_ket(theta), n_shots=qarp.EXACT)
     angles = [0.3, 1.2]
     swept = engine.batch_run([sampler], [{theta: a} for a in angles])
-    assert "permutation" in _programs(engine, sampler)[0].kinds()
+    assert "permutation" in engine.kernels(sampler)[0]
     for angle, results in zip(angles, swept, strict=True):
         np.testing.assert_allclose(_dense(results[0], 1 << 12)[:32], _born(angle), atol=1e-12)
     # rebuild=False keeps the programs of the first build.
     again = engine.batch_run([sampler], [{theta: 0.5}], rebuild=False)
-    assert "permutation" in _programs(engine, sampler)[0].kinds()
+    assert "permutation" in engine.kernels(sampler)[0]
     np.testing.assert_allclose(_dense(again[0][0], 1 << 12)[:32], _born(0.5), atol=1e-12)
 
 
@@ -293,7 +294,7 @@ def test_gradients_through_a_planned_circuit_match_the_analytic_value(method):
     estimator = PauliAveraging(ket=ket, operator=QubitOperator("Z1"), n_shots=qarp.EXACT)
     engine = QarpEngine(structured=True)
     engine.build([estimator])
-    assert any(p is not None for p in _programs(engine, estimator))
+    assert any(k != ["gates"] for k in engine.kernels(estimator))
     phi = 0.8
     assert engine.run({Symbol("phi"): phi})[0] == pytest.approx(np.cos(phi), abs=1e-12)
     grad = engine.run_gradient({Symbol("phi"): phi}, method=method)[0]
@@ -324,11 +325,11 @@ def test_engine_keeps_the_gate_path_with_a_device_or_amplitude_primitive():
     with_device = QarpEngine(device=Device(n), structured=True)
     sampler = Sampler(ket, n_shots=qarp.EXACT)
     with_device.build([sampler])
-    assert _programs(with_device, sampler) == [None]
+    assert with_device.kernels(sampler) == [["gates"]]
     engine = QarpEngine(structured=True)
     amplitudes = StateVector(operator=QubitOperator("Z0"), ket=ket)
     engine.build([amplitudes])
-    assert _programs(engine, amplitudes) == [None]
+    assert engine.kernels(amplitudes) == [["gates"]]
 
 
 class _Collide(SimpleBlock):
@@ -410,10 +411,10 @@ def test_the_engine_plans_at_its_simulator_fusion_width():
     engine = QarpEngine(structured=True)
     sampler = Sampler(_two_qubit_terms(n), n_shots=qarp.EXACT)
     engine.build([sampler])
-    assert _programs(engine, sampler) == [None]
+    assert engine.kernels(sampler) == [["gates"]]
     engine._sim.fusion_max_qubits = 1
     engine.build([sampler])
-    assert set(_programs(engine, sampler)[0].kinds()) == {"dense"}
+    assert set(engine.kernels(sampler)[0]) == {"dense"}
 
 
 def test_order_finding_reads_its_order_through_permutation_kernels():
@@ -447,7 +448,7 @@ def test_a_measurement_reused_in_the_last_kernel_keeps_the_gate_path():
     engine = QarpEngine(seed=3, n_shots=200, structured=True)
     sampler = Sampler(ket)
     engine.build([sampler])
-    assert _programs(engine, sampler) == [None]
+    assert engine.kernels(sampler) == [["gates"]]
     assert sum(engine.run()[0].probabilities) == pytest.approx(1.0)
 
 
@@ -969,7 +970,7 @@ def test_the_engine_runs_its_gate_slices_at_its_optimization_level(level):
     engine._transpiler = _Spy()
     sampler = Sampler(block)
     engine.build([sampler])
-    assert set(_programs(engine, sampler)[0].kinds()) == {"permutation", "gates"}
+    assert set(engine.kernels(sampler)[0]) == {"permutation", "gates"}
     assert seen and all(lvl == _program.opt_level(level) for lvl in seen)
     got = np.zeros(1 << n)
     for bits, p in engine.run()[0].items():
@@ -1185,3 +1186,123 @@ def test_a_child_with_a_pending_substitution_stays_an_opaque_span():
         np.asarray(parent.unitary_matrix()) @ psi,
         atol=1e-12,
     )
+
+
+def _p_u(phi: float = 0.375) -> SimpleBlock:
+    u = SimpleBlock(1, name="U")
+    u.p(0, 2 * np.pi * phi)
+    return u
+
+
+def test_pauli_averaging_over_a_declaring_block_is_planned():
+    """QPE of P(2π·3/8) from |1⟩ leaves the ancilla register in |3⟩ = 011
+    exactly, so ⟨Z0⟩ = −1 and ⟨Z2⟩ = +1 (analytic); the group circuit is
+    planned from the ket's declaration and never builds the ladder.  The
+    amplitude path (never planned) is the additional reference."""
+    operator = QubitOperator("Z0") + 2.0 * QubitOperator("Z2")
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    ket = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False)
+    averaging = PauliAveraging(ket=ket, operator=operator)
+    engine.build([averaging])
+    assert not ket.is_built
+    assert "controlled_powers" in engine.kernels(averaging)[0]
+    assert engine.run()[0] == pytest.approx(1.0, abs=1e-10)
+    exact = StateVector(
+        ket=QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False),
+        operator=operator,
+    )
+    engine.build([exact])
+    assert engine.run()[0] == pytest.approx(1.0, abs=1e-10)
+
+
+def test_engine_kernels_lists_each_circuit_compiled_under_its_settings():
+    """Z0 and X0 measure in two groups, each lowered from the QPE ket's
+    declaration; the ancilla register is |3⟩, so ⟨Z0⟩ + ⟨X0⟩ = −1 + 0
+    (analytic).  The 3-qubit sampler is below the planner minimum.  The
+    circuits live on the primitive, so a later build of others keeps them."""
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    ket = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False)
+    averaging = PauliAveraging(ket=ket, operator=QubitOperator("Z0") + QubitOperator("X0"))
+    small = Sampler(HnBlock(3), n_shots=qarp.EXACT)
+    assert engine.kernels(averaging) == []
+    engine.build([averaging, small])
+    assert engine.kernels(averaging) == [["gates", "controlled_powers", "gates"]] * 2
+    assert averaging.compiled_circuits == [[], []] and not ket.is_built
+    assert engine.kernels(small) == [["gates"]]
+    assert engine.run()[0] == pytest.approx(-1.0, abs=1e-10)
+    engine.build([small])
+    assert engine.kernels(averaging) == [["gates", "controlled_powers", "gates"]] * 2
+    with pytest.raises(RuntimeError, match="compiled under this engine's settings"):
+        QarpEngine(n_shots=qarp.EXACT, structured=False).kernels(averaging)
+
+
+class _CountingSimulator:
+    def __init__(self, sim):
+        self._sim, self.calls = sim, Counter()
+
+    def __getattr__(self, name):
+        self.calls[name] += 1
+        return getattr(self._sim, name)
+
+
+def test_a_finite_shot_sweep_runs_a_built_ladder_through_its_program(monkeypatch):
+    """QPE of P(2π·0.3) on 11 ancillas reads k with P(k) = |Σ_j e^{2πij(φ − k/2¹¹)}|² / 4¹¹
+    (analytic), φ being off the grid; the low three ancillas read k mod 8.  Every set
+    runs the program planned after the build, set 0 on run()'s seeds."""
+    phi, t, shots = 0.3, 11, 20_000
+    block = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(phi), t, 1).build()
+    sampler = Sampler(block, n_shots=shots, measured_qubits=[0, 1, 2])
+    engine = QarpEngine(seed=7)
+    engine.build([sampler])
+    assert "controlled_powers" in engine.kernels(sampler)[0]
+    by_run = dict(engine.run()[0])
+    spy = _CountingSimulator(engine._sim)
+    monkeypatch.setattr(engine, "_sim", spy)
+    sets = engine.batch_run([sampler], [{}] * 3, rebuild=False)
+    assert spy.calls["program_run"] == 3 and spy.calls["run"] == spy.calls["batch_run"] == 0
+
+    k = np.arange(2**t)
+    p_k = np.abs(np.exp(2j * np.pi * np.outer(phi - k / 2**t, k)).sum(axis=1)) ** 2 / 4**t
+    for r in range(8):
+        p = p_k[k % 8 == r].sum()
+        for (dist,) in sets:
+            assert dist.probability_of(r) == pytest.approx(
+                p, abs=5 * np.sqrt(p * (1 - p) / shots) + 1e-12
+            )
+    assert dict(sets[0][0]) == by_run and dict(sets[1][0]) != by_run
+
+
+@pytest.mark.parametrize("method", ["parameter-shift", "finite-diff"])
+def test_gradients_beside_a_lowered_circuit_match_the_analytic_value(method):
+    """A lowered circuit has an empty gate stream and no symbols, so its
+    gradient is 0; Ry(φ) beside it keeps d⟨Z0⟩/dφ = −sin φ (analytic)."""
+    ket = QPEBlock(ComputationalBasisStateBlock([1]), _p_u(), 3, 1, measure=False)
+    lowered = PauliAveraging(ket=ket, operator=QubitOperator("Z0") + 2.0 * QubitOperator("Z2"))
+    rotated = PauliAveraging(
+        ket=CompositeBlock([_Rotate(1, target_qubits=[0])], n_qubits=12),
+        operator=QubitOperator("Z0"),
+    )
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    engine.build([lowered, rotated])
+    assert not ket.is_built and lowered.compiled_circuits == [[]]
+    phi = 0.8
+    assert engine.run({Symbol("phi"): phi}) == pytest.approx([1.0, np.cos(phi)], abs=1e-10)
+    grads = engine.run_gradient({Symbol("phi"): phi}, method=method)
+    assert grads[0][0] == pytest.approx(0.0, abs=1e-10)
+    assert grads[1][0] == pytest.approx(-np.sin(phi), abs=1e-6)
+
+
+def test_a_second_build_of_the_same_circuit_does_not_replan(monkeypatch):
+    calls: list = []
+    real = _program.plan
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_program, "plan", spy)
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    sampler = Sampler(HnBlock(14))
+    engine.build([sampler])
+    engine.build([sampler])
+    assert len(calls) == 1

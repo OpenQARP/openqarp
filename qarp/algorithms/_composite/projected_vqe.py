@@ -215,16 +215,14 @@ class _ProjectedStateVector(StateVector):
         self.last_statevector: Optional[np.ndarray] = None
         self.last_projected_statevector: Optional[np.ndarray] = None
 
-    def build(self) -> "_ProjectedStateVector":
+    def circuits(self) -> list:
         if self.projector_matrix is None or self.hamiltonian_matrix is None:
             raise RuntimeError(
                 "ProjectedVQE.build() must set projector_matrix and hamiltonian_matrix "
                 "on the primitive before the engine build."
             )
         self.target = Target.EXPECTATION_VALUE
-        self.ket.build()
-        self.sub_blocks = [self.ket]
-        return self
+        return [self.ket]
 
     def run_from_amplitudes(self, compiled_circuits: list, simulator=None) -> float:
         assert self.projector_matrix is not None and self.hamiltonian_matrix is not None

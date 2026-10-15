@@ -17,8 +17,8 @@ from qarp.blocks import ComputationalBasisStateBlock
 class _ConcretePrimitive(PrimitiveAlgorithm):
     """Minimal concrete subclass so the ABC can be instantiated."""
 
-    def build(self):
-        return self
+    def circuits(self):
+        return []
 
     def run(self, results):
         pass

@@ -6,7 +6,7 @@ three different state preparations: the bare ``ket``, a GHZ-like
 "real" combination, and a dephased GHZ-like "imaginary" combination.
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
 import qarpx as qx
 
@@ -65,7 +65,6 @@ class InterferometricTest(PrimitiveAlgorithm):
 
         if not isinstance(ket, ComputationalBasisStateBlock):
             raise TypeError("ket must be a ComputationalBasisStateBlock instance")
-        ket.build()
         self.n_qubits = ket.n_qubits
         if ket.basis_state == [0] * self.n_qubits:
             raise ValueError(
@@ -82,36 +81,35 @@ class InterferometricTest(PrimitiveAlgorithm):
             raise TypeError("operator must be a Block instance or None")
 
     def _configure(self, sa: PrimitiveAlgorithm, *, bra: AnyBlock, ket: AnyBlock) -> AnyBlock:
-        """Set up ``sa`` (MirrorTest or SWAPTest) for one sub-block build."""
+        """Set up ``sa`` (MirrorTest or SWAPTest) for one circuit."""
         sa.bra = bra
         sa.operator = self.operator
         sa.ket = ket
         sa.n_shots = self.n_shots
-        sa.build()
-        return sa.sub_blocks[0]
+        return sa.build().sub_blocks[0]
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         self._validate_inputs()
-        self.sub_blocks = []
+        circuits = []
 
         # 1. Reference: bra = ket = ket  (gives ⟨ψ|U|ψ⟩ probability).
-        self.sub_blocks.append(self._configure(self.sampling_algorithm, bra=self.ket, ket=self.ket))
+        circuits.append(self._configure(self.sampling_algorithm, bra=self.ket, ket=self.ket))
 
         ghzlike_real = None
         if self.real:
             ghzlike_real = GHZLikeStateBlock(self.ket.basis_state)
-            self.sub_blocks.append(
+            circuits.append(
                 self._configure(self.sampling_algorithm, bra=ghzlike_real, ket=ghzlike_real)
             )
         if self.imaginary:
             if ghzlike_real is None:
                 ghzlike_real = GHZLikeStateBlock(self.ket.basis_state)
             ghzlike_imag = GHZLikeStateBlock(self.ket.basis_state, dephase=True)
-            self.sub_blocks.append(
+            circuits.append(
                 self._configure(self.sampling_algorithm, bra=ghzlike_imag, ket=ghzlike_real)
             )
 
-        return self
+        return circuits
 
     def run(self, results: list) -> complex:
         idx = 0

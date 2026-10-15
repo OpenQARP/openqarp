@@ -15,9 +15,9 @@ import qarp
 import qarp.blocks as qb
 import qarpx as qx
 from qarp import _program
-from qarp._types import Consumes
-from qarp.algorithms import PauliAveraging, Sampler, StateVector
+from qarp.algorithms import Sampler, StateVector
 from qarp.blocks import (
+    CompositeBlock,
     ComputationalBasisStateBlock,
     ControlledBlock,
     DOSQPEBlock,
@@ -31,7 +31,6 @@ from qarp.blocks import (
 from qarp.devices import Device
 from qarp.engines import QarpEngine
 from qarp.operators import QubitOperator
-from tests.conftest import _StubEngine
 
 
 def _random_state(n: int, seed: int) -> np.ndarray:
@@ -369,51 +368,155 @@ def test_a_repeat_naming_an_unbuilt_block_refuses_the_unbuilt_plan():
     assert _program.plan_structure(_Declares([Repeat(unbuilt, 3)], 5), 5) is None
 
 
-def test_engines_without_the_path_offer_no_structured_run():
-    block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1)
-    assert _StubEngine().prepare_structured(block, Sampler()) is None
-    assert QarpEngine(device=Device(4)).prepare_structured(block, Sampler()) is None
-    assert QarpEngine(structured=False).prepare_structured(block, Sampler()) is None
-    amplitudes = StateVector(operator=QubitOperator("Z0"), ket=block)
-    assert QarpEngine().prepare_structured(block, amplitudes) is None
-    # Counts, but of derived circuits: the run would hand it the bare block.
-    averaging = PauliAveraging(operator=QubitOperator("X0"), n_shots=qarp.EXACT)
-    assert averaging.consumes is Consumes.COUNTS
-    assert QarpEngine().prepare_structured(block, averaging) is None
-    assert QarpEngine().prepare_structured(block, _CountsWithoutTheFlag()) is None
-    assert not block.is_built
+def _raw_x_layer(n: int):
+    block = qx.SimpleBlock(n, "raw")
+    for q in range(n):
+        block.x(q)
+    return block
 
 
-class _CountsWithoutTheFlag:
-    """A runnable from before ``samples_block``: counts, no declaration."""
+def test_an_unbuilt_raw_qx_block_is_read_as_unbuilt():
+    """A raw ``qx.Block`` reports ``is_built`` as a method.  Under a Repeat it
+    refuses the unbuilt plan; as a plain part it is built in place, and X on
+    all 12 qubits sends |0…0⟩ to |1…1⟩ (analytic)."""
+    assert _program.plan_structure(_Declares([Repeat(_raw_x_layer(12), 3)], 12), 12) is None
+    sampler = Sampler(CompositeBlock([_raw_x_layer(12)], n_qubits=12), n_shots=qarp.EXACT)
+    engine = QarpEngine()
+    engine.build([sampler])
+    assert engine.kernels(sampler) == [["permutation"]]
+    assert dict(engine.run()[0]) == {(1,) * 12: 1.0}
 
-    consumes = Consumes.COUNTS
-    n_shots = None
-    initial_state = None
-    supports_exact = True
+
+def test_plan_structure_descends_an_unbuilt_composite():
+    """A declaring child of an unbuilt composite is lowered from its
+    declaration without being built; the plain tail is built on its own.
+    Oracle: ``unitary_matrix()`` of a separately built copy."""
+
+    def tree():
+        qpe = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1, measure=False)
+        return qpe, CompositeBlock([qpe, HnBlock(4)], n_qubits=4)
+
+    qpe, composite = tree()
+    found = _program.plan_structure(composite, 4)
+    assert found is not None and found.kinds().count("controlled_powers") == 1
+    assert not qpe.is_built and not composite.is_built
+    psi = np.asarray(qx.QarpSimulator().program_statevector(found.program(), 4))
+    expected = np.asarray(tree()[1].build().unitary_matrix())[:, 0]
+    np.testing.assert_allclose(psi, expected, atol=1e-10)
 
 
-def test_a_structured_run_samples_the_declared_block():
+def test_engines_without_the_path_build_the_block():
+    def builds(engine, prim):
+        engine.build([prim])
+        return prim.sub_blocks[0].is_built and engine.kernels(prim) == [["gates"]]
+
+    for engine in (QarpEngine(device=Device(4)), QarpEngine(structured=False)):
+        block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1)
+        assert builds(engine, Sampler(block))
+    block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1, measure=False)
+    assert builds(QarpEngine(), StateVector(operator=QubitOperator("Z0"), ket=block))
+
+
+def test_the_engine_samples_a_declared_block_without_building_it():
     # QPE on P(2πφ) from |1⟩ reads φ = 3/8 exactly (analytic), below the
     # planner's register minimum and without building the block.
     block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1)
-    sampler = Sampler(n_shots=qarp.EXACT, measured_qubits=[0, 1, 2])
-    run = QarpEngine().prepare_structured(block, sampler)
-    assert run is not None and not block.is_built
-    dist = run.sample()
+    sampler = Sampler(block, n_shots=qarp.EXACT, measured_qubits=[0, 1, 2])
+    engine = QarpEngine()
+    engine.build([sampler])
+    assert not block.is_built
+    assert engine.kernels(sampler)[0].count("controlled_powers") == 1
+    dist = engine.run()[0]
     assert dict(dist) == pytest.approx({(1, 1, 0): 1.0}, abs=1e-10)
     assert sampler.result is dist
 
     # The primitive marginalises as on the ordinary path: no measured_qubits
-    # on an unbuilt sampler reads the whole register.
-    whole = Sampler(n_shots=qarp.EXACT)
-    dist = QarpEngine().prepare_structured(block, whole).sample()
-    assert dict(dist) == pytest.approx({(1, 1, 0, 1): 1.0}, abs=1e-10)
+    # on a sampler reads the whole register.
+    whole = Sampler(
+        QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1), n_shots=qarp.EXACT
+    )
+    engine.build([whole])
+    assert dict(engine.run()[0]) == pytest.approx({(1, 1, 0, 1): 1.0}, abs=1e-10)
 
 
 def test_a_built_declaring_block_through_a_primitive_plans_its_ladder():
     engine = QarpEngine(structured=True)
     sampler = Sampler(QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 11, 1))
     engine.build([sampler])
-    program = engine._programs[id(sampler)][0]
-    assert program is not None and "controlled_powers" in program.kinds()
+    kinds = engine.kernels(sampler)[0]
+    assert kinds is not None and "controlled_powers" in kinds
+
+
+class _FlipAll(CompositeBlock):
+    """Populates itself at build, as a composite subclass may."""
+
+    def __init__(self, n: int):
+        super().__init__([], n_qubits=n, name="FlipAll")
+
+    def build_vanilla(self):
+        flip = SimpleBlock(self.n_qubits, name="X")
+        for q in range(self.n_qubits):
+            flip.x(q)
+        self.add_child(flip.build())
+        super().build_vanilla()
+
+
+@pytest.mark.parametrize("structured", [True, False])
+def test_a_composite_populated_at_build_is_a_plain_part(structured):
+    # QPE reads φ = 3/8 as ancillas (1, 1, 0) beside the eigenstate |1⟩
+    # (analytic); flipping every qubit then gives (0, 0, 1, 0).
+    qpe = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1, measure=False)
+    readout = SimpleBlock(4, name="m")
+    readout.measure([(q, q) for q in range(4)])
+    tree = CompositeBlock([qpe, _FlipAll(4), readout], n_qubits=4)
+    sampler = Sampler(tree, n_shots=qarp.EXACT)
+    engine = QarpEngine(structured=structured)
+    engine.build([sampler])
+    assert dict(engine.run()[0]) == pytest.approx({(0, 0, 1, 0): 1.0}, abs=1e-10)
+
+
+class _QPEThenFlip(QPEBlock):
+    """Inherits the declaration but builds one more gate than it names."""
+
+    def build_vanilla(self):
+        super().build_vanilla()
+        flip = SimpleBlock(1, target_qubits=[self.n_ancilla], name="X")
+        flip.x(0)
+        self.add_child(flip.build())
+
+
+@pytest.mark.parametrize("built", [False, True])
+def test_an_inherited_declaration_is_not_trusted_over_another_build(built):
+    # The ancillas read φ = 3/8 as (1, 1, 0); the extra X turns the
+    # eigenstate |1⟩ into |0⟩ after the kickback (analytic).
+    block = _QPEThenFlip(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1, measure=False)
+    if built:
+        block.build()
+    sampler = Sampler(block, n_shots=qarp.EXACT)
+    engine = QarpEngine(structured=True)
+    engine.build([sampler])
+    assert dict(engine.run()[0]) == pytest.approx({(1, 1, 0, 0): 1.0}, abs=1e-10)
+
+
+def test_a_built_declaring_block_is_planned_from_its_stream():
+    # Built, the block is planned from its tree, its declaration checked by
+    # digest against the stream it was built with.
+    block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 11, 1).build()
+    sampler = Sampler(block)
+    engine = QarpEngine(structured=True)
+    engine.build([sampler])
+    assert sampler.compiled_circuits[0]
+    assert "controlled_powers" in engine.kernels(sampler)[0]
+
+
+def test_a_lowered_circuit_sweeps_from_an_initial_state():
+    # From |1⟩ on the state qubit the preparation's X leaves |0⟩, an eigenstate
+    # of P with phase 0: every shot reads all zeros (analytic).
+    psi = np.zeros(16, dtype=complex)
+    psi[0b1000] = 1.0
+    block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1)
+    sampler = Sampler(block, n_shots=64, initial_state=psi)
+    engine = QarpEngine(seed=3)
+    (per_set,) = engine.batch_run([sampler], [{}])
+    assert not block.is_built
+    assert dict(per_set[0]) == {(0, 0, 0, 0): 1.0}

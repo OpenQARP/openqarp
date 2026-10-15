@@ -18,8 +18,9 @@ green-lit plan is the contract the rest of that same PR gets diffed against
    section the topic touches. The plan must FIT these conventions; if it
    needs to change one, that is a deliberate edit to the conventions doc,
    named explicitly in the plan's Design section.
-3. Skim the open rows (🚧, 📋) of the index in `docs/contributions/README.md`
-   for adjacent work the plan should not collide with.
+3. Skim the plans whose `**Status:**` is Planned or In progress
+   (`grep -H '^\*\*Status:' docs/contributions/*_plan.md`) for adjacent work
+   the plan should not collide with.
 
 ## Then
 
@@ -36,8 +37,9 @@ green-lit plan is the contract the rest of that same PR gets diffed against
      number, openfermion/scipy), never the implementation's own output.
      Naming oracles now, before code exists, is the point.
    - **Phases** individually landable; date items as they complete.
-6. Add the plan's row to the index table in `docs/contributions/README.md`
-   (status 📋 Planned).
+6. Set the plan's Status to Planned and add its row (file and theme) to the
+   index table in `docs/contributions/README.md`, alphabetically.  The row
+   is not edited afterwards; the plan's state lives in its header.
 7. Remind the author: branch, then open a **Draft** PR whose first commit is
    the plan, using the default PR template (delete the *Trivial PR*
    section, fill *Planned PR* and tick the Gate 1 boxes; the reviewer
@@ -45,10 +47,11 @@ green-lit plan is the contract the rest of that same PR gets diffed against
    author to tick).  The reviewer's green-light in that Draft PR — a comment
    `Green-lit at <sha>`, not an Approve review — is the design approval.
    Do not start implementing before it, and do not open a second PR.  Once
-   it is posted, fill the plan's `**Green-lit:**` header with the sha, the date
-   and the blob id from `git rev-parse <sha>:docs/contributions/<topic>_plan.md`,
-   and flip the index row to 🚧, in one commit.  The blob identifies the
-   green-lit plan by content, so rebasing the branch later is fine.
+   it is posted, fill the plan's `**Green-lit:**` header with the date and
+   the blob id from `git rev-parse <sha>:docs/contributions/<topic>_plan.md`,
+   and set its Status to In progress, in one commit.  The blob identifies the
+   green-lit plan by content, so rebasing the branch later is fine and the
+   header is never re-pinned.
    A PR that started trivial and was asked for a plan follows the same
    steps from a later commit — the plan need not be the first commit.
 

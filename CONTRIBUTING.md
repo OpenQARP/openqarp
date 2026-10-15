@@ -26,14 +26,15 @@ One PR per contribution, with two review gates inside it.
    `Green-lit at <sha>` with the Gate 1 reviewer checks from the PR template
    ticked.  *That comment* is the design approval; implementation does not
    start before it.  It is a comment, not a GitHub *Approve* review —
-   Approves are given at Gate 2 only.  The author records the sha and the
+   Approves are given at Gate 2 only.  The author records the date and the
    plan file's blob id in the plan header, so the green-lit revision is
-   identified by content and the branch may be rebased freely.
+   identified by content and the branch may be rebased freely; the sha stays
+   in the reviewer's comment.
 3. **Implement** — same branch, same PR.  The PR declares deviations from the
    green-lit plan (an empty section claims "implemented as green-lit", and
    the reviewer checks that claim against the green-lit plan).
-4. **Review** — fold declared drift back into the plan file, flip its status
-   to ✅, then mark the PR ready; the reviewer posts the AI conformance
+4. **Review** — fold declared drift back into the plan file, set its Status
+   to Landed, then mark the PR ready; the reviewer posts the AI conformance
    report as a PR comment, then gives the GitHub *Approve* with the Gate 2
    reviewer checks ticked in its body.  Human approval stays human.
 5. **Land** — merge.  A push after the Approve dismisses it, so the branch
