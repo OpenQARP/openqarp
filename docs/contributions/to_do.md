@@ -30,6 +30,16 @@ the same window.
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
   `prepare_structured_qpe`; the counter is 14 after structured execution and
   the hook is gone.  Fix when each branch rebases.
+- **`is_built` is a method on a raw `qx.Block`.**  The Python blocks shadow
+  it with a property, so code that reads `block.is_built` without calling it
+  takes an unbuilt raw block for built, and `flatten()` then raises:
+  `ResourceEstimator.estimate` (`qarp/resources/_estimator.py`),
+  `CuttingPrimitive.build` (`cutting_primitive.py`) and `CircuitAdapter`
+  (`qarp/plotting/_circuit_adapter.py`).  Bind it with `def_prop_ro`
+  (`cpp/libqarpx/python/bindings.cpp`), which bumps the ABI counter; the
+  `_is_built` helpers in `qarp/_program.py` and `_circuit_adapter.py` then
+  go, and `tests/test_blocks/test_block.py` stops calling it.  A regression
+  test per call site, each with an unbuilt raw block.
 
 ## Breaking changes waiting for a minor release
 
@@ -96,3 +106,12 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   flattens a shared ket once more per group on every build, and a
   parametric ket is flattened only to be declined.  A cache would need a
   key for an unbuilt composition, which has no stream to digest.
+- **A parametric planned program copies its tables on every binding.**
+  `Program::substituted` (`cpp/libqarpx/src/simulator/program.cpp`) copies
+  every permutation table and dense matrix by value, and `QarpEngine`
+  substitutes a parametric program once per `run(params)` and per
+  `batch_run` set.  Structural kernels never hold a parameter, so a built
+  circuit with one rotation beside a large permutation copies the
+  permutation each time: about 0.013 s per 2^22-entry table per set.  Hold
+  the tables behind a shared pointer, so substitution copies only the gate
+  kernels.
