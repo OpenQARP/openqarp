@@ -31,4 +31,8 @@ std::uint64_t blas_callback_invocations();
 /// Pool workers alive now; the caller of each call runs its first job.
 std::size_t blas_pool_workers();
 
+/// CPU time the pool's workers have used so far, summed over them; a value
+/// below zero where a thread's own clock cannot be read (Windows).
+double blas_pool_worker_cpu_seconds();
+
 }  // namespace qarpx
