@@ -88,11 +88,12 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   default from them.
 - **`check_untyped_defs` for `tests/`.**  `compiled_backend_stubs_plan.md`
   turns it on for `qarp/` only, so unannotated test bodies, which is nearly
-  every test, are still unchecked.  With the stubs in place at `2167d69` it
-  reported 1832 errors in 202 test files; many share causes that plan removes
+  every test, are still unchecked.  With the stub in place at `4093ad5` it
+  reported 1813 errors in 202 test files; many share causes that plan removes
   (`build()`'s return value, floats passed as `Param`, `is_built` read
   without calling it), so measure again once it lands.  It touches nearly
-  every test file, so it gets its own plan, after the layout move.
+  every test file, so it gets its own plan; land it after the layout move,
+  which would otherwise conflict with it in every test file.
 - **`Sampler(postselect=PostSelection(...))`.**  Applying post-selection
   inside `Sampler.run()` waited on a result type that could carry
   `success_rate` without breaking the dict return; `SamplingDistribution`
