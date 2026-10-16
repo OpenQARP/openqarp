@@ -18,7 +18,19 @@ from __future__ import annotations
 
 import numbers
 from copy import deepcopy
-from typing import Any, ClassVar, Dict, Iterable, List, Optional, Self, Tuple, TypeAlias, cast
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Self,
+    Tuple,
+    TypeAlias,
+    cast,
+    overload,
+)
 
 import numpy as np
 from sympy import Symbol
@@ -180,9 +192,9 @@ def _clone_cpp_block(src, result, memo) -> None:
             result,
             list(src.condition_cbits),
             list(src.condition_values),
-            then_body,
-            else_body,
-            src.name,
+            then_body=then_body,
+            else_body=else_body,
+            name=src.name,
         )
     elif isinstance(result, qx.SimpleBlock):
         # SimpleBlock proper, or the built-SimpleBlock shell standing in for
@@ -505,7 +517,7 @@ class _BlockMixin:
         # fallback exists only for pure-Python test stubs (no C++ base).
         if self._cpp_base is None:
             return self.__dict__.get("_built_py", False)
-        return self._cpp_base.is_built(self)
+        return self._cpp_base.is_built.fget(self)
 
     @_built.setter
     def _built(self, value: bool) -> None:
@@ -1610,8 +1622,24 @@ class ResetBlock(qx.ResetBlock):
 
 @_attach_mixin
 class ConditionalBlock(qx.ConditionalBlock):
-    """Classical-control wrapper: run ``then_body`` (or ``else_body``) based on cbits."""
+    """Classical-control wrapper: run ``then_body`` (or ``else_body``) based on cbits.
 
+    Either body may be omitted, not both: ``then_body=None`` takes ``else_body``
+    by keyword.
+    """
+
+    @overload
+    def __init__(
+        self,
+        cbits: List[int],
+        values: List[bool],
+        then_body: None,
+        *,
+        else_body: "AnyBlock",
+        name: Optional[str] = None,
+    ) -> None: ...
+
+    @overload
     def __init__(
         self,
         cbits: List[int],
@@ -1619,7 +1647,16 @@ class ConditionalBlock(qx.ConditionalBlock):
         then_body: "AnyBlock",
         else_body: Optional["AnyBlock"] = None,
         name: Optional[str] = None,
-    ):
+    ) -> None: ...
+
+    def __init__(
+        self,
+        cbits: List[int],
+        values: List[bool],
+        then_body: Optional["AnyBlock"],
+        else_body: Optional["AnyBlock"] = None,
+        name: Optional[str] = None,
+    ) -> None:
         # then_body / else_body are lifted from their raw C++ buffers; bake
         # any pending set_symbols / replace_symbols / dagger first (same
         # boundary hazard as ControlledBlock).  ``None`` passes through.
@@ -1627,9 +1664,9 @@ class ConditionalBlock(qx.ConditionalBlock):
             self,
             cbits,
             values,
-            _materialise_pending_ops(then_body),
-            _materialise_pending_ops(else_body) if else_body is not None else None,
-            name or "Conditional",
+            then_body=_materialise_pending_ops(then_body) if then_body is not None else None,
+            else_body=_materialise_pending_ops(else_body) if else_body is not None else None,
+            name=name or "Conditional",
         )
         self._init_python_state()
 

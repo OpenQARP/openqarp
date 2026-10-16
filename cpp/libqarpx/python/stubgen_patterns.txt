@@ -1,0 +1,46 @@
+# Replacements nanobind's stubgen applies when scripts/generate_stubs.py writes
+# qarpx.pyi.  Only what the bindings cannot express, and values that vary by
+# build; a wrong or vague type is fixed in the binding (nb::arg, nb::sig).
+# Each query is a regular expression over the member's qualified name, and
+# generate_stubs.py fails when one matches nothing.
+
+# The configuring checkout's path: differs per checkout, worktree and runner.
+^qarpx\.__source_dir__$:
+    __source_dir__: str
+
+# True or False by build (QARP_WITH_SYMENGINE).
+^qarpx\.__with_symengine__$:
+    __with_symengine__: bool
+
+# Set as an attribute (cls.attr("__hash__") = None), which nb::sig cannot
+# reach; typeshed's form for an unhashable class.
+^qarpx\.(QubitOperator|FermionOperator)\.__hash__$:
+    \from typing import ClassVar
+    __hash__: ClassVar[None]  # type: ignore[assignment]
+
+# The in-place operators have no symbolic overload: `op += Symbol("a")` falls
+# back to __add__ and rebinds `op`.  The third overload declares that fallback,
+# which mypy otherwise reports as incompatible with __add__.
+^qarpx\.(QubitOperator|FermionOperator)\.__iadd__$:
+    @overload
+    def __iadd__(self, arg: \1, /) -> \1: ...
+    @overload
+    def __iadd__(self, arg: complex, /) -> \1: ...
+    @overload
+    def __iadd__(self, arg: object, /) -> \1: ...
+
+^qarpx\.(QubitOperator|FermionOperator)\.__isub__$:
+    @overload
+    def __isub__(self, arg: \1, /) -> \1: ...
+    @overload
+    def __isub__(self, arg: complex, /) -> \1: ...
+    @overload
+    def __isub__(self, arg: object, /) -> \1: ...
+
+^qarpx\.(QubitOperator|FermionOperator)\.__imul__$:
+    @overload
+    def __imul__(self, arg: \1, /) -> \1: ...
+    @overload
+    def __imul__(self, arg: complex, /) -> \1: ...
+    @overload
+    def __imul__(self, arg: object, /) -> \1: ...

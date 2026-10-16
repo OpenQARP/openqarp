@@ -6,6 +6,7 @@ the Fock spectrum of a non-interacting Hamiltonian, and hand-built graphs.
 import numpy as np
 import pytest
 
+import qarpx as qx
 from qarp.algorithms import (
     find_eigenspectrum_degeneracy,
     find_occupation_numbers,
@@ -240,3 +241,13 @@ def test_qubit_operator_to_graph_non_z_raises():
 def test_qubit_operator_to_graph_beyond_quadratic_raises():
     with pytest.raises(ValueError, match="linear and quadratic"):
         qubit_operator_to_graph(QubitOperator("Z0 Z1 Z2"))
+
+
+def test_new_basis_from_a_raw_block():
+    """Raw qarpx blocks build to themselves.  Oracle: X|0⟩ = |1⟩ and X|1⟩ = |0⟩."""
+    u = qx.SimpleBlock(1, "x")
+    u.x(0)
+    states, _, indices = generate_states_new_basis(u)
+    assert indices == [0, 1]
+    np.testing.assert_allclose(states[0], [0, 1])
+    np.testing.assert_allclose(states[1], [1, 0])

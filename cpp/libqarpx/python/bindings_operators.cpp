@@ -19,6 +19,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/operators.h>
 #include <nanobind/stl/complex.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -31,6 +32,7 @@
 #include <complex>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -251,6 +253,17 @@ nb::tuple fermion_key_tuple(const FermionKey& key) {
 // Per-class glue used by the generic bind_operator_common below.
 struct QubitGlue {
     using Op = QubitOperator;
+    static constexpr const char* kName = "QubitOperator";
+    static constexpr const char* kKey = "tuple[tuple[int, str], ...]";
+    static constexpr const char* kSparseDoc =
+        "qarpx-LSB ``scipy.sparse.csc_matrix`` of the operator (qubit q ↔ bit q).\n\n"
+        "The only matrix API (conventions §1) — directly contractable with qarpx "
+        "statevectors / unitaries.  openfermion's MSB layout, for interop only, is "
+        ":func:`qarp.operators.compat.get_sparse_operator`.  ``n_qubits`` None or "
+        "negative infers the width from the operator.";
+    static qarpx::ops::SparseCoo coo(const Op& op, int n_qubits) {
+        return qarpx::ops::qubit_operator_coo(op, n_qubits, qarpx::ops::BitOrder::kLsb);
+    }
     static nb::tuple key_tuple(const PackedPauli& key) { return qubit_key_tuple(key); }
     // Canonical single-term operator for a .terms key (folds/canonicalizes
     // exactly like the constructor, so assigned keys normalize).
@@ -269,6 +282,18 @@ struct QubitGlue {
 
 struct FermionGlue {
     using Op = FermionOperator;
+    static constexpr const char* kName = "FermionOperator";
+    static constexpr const char* kKey = "tuple[tuple[int, int], ...]";
+    static constexpr const char* kSparseDoc =
+        "qarpx-LSB ``scipy.sparse.csc_matrix`` of the Jordan-Wigner image "
+        "(qubit q ↔ bit q).\n\n"
+        "The only matrix API (conventions §1) — directly contractable with qarpx "
+        "statevectors / unitaries.  openfermion's MSB layout, for interop only, is "
+        ":func:`qarp.operators.compat.get_sparse_operator`.  ``n_qubits`` None or "
+        "negative infers the width from the operator.";
+    static qarpx::ops::SparseCoo coo(const Op& op, int n_qubits) {
+        return qarpx::ops::fermion_operator_coo(op, n_qubits, qarpx::ops::BitOrder::kLsb);
+    }
     static nb::tuple key_tuple(const FermionKey& key) { return fermion_key_tuple(key); }
     static Op single_term(nb::handle key, const PyCoeff& coeff) {
 #ifdef QARP_WITH_SYMENGINE
@@ -369,6 +394,15 @@ Op scalar_add(const Op& a, nb::handle s, bool negate_operator, bool negate_scala
 template <typename Glue>
 void bind_operator_common(nb::class_<typename Glue::Op>& cls) {
     using Op = typename Glue::Op;
+    // Coefficients are complex, or sympy expressions on the SymEngine backend.
+    const std::string coeff_type = "complex | sympy.Expr";
+    const std::string terms_type =
+        std::string("types.MappingProxyType[") + Glue::kKey + ", " + coeff_type + "]";
+    const std::string terms_getter_sig = "def terms(self, /) -> " + terms_type;
+    const std::string terms_setter_sig = std::string("def terms(self, value: collections.abc.Mapping[") +
+                                         Glue::kKey + ", complex], /) -> None";
+    const std::string coefficient_sig =
+        "def coefficient(self, term: object) -> " + coeff_type;
 
     cls.def(
         "__init__",
@@ -404,6 +438,8 @@ void bind_operator_common(nb::class_<typename Glue::Op>& cls) {
             return proxy;
         },
         [](Op& self, nb::handle mapping) { assign_terms<Glue>(self, mapping); },
+        nb::for_getter(nb::sig(terms_getter_sig.c_str())),
+        nb::for_setter(nb::sig(terms_setter_sig.c_str())),
         "Term dictionary (read-only view; assign a full dict to replace).");
 
     cls.def(
@@ -424,7 +460,7 @@ void bind_operator_common(nb::class_<typename Glue::Op>& cls) {
             if (!found) throw nb::key_error(nb::repr(term).c_str());
             return out;
         },
-        "term"_a,
+        "term"_a, nb::sig(coefficient_sig.c_str()),
         "Fast single-term coefficient lookup (qarpx extra, not openfermion).");
 
     // Arithmetic dunders — operator·operator and numeric scalars (both
@@ -448,8 +484,8 @@ void bind_operator_common(nb::class_<typename Glue::Op>& cls) {
         .def(nb::self *= Complex())
         .def(nb::self /= Complex())
         .def(-nb::self)
-        .def(nb::self == nb::self)
-        .def(nb::self != nb::self);
+        .def(nb::self == nb::self, nb::sig("def __eq__(self, other: object, /) -> bool"))
+        .def(nb::self != nb::self, nb::sig("def __ne__(self, other: object, /) -> bool"));
 
     cls.def("__mul__", [](const Op& a, nb::handle s) { return scalar_mul(a, s); })
         .def("__rmul__", [](const Op& a, nb::handle s) { return scalar_mul(a, s); })
@@ -514,10 +550,13 @@ void bind_operator_common(nb::class_<typename Glue::Op>& cls) {
             }
         });
 
-#ifdef QARP_WITH_SYMENGINE
+    // Bound on every build, so the stub does not depend on it; without
+    // SymEngine no coefficient is symbolic and both raise.  Detect the
+    // backend with qx.__with_symengine__.
     cls.def(
            "substitute",
-           [](const Op& self, nb::handle values) {
+           [](const Op& self, nb::handle values) -> Op {
+#ifdef QARP_WITH_SYMENGINE
                std::vector<std::pair<std::string, Complex>> subs;
                nb::object items = nb::getattr(values, "items")();
                for (nb::handle item : items) {
@@ -529,13 +568,41 @@ void bind_operator_common(nb::class_<typename Glue::Op>& cls) {
                    subs.emplace_back(name, coefficient_to_complex(nb::object(kv[1])));
                }
                return self.substituted(subs);
+#else
+               (void)self;
+               (void)values;
+               throw std::runtime_error(
+                   "qarpx built without SymEngine; symbolic coefficients unavailable");
+#endif
            },
            "values"_a,
            "Substitute named symbols with numeric values; demotes to the "
            "numeric backend when no free symbols remain (qarpx extra).")
-        .def("free_symbols", [](const Op& self) { return self.free_symbols(); },
-             "Sorted names of the free symbols across all coefficients.");
+        .def("free_symbols",
+             [](const Op& self) -> std::vector<std::string> {
+#ifdef QARP_WITH_SYMENGINE
+                 return self.free_symbols();
+#else
+                 (void)self;
+                 throw std::runtime_error(
+                     "qarpx built without SymEngine; symbolic coefficients unavailable");
 #endif
+             },
+             "Sorted names of the free symbols across all coefficients.");
+
+    cls.def(
+        "sparse_matrix",
+        [](const Op& self, std::optional<int> n_qubits) {
+            nb::tuple coo = coo_to_python(Glue::coo(self, n_qubits.value_or(-1)));
+            nb::object csc = nb::module_::import_("scipy.sparse").attr("csc_matrix");
+            nb::tuple shape = nb::make_tuple(coo[3], coo[3]);
+            return csc(nb::make_tuple(coo[0], nb::make_tuple(coo[1], coo[2])),
+                       "shape"_a = shape);
+        },
+        "n_qubits"_a = nb::none(),
+        nb::sig("def sparse_matrix(self, n_qubits: int | None = None) -> "
+                "scipy.sparse.csc_matrix"),
+        Glue::kSparseDoc);
 }
 
 }  // namespace
@@ -634,9 +701,9 @@ void register_operator_bindings(nb::module_& m) {
           "The qarpx simulator Pauli-sum format: list of (sparse "
           "[(qubit, letter)] term, complex coefficient) pairs.");
 
-    // ── Sparse-matrix COO kernels (scipy assembly happens in
-    //    qarp/operators/{qubit,fermion}_operator.py::sparse_matrix and, for
-    //    the MSB openfermion layout, qarp/operators/compat.py) ──
+    // ── Sparse-matrix COO kernels (scipy assembly happens in the operators'
+    //    sparse_matrix and, for the MSB openfermion layout, in
+    //    qarp/operators/compat.py) ──
     m.def("qubit_operator_coo",
           [](const QubitOperator& op, nb::handle n_qubits, bool msb) {
               return coo_to_python(qarpx::ops::qubit_operator_coo(

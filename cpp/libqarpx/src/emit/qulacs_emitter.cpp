@@ -550,5 +550,8 @@ void register_qulacs_emitter(nb::module_& m) {
              "sequence can cross.  Needs no SDK installed.")
         .def("emit", &QulacsEmitter::emit,
              "commands"_a, "n_qubits"_a, "circuit_name"_a = "circuit",
+             // The SDK circuit type: typed Any so the stub imports no SDK.
+             nb::sig("def emit(self, commands: collections.abc.Sequence[qarpx.Command], "
+                     "n_qubits: int, circuit_name: str = 'circuit') -> typing.Any"),
              "Convert a QARPx command sequence to a qulacs.QuantumCircuit.");
 }

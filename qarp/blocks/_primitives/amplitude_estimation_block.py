@@ -54,7 +54,7 @@ class AmplitudeEstimationBlock(CompositeBlockBase):
     ) -> None:
         self.n_state_qubits = validate_amplification_blocks(state_preparation, oracle)
         self.n_ancilla = validate_n_ancilla(n_ancilla)
-        self.state_preparation = deepcopy(state_preparation)
+        self.state_preparation_block = deepcopy(state_preparation)
         self.oracle = deepcopy(oracle)
         super().__init__(
             n_qubits=self.n_ancilla + self.n_state_qubits,
@@ -64,8 +64,8 @@ class AmplitudeEstimationBlock(CompositeBlockBase):
 
     def build_vanilla(self) -> None:
         # QPEBlock builds and retargets its eigenstate in place; the iterate copies its own.
-        state_preparation = deepcopy(self.state_preparation)
-        iterate = AmplitudeAmplificationBlock(self.state_preparation, self.oracle)
+        state_preparation = deepcopy(self.state_preparation_block)
+        iterate = AmplitudeAmplificationBlock(self.state_preparation_block, self.oracle)
         qpe = QPEBlock(
             eigenstate=state_preparation,
             unitary=iterate,

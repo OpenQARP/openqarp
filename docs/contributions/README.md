@@ -135,6 +135,7 @@ something else, parked until they are picked up.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
+| [`compiled_backend_stubs_plan.md`](compiled_backend_stubs_plan.md) | Ship type stubs for `qarpx` and type-check `qarp` against them | Stefano Scali | 🚧 | Structural: §13/§15 edits; ABI 14 → 15; `check_untyped_defs` on `qarp/`; lands after #13 |
 | [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator | Stefano Scali | ✅ | OpenBLAS's thread count lowered by default, the qarpx-owned pool behind `QARP_BLAS_THREADS=pool`; bare-metal timings in `to_do.md` |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` | Stefano Scali | ✅ | Structural: §14 result-contract edit; breaks `isinstance(dict)` and mutation of results |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` | Stefano Scali | ✅ | Same PR as `sampler_distribution_plan.md`; no convention edit |

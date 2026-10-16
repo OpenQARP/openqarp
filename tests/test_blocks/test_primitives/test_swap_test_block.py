@@ -186,3 +186,14 @@ def test_bra_ket_attributes_preserved():
     sw = SWAPTestBlock(bra=bra, ket=ket)
     assert sw.bra is bra
     assert sw.ket is ket
+
+
+def test_raw_blocks_as_bra_and_ket():
+    """Raw qarpx blocks build to themselves.  Oracle: P(0) = (1 + |⟨0|+⟩|²)/2 = 3/4,
+    which a circuit missing the controlled SWAPs (P(0) = 1) does not give."""
+    bra = qx.SimpleBlock(1, "zero")
+    ket = qx.SimpleBlock(1, "plus")
+    ket.h(0)
+    block = SWAPTestBlock(bra=bra, ket=ket).build()
+    expectation = _ancilla_expectation(_unitary(block), block.n_qubits)
+    assert (1 + expectation) / 2 == pytest.approx(0.75, abs=1e-12)

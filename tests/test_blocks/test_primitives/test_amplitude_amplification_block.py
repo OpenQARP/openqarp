@@ -318,3 +318,18 @@ def test_power_validation_rejects_bad_values():
         AmplitudeAmplificationBlock(state_preparation, oracle, power="2")  # non-int
     with pytest.raises(ValueError):
         AmplitudeAmplificationBlock(state_preparation, oracle, power=-1)  # negative
+
+
+def test_state_preparation_block_holds_the_input():
+    """The input's name does not hide the ``state_preparation`` gate method, which
+    raises on this composite (§13)."""
+    preparation = SimpleBlock(1)
+    preparation.ry(0, 0.3)
+    preparation.build()
+    oracle = SimpleBlock(1)
+    oracle.z(0)
+    oracle.build()
+    block = AmplitudeAmplificationBlock(preparation, oracle)
+    assert [str(c) for c in block.state_preparation_block.flatten()] == ["Ry(0.3) [q0]"]
+    with pytest.raises(TypeError, match="composite"):
+        block.state_preparation([0.6, 0.8])
