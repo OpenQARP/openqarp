@@ -164,3 +164,166 @@ def test_python_registered_rule_overrides_a_builtin():
     want = np.diag([1, -1j])
     overlap = np.trace(want.conj().T @ got) / 2
     assert abs(abs(overlap) - 1) < 1e-12
+
+
+# ── The sx_rz hardware target ────────────────────────────────────────────
+
+SX_RZ_ANGLES = (0.7, -0.4, 2.9)
+
+
+def _p(t):
+    return np.diag([1, np.exp(1j * t)])
+
+
+def _u(th, ph, la):
+    return np.array(
+        [
+            [np.cos(th / 2), -np.exp(1j * la) * np.sin(th / 2)],
+            [np.exp(1j * ph) * np.sin(th / 2), np.exp(1j * (ph + la)) * np.cos(th / 2)],
+        ]
+    )
+
+
+# (builder method, analytic matrix, number of angles) — §2 tables.
+SX_RZ_ONE_QUBIT = {
+    "h": (lambda: H, 0),
+    "s": (lambda: np.diag([1, 1j]), 0),
+    "sdg": (lambda: np.diag([1, -1j]), 0),
+    "t": (lambda: _p(math.pi / 4), 0),
+    "tdg": (lambda: _p(-math.pi / 4), 0),
+    "y": (lambda: Y, 0),
+    "z": (lambda: Z, 0),
+    "rx": (_rx, 1),
+    "ry": (_ry, 1),
+    "p": (_p, 1),
+    "u": (_u, 3),
+}
+
+SX_RZ_ALLOWED = {
+    qx.GateType.X,
+    qx.GateType.SX,
+    qx.GateType.Rz,
+    qx.GateType.CX,
+    qx.GateType.Measure,
+    qx.GateType.Barrier,
+}
+
+
+def _one_qubit_command(gate, angles):
+    b = qx.SimpleBlock(1, gate)
+    getattr(b, gate)(0, *angles)
+    b.build()
+    return b.flatten()[0]
+
+
+def _kron_lsb(mat, q, n=2):
+    # qarp is LSB: qubit 0 is the least significant bit, i.e. the rightmost kron factor.
+    factors = [I2] * n
+    factors[n - 1 - q] = mat
+    out = factors[0]
+    for f in factors[1:]:
+        out = np.kron(out, f)
+    return out
+
+
+def _phase_free_allclose(got, want, atol=1e-10):
+    overlap = np.trace(want.conj().T @ got) / want.shape[0]
+    assert abs(abs(overlap) - 1) < atol, f"not unitarily equal: |overlap| = {abs(overlap)}"
+    np.testing.assert_allclose(got * np.conj(overlap / abs(overlap)), want, atol=atol)
+
+
+def test_sx_rz_gateset_shape():
+    gs = qx.sx_rz_gateset()
+    assert gs.name == "sx_rz"
+    assert gs.rules == "sx_rz"
+    assert gs.allowed == SX_RZ_ALLOWED
+
+
+@pytest.mark.parametrize("gate", sorted(SX_RZ_ONE_QUBIT))
+def test_sx_rz_phase_exact(gate):
+    """Each override is exact, GPhase included: admit GPhase in a copy of the
+    target so the compensating phase survives, then compare on the nose."""
+    from itertools import product
+
+    matrix, n_angles = SX_RZ_ONE_QUBIT[gate]
+    gs = qx.sx_rz_gateset()
+    gs.allowed = gs.allowed | {qx.GateType.GPhase}
+    t = qx.Transpiler(gs)
+    for angles in product(SX_RZ_ANGLES, repeat=n_angles):
+        out = t.transpile([_one_qubit_command(gate, angles)])
+        assert {c.gate for c in out} <= {
+            qx.GateType.X,
+            qx.GateType.SX,
+            qx.GateType.Rz,
+            qx.GateType.GPhase,
+        }
+        np.testing.assert_allclose(_unitary(out, 1), matrix(*angles), atol=1e-12)
+
+
+def test_sx_rz_target_closure():
+    """A sweep over the native single- and two-qubit gates lands in the target
+    with the GPhase dropped, equal to the analytic unitary up to global phase."""
+    th, ph, la = SX_RZ_ANGLES
+    b = SimpleBlock(2, name="sweep")
+    b.h(0).s(1).t(0).y(1).z(0).rx(0, th).ry(1, ph).p(0, la).u(1, th, ph, la)
+    b.sdg(0).tdg(1).cz(0, 1).swap(0, 1).cy(1, 0).sx(0).sxdg(1)
+    b.build()
+
+    cz = np.diag([1, 1, 1, -1]).astype(complex)
+    swap = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]], dtype=complex)
+    p0, p1 = np.diag([1, 0]).astype(complex), np.diag([0, 1]).astype(complex)
+    cy_1_0 = np.kron(p0, I2) + np.kron(p1, Y)  # control = qubit 1 (high bit), target = qubit 0
+    sx = np.exp(1j * math.pi / 4) * _rx(math.pi / 2)
+    steps = [
+        _kron_lsb(H, 0),
+        _kron_lsb(np.diag([1, 1j]), 1),
+        _kron_lsb(_p(math.pi / 4), 0),
+        _kron_lsb(Y, 1),
+        _kron_lsb(Z, 0),
+        _kron_lsb(_rx(th), 0),
+        _kron_lsb(_ry(ph), 1),
+        _kron_lsb(_p(la), 0),
+        _kron_lsb(_u(th, ph, la), 1),
+        _kron_lsb(np.diag([1, -1j]), 0),
+        _kron_lsb(_p(-math.pi / 4), 1),
+        cz,
+        swap,
+        cy_1_0,
+        _kron_lsb(sx, 0),
+        _kron_lsb(sx.conj().T, 1),
+    ]
+    want = np.eye(4, dtype=complex)
+    for m in steps:
+        want = m @ want
+
+    out = qx.Transpiler(qx.sx_rz_gateset()).transpile(b.flatten())
+    assert {c.gate for c in out} <= SX_RZ_ALLOWED
+    _phase_free_allclose(_unitary(out, 2), want)
+
+
+def test_sx_rz_routed_device():
+    """`compile_for_device` on a directed line with the sx_rz target: the
+    routed program re-expressed in logical order equals the unrouted unitary
+    up to phase (§14), and every emitted CX respects the edge direction."""
+    from qarp.devices import Device
+
+    arch = qx.Architecture(3, [(0, 1), (1, 2)], "line")
+    dev = Device(3, architecture=arch, gate_set=qx.sx_rz_gateset(), directedness=True)
+    b = SimpleBlock(3, name="routed")
+    b.h(0).cx(0, 2).cz(2, 1).ry(2, 0.7).cx(1, 0)
+    b.build()
+
+    out = qx.compile_for_device(b.flatten(), 3, dev)
+    assert {c.gate for c in out.commands} <= SX_RZ_ALLOWED
+    qx.assert_directions(out.commands, arch)
+
+    n = 3
+    initial = list(out.initial_logical_to_physical)
+    final = list(out.final_logical_to_physical)
+
+    def basis(l2p):
+        return [sum(((j >> q) & 1) << l2p[q] for q in range(n)) for j in range(2**n)]
+
+    u_physical = _unitary(list(out.commands), n)
+    u_logical = u_physical[np.ix_(basis(final), basis(initial))]
+    _phase_free_allclose(u_logical, _unitary(b.flatten(), n))

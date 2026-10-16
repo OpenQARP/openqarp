@@ -9,6 +9,7 @@ from ._architecture import (
 )
 from ._device import Device
 from ._noise_model import NoiseModel
+from ._oqtopus import device_from_oqtopus
 
 import qarpx as _qx
 
@@ -41,6 +42,7 @@ __all__ = [
     "Device",
     "NoiseModel",
     "compile_for_device",
+    "device_from_oqtopus",
     "get_all_to_all_architecture",
     "get_nearest_neighbour_architecture",
 ]

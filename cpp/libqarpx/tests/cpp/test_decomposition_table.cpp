@@ -32,6 +32,7 @@
 #include <complex>
 #include <random>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -428,6 +429,65 @@ TEST(DecompositionTable, RzOnlyOverrideRulesAreExact) {
         << "built-in table gained an Rx rule — re-check the Rz-only override";
     EXPECT_EQ(builtin.count(GateType::Ry), 0u)
         << "built-in table gained an Ry rule — re-check the Rz-only override";
+}
+
+// ── sx_rz-target overrides ──────────────────────────────────────────────────
+
+TEST(DecompositionTable, SxRzOverrideRulesAreExactAndClosed) {
+    // `sx_rz_decompositions()` rewrites every single-qubit gate outside
+    // {X, SX, Rz} into an Rz·SX·Rz form with an explicit GPhase (§11).  The
+    // rules must be exact so the table composes under ControlledBlock; only
+    // the target drops the GPhase, through `decompose_gphase`.
+    const auto table = sx_rz_decompositions();
+    const std::set<GateType> closed = {
+        GateType::X, GateType::SX, GateType::Rz, GateType::GPhase};
+    const std::vector<std::pair<GateType, std::size_t>> cases = {
+        {GateType::H, 0},  {GateType::S, 0},  {GateType::Sdg, 0}, {GateType::T, 0},
+        {GateType::Tdg, 0}, {GateType::Y, 0}, {GateType::Z, 0},
+        {GateType::Rx, 1}, {GateType::Ry, 1}, {GateType::P, 1},  {GateType::U, 3},
+    };
+    const std::vector<double> u_angles = {0.7, -0.4, 2.9};
+
+    for (const auto& [gate, n_params] : cases) {
+        ASSERT_TRUE(table.count(gate) > 0) << "no sx_rz rule for " << gate_name(gate);
+        const auto& rule = table.at(gate);
+
+        std::vector<std::vector<double>> grids;
+        if (n_params == 0) grids.push_back({});
+        else if (n_params == 1) for (double th : kAngles) grids.push_back({th});
+        else for (double a : u_angles) for (double b : u_angles) for (double c : u_angles)
+            grids.push_back({a, b, c});
+
+        for (const auto& params : grids) {
+            Command cmd;
+            cmd.gate = gate;
+            cmd.qubits.push_back(1u);
+            for (double v : params) cmd.params.push_back(Param(v));
+            const std::vector<Command> expansion = rule(cmd);
+            for (const Command& c : expansion) {
+                EXPECT_TRUE(closed.count(c.gate) > 0)
+                    << "sx_rz rule for " << gate_name(gate) << " emits " << gate_name(c.gate);
+            }
+            const Mat expected = reference_unitary({cmd}, 3);
+            const Mat actual   = reference_unitary(expansion, 3);
+            EXPECT_TRUE(expect_unitary_close(actual, expected, 1e-12))
+                << "sx_rz rule " << gate_name(gate) << " params " << params.size();
+        }
+    }
+}
+
+TEST(DecompositionTable, UnknownRuleSetErrorListsSxRz) {
+    GateSet gs;
+    gs.name = "odd";
+    gs.rules = "no_such_rules";
+    try {
+        (void)decompositions_for(gs);
+        FAIL() << "decompositions_for accepted an unknown rules tag";
+    } catch (const std::invalid_argument& e) {
+        const std::string msg = e.what();
+        EXPECT_NE(msg.find("sx_rz"), std::string::npos) << msg;
+        EXPECT_NE(msg.find("clifford_t_rz"), std::string::npos) << msg;
+    }
 }
 
 }  // namespace qarpx::test

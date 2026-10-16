@@ -84,6 +84,12 @@ openfermion = ["openfermion>=1.7.1,<1.8"]
 # wheels are OFF).  See docs/source/installation.rst.  Deliberately excluded
 # from `full` / `full-dev`.
 cudaq-runtime = ["cuda-quantum-cu12>=0.9"]
+# OQTOPUS cloud client behind qarp.engines.OqtopusEngine (the one SDK a remote
+# engine may route through, §15).  Imported inside OqtopusClientTransport's
+# constructor only; LocalOqtopusTransport needs nothing from it.  Kept out of
+# [full] / [full-dev] so the coverage floor is measured without it; the
+# nightly notebooks job installs it.
+oqtopus = ["oqtopus-client>=1.3"]
 # The web GUI (qarp-gui repository) is a separate, unpublished distribution —
 # deliberately not an extra here until it is on PyPI.
 # Test runner (openfermion powers the operator differential/golden tests;

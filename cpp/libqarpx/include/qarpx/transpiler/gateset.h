@@ -75,6 +75,13 @@ GateSet clifford_t_gateset();
 /// (`rules` tag, see `decompositions_for`).
 GateSet clifford_t_rz_gateset();
 
+/// Hardware basis {X, SX, Rz, CX} plus Measure/Barrier: the OpenQASM 3
+/// `x, sx, rz, cx` set that IBM-style and OQTOPUS gateways accept.  No
+/// GPhase, so the final lowering drops it (§11).  The `rules` tag installs
+/// the Rz·SX·Rz rewrites of every other single-qubit gate
+/// (`sx_rz_decompositions`).
+GateSet sx_rz_gateset();
+
 /// Universal default: all gates in the GateType enum (no decomposition needed)
 GateSet universal_gateset();
 

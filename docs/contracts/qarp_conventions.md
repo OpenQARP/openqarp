@@ -330,10 +330,18 @@ the leftmost factor is applied first.
   matrix; a multi-qubit or matrixless `Custom` cannot be re-opened and raises.
 
 Per-target tables extend this: the Clifford+T+Rz set adds `Rx → H·Rz·H` and `Ry → Sdg·H·Rz·H·S`
-(`clifford_t_rz_decompositions`), since it carries `Rz` as its only rotation.
+(`clifford_t_rz_decompositions`), since it carries `Rz` as its only rotation.  The `sx_rz` set
+(`{X, SX, Rz, CX}`, the OpenQASM 3 basis of IBM-style and OQTOPUS gateways) overrides every other
+single-qubit gate with an `Rz·SX·Rz` sandwich plus its exact `GPhase` (`sx_rz_decompositions`):
+`H → Rz(π/2)·SX·Rz(π/2)·GPhase(π/4)`, `Rx(θ) → Rz(π/2)·SX·Rz(θ+π)·SX·Rz(π/2)·GPhase(π/2)`,
+`Ry(θ) → SX·Rz(θ+π)·SX·Rz(π)·GPhase(π/2)`, `U(θ, φ, λ) → Rz(λ)·SX·Rz(θ+π)·SX·Rz(φ+π)·GPhase((φ+λ+π)/2)`,
+`Z → Rz(π)·GPhase(π/2)`, `Y → Rz(π)·X·GPhase(π)`, and `S`, `Sdg`, `T`, `Tdg` as the `Rz` of their
+angle with the matching `GPhase`.  Two-qubit gates cascade through the built-in table (`CZ → H·CX·H`
+reaches the `H` override).
 
 **Per-target rules travel with the target.** A `GateSet` carries a `rules` tag (`""` = built-in
-table only, `"clifford_t_rz"` = the Rz-only overrides); `Transpiler(gs)` seeds its table from
+table only, `"clifford_t_rz"` = the Rz-only overrides, `"sx_rz"` = the `Rz·SX·Rz` overrides);
+`Transpiler(gs)` seeds its table from
 `decompositions_for(gs)`, so `Transpiler(clifford_t_rz_gateset())`, `Block.optimize(target_gateset=
 clifford_t_rz_gateset())` and a `Device(gate_set=clifford_t_rz_gateset())` all lower `Rx`/`Ry` with no separate
 install call. Derived sets keep the tag (`routable_subset`); a rename does not affect it;
@@ -343,9 +351,10 @@ circuits already inside it, and rules may be registered after construction (`reg
 decomposition`, also bound to Python) — but a failing `transpile()` names every unreachable gate
 of the target, not only the one it hit.
 
-`H` is the one gate whose phase-exact lowering lives outside the built-in table: every built-in
-target carries `H`, so its only consumer is the multi-control basis
-(`decompose_h_phase_correct` in `controlled_block.cpp`, §6.2).
+`H` has no rule in the built-in table, since every built-in target carries it; its phase-exact
+lowerings live in `decompositions.cpp` beside the per-target tables: `decompose_h_phase_correct`
+(`Rz(π)·Ry(π/2)·GPhase(π/2)`), consumed by the multi-control basis in `controlled_block.cpp` (§6.2),
+and `decompose_h_sx_rz` for the `sx_rz` target.
 
 `U` and `CU` are the only general single-qubit forms in the IR (§2.5, §3.1); controlling a
 `U` produces `CU(θ, φ, λ, γ=0)` (`controlled_block.cpp`).
@@ -589,7 +598,21 @@ How circuits run.
   `1e-10` — rejected, never renormalised), surfaced as `initial_state=` on
   `Sampler`/`StateVector` (seeds the ket; `CapabilityError` on other engines and routed devices).
 - **Engine / primitive names.** The primitive surfaces are `Sampler` and `PrimitiveAlgorithm`;
-  the concrete engines are `QarpEngine`, `CudaqEngine`.
+  the concrete engines are `QarpEngine`, `CudaqEngine`, `OqtopusEngine`.
+- **Remote engines.** `OqtopusEngine` is the first.  A remote engine takes no `seed`
+  (hardware randomness is not seedable) and no `device=` (the device is fetched from the
+  service, `device_from_oqtopus`), declares `provides_amplitudes = False` and
+  `supports_initial_state = False` so the shared validation refuses amplitudes, `EXACT`
+  readout and injected states, compiles for the device itself (server-side transpilation
+  off) and spells out end-of-circuit measurement on the routed register: terminal
+  `Measure`s are lifted out before routing and re-laid on the final physical wire of
+  their logical qubit (measure-all for a measurement-free circuit), so the service's
+  classical-register counts come back keyed by logical qubit and are wrapped through the
+  `SamplingResult` constructor with no reindex.  It raises `RemoteJobError`
+  (`qarp.errors`, a `RuntimeError`, never `CapabilityError`) for a job the service
+  failed or cancelled, and cancels every outstanding job of a call on the way out of a
+  failed submit or `wait`.  It depends on a transport protocol only; the credential-free
+  `LocalOqtopusTransport` is public API and the test double.
 - **CUDA-Q is build-gated.** Off unless `QARP_WITH_CUDAQ=ON`; CPU-only builds compile a throwing
   stub with `available()==false`. Backend + precision are chosen by the `CUDAQ_DEFAULT_SIMULATOR`
   env var (read once per process), not `cudaq::set_target`.
@@ -641,7 +664,10 @@ How circuits run.
 - **SDK integrations are optional and lazy.** qiskit, pytket, pennylane, and qulacs are
   interop adapters only — emit/absorb pairs behind the `integrations` extra
   (`to_qiskit()` / `PytketAbsorber` / …), imported inside the call, so `import qarp` pulls
-  none of them and core code paths (blocks, transpiler, engines) never route through an SDK.
+  none of them and core code paths (blocks, transpiler, local engines) never route through
+  an SDK.  The one exception is a *cloud client* SDK behind a remote engine: `oqtopus-client`
+  (the `oqtopus` extra) is imported inside `OqtopusClientTransport`'s constructor, never at
+  module scope, and never by blocks, the transpiler or a local engine.
 - **Import name** is `qarpx`, conventionally `import qarpx as qx`.
 - **The qarpx ABI counter moves with the bindings.** Any commit that changes a binding
   signature, enum, or class shape bumps `QARPX_ABI_VERSION`

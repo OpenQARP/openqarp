@@ -22,7 +22,7 @@ _ALGO_IMPORT = re.compile(
 def test_engines_do_not_import_algorithms():
     offenders = [
         f"{path.name}: {match.group(0).strip()}"
-        for path in sorted(ENGINES_DIR.glob("*.py"))
+        for path in sorted(ENGINES_DIR.rglob("*.py"))
         for match in _ALGO_IMPORT.finditer(path.read_text())
     ]
     assert not offenders, f"qarp/engines/ must not import from qarp/algorithms/: {offenders}"

@@ -136,7 +136,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 8
+#define QARPX_ABI_VERSION 9
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -745,6 +745,7 @@ NB_MODULE(qarpx, m) {
         .def_ro("reason", &Incompatibility::reason);
     m.def("clifford_t_gateset", &clifford_t_gateset);
     m.def("clifford_t_rz_gateset", &clifford_t_rz_gateset);
+    m.def("sx_rz_gateset", &sx_rz_gateset);
     m.def("full_gateset_1q", &full_gateset_1q);
     m.def("full_gateset_2q", &full_gateset_2q);
     m.def("full_gateset_1q_2q", &full_gateset_1q_2q);
@@ -1034,6 +1035,45 @@ NB_MODULE(qarpx, m) {
 
     // ── SamplingResult ──
     nb::class_<SamplingResult>(m, "SamplingResult")
+        .def("__init__",
+             [](SamplingResult* self, int n_qubits,
+                std::unordered_map<uint64_t, int> counts, int n_shots, int n_cbits) {
+                 // Counts from a service carry no per-shot register, so
+                 // cbit_history stays empty whatever n_cbits says.
+                 if (n_qubits < 0 || n_qubits > 63) {
+                     throw std::invalid_argument(
+                         "SamplingResult: n_qubits must be in [0, 63], got " +
+                         std::to_string(n_qubits));
+                 }
+                 long long total = 0;
+                 for (const auto& [key, n] : counts) {
+                     if (key >= (uint64_t{1} << n_qubits)) {
+                         throw std::invalid_argument(
+                             "SamplingResult: outcome " + std::to_string(key) +
+                             " does not fit n_qubits=" + std::to_string(n_qubits));
+                     }
+                     if (n < 0) {
+                         throw std::invalid_argument(
+                             "SamplingResult: negative count for outcome " +
+                             std::to_string(key));
+                     }
+                     total += n;
+                 }
+                 if (total != n_shots) {
+                     throw std::invalid_argument(
+                         "SamplingResult: counts sum to " + std::to_string(total) +
+                         " but n_shots=" + std::to_string(n_shots));
+                 }
+                 new (self) SamplingResult();
+                 self->n_qubits = n_qubits;
+                 self->n_shots  = n_shots;
+                 self->n_cbits  = n_cbits;
+                 self->counts   = std::move(counts);
+             },
+             "n_qubits"_a, "counts"_a, "n_shots"_a, "n_cbits"_a = 0,
+             "Wrap externally produced counts (LSB integer keys, §1).  "
+             "ValueError if a key does not fit n_qubits or the counts do not "
+             "sum to n_shots; cbit_history stays empty.")
         .def_ro("n_qubits",     &SamplingResult::n_qubits)
         .def_ro("n_shots",      &SamplingResult::n_shots)
         .def_ro("n_cbits",      &SamplingResult::n_cbits)

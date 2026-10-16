@@ -275,6 +275,16 @@ cvxpy.  With the extra missing, the first use raises ``ImportError`` naming
 it (``hasattr(pkg, name)`` raises too; test ``name in pkg.__all__`` instead,
 which lists only what is installed).
 
+Remote execution on an OQTOPUS device (``qarp.engines.OqtopusEngine``) needs
+the ``[oqtopus]`` extra, which installs the ``oqtopus-client`` SDK::
+
+   pip install "openqarp[oqtopus]"
+
+The SDK is imported when ``OqtopusClientTransport`` is constructed, never at
+import time; credentials are resolved by the SDK (``OQTOPUS_URL`` and
+``OQTOPUS_API_TOKEN``, or its config file).  ``LocalOqtopusTransport`` runs
+the same engine on the local simulator without the extra or any credential.
+
 GPU execution (CUDA-Q)
 ----------------------
 

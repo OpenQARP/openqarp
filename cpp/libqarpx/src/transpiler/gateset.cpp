@@ -169,6 +169,18 @@ GateSet clifford_t_rz_gateset() {
     };
 }
 
+GateSet sx_rz_gateset() {
+    return GateSet{
+        .name = "sx_rz",
+        .allowed = {
+            GateType::X, GateType::SX, GateType::Rz,
+            GateType::CX,
+            GateType::Measure, GateType::Barrier,
+        },
+        .rules = "sx_rz",
+    };
+}
+
 GateSet universal_gateset() {
     GateSet gs;
     gs.name = "universal";

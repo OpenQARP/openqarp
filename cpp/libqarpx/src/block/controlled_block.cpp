@@ -26,23 +26,6 @@ constexpr double PI_4 = std::numbers::pi / 4.0;
 // (the phase becomes a controlled-phase on the wrapping controls).  Override
 // the lossy decompositions with phase-preserving variants below.
 
-/// Phase-preserving ``H`` decomposition.
-///
-/// ``H = e^{iπ/2} · Ry(π/2) · Rz(π)`` (matrix product, time flows right→left).
-/// Emit in circuit order (first emitted = first applied = rightmost in the
-/// matrix product): ``Rz(π)``, ``Ry(π/2)``, ``GPhase(π/2)``.
-std::vector<Command> decompose_h_phase_correct(const Command& cmd) {
-    uint32_t q = cmd.qubits[0];
-    Command gphase;
-    gphase.gate = GateType::GPhase;
-    gphase.params.push_back(Param(PI_2));
-    return {
-        Command(GateType::Rz, q, Param(PI)),
-        Command(GateType::Ry, q, Param(PI_2)),
-        std::move(gphase),
-    };
-}
-
 /// ``S = P(π/2)`` exactly.
 std::vector<Command> decompose_s_to_p(const Command& cmd) {
     return {Command(GateType::P, cmd.qubits[0], Param(PI_2))};
@@ -78,7 +61,8 @@ std::vector<Command> decompose_u_phase_correct(const Command& cmd) {
 }
 
 /// The ``Transpiler`` for the multi-control basis, with the phase-preserving
-/// overrides for ``H``, ``S``, ``T``, ``U``.  ``Sdg`` and ``Tdg`` already
+/// overrides for ``H`` (the shared ``decompose_h_phase_correct``), ``S``,
+/// ``T``, ``U``.  ``Sdg`` and ``Tdg`` already
 /// lower exactly via the built-in ``decompose_sdg``/``_tdg`` (``Sdg =
 /// P(-π/2)``, ``Tdg = P(-π/4)``); ``P`` is in the target basis and is not
 /// lowered.  Built once: the single-control path lowers one command at a

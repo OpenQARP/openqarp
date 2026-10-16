@@ -12,6 +12,12 @@ unsupported" from a generic bad argument should catch it by name.
 
     from qarp.errors import CapabilityError
 
+A remote engine adds one more type: :class:`~qarp.errors.RemoteJobError`, a
+``RuntimeError`` raised by :class:`~qarp.engines.OqtopusEngine` when a job the
+service accepted ends ``failed`` or ``cancelled`` (or succeeds without a
+result payload).  It is not a capability failure — the request was legitimate
+— and carries ``job_id``, ``status`` and the service ``message`` as attributes.
+
 Where it is raised
 -------------------
 

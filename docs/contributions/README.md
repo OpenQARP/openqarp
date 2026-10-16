@@ -88,5 +88,5 @@ Not a row: [`_template.md`](_template.md), the plan scaffold.
 
 | Plan | Theme | Author | Status | Notes |
 |---|---|---|:---:|---|
-| [`oqtopus_plan.md`](oqtopus_plan.md) | `OqtopusEngine` — first remote engine, over `oqtopus-client`; `sx_rz` rebase target; `SamplingResult` constructor | Stefano Scali | 📋 | Structural: new engine + deliberate §11/§14/§15 edits.  Phases 0–2 land offline on `LocalOqtopusTransport`; Phase 3 (live tier) waits on credentials |
+| [`oqtopus_plan.md`](oqtopus_plan.md) | `OqtopusEngine` — first remote engine, over `oqtopus-client`; `sx_rz` rebase target; `SamplingResult` constructor | Stefano Scali | 🚧 | Structural: new engine + deliberate §11/§14/§15 edits.  Phases 0–2 implemented offline on `LocalOqtopusTransport`; Phase 3a (local stack) and 3b (QPU, waits on credentials) open |
 | [`example_plan.md`](example_plan.md) | Worked example of a plan | OpenQARP maintainers | 🗄️ | Illustrates the format only: a filled-in `_template.md` for a small standard-tier feature.  Not implemented; delete this row when the first real plan lands |

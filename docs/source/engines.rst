@@ -3,7 +3,7 @@ Engines
 
 The engines module is the execution backend of OpenQARP. Every quantum computation flows through an :class:`~qarp.engines.Engine` instance. If a :code:`Device` is given to the engine, it owns the rebase / route / re-rebase compilation pipeline (plus per-gate noise injection); otherwise the engine simulates the circuit as written.
 
-OpenQARP currently provides two qarpx-native engines. The default, always available:
+OpenQARP provides two qarpx-native simulation engines and one remote engine. The default, always available:
 
 - :class:`~qarp.engines.QarpEngine` — fast statevector / trajectory simulation backed by ``qx.QarpSimulator``.
 
@@ -14,6 +14,10 @@ execution (single/multi-GPU statevector or tensor-network backends). It needs bo
 `Installation <installation.html>`_ page has the build steps. A
 CPU-only build raises a clear, actionable error from ``CudaqEngine`` — use ``QarpEngine``
 for CPU simulation.
+
+The third, :class:`~qarp.engines.OqtopusEngine`, submits sampling jobs to an
+`OQTOPUS <https://github.com/oqtopus-team>`_ device — a real QPU or the cloud's
+simulator — and is described at the end of this page.
 
 To implement a custom engine, subclass :class:`~qarp.engines.Engine`.
 
@@ -208,3 +212,54 @@ batched per-occurrence parameter shift, finite differences and SPSA, all
 returning one array per primitive in the insertion order of ``params``.
 ``CudaqEngine`` never falls back to a CPU simulator for a gradient.  The
 registry, costs and refusals are documented in :doc:`gradients`.
+
+OqtopusEngine — remote execution
+--------------------------------
+
+:class:`~qarp.engines.OqtopusEngine` runs counts-consuming primitives on an
+OQTOPUS device.  qarp compiles every circuit for the device itself — the
+coupling map and the ``x, sx, rz, cx`` basis come from the service's
+``device_info`` (:func:`~qarp.devices.device_from_oqtopus`) — and submits one
+OpenQASM 3 program per circuit with server-side transpilation switched off.
+Measurement is spelled out on the routed register, so the counts the service
+returns are already in logical qubit order.  ``Sampler``, ``PauliAveraging``,
+VQE and the parameter-shift / finite-difference / SPSA gradients work
+unchanged; ``batch_run`` submits every job of the sweep up front and waits
+once, which makes a parameter-shift gradient a single round trip.
+
+The engine talks to the service through a four-method transport.
+:class:`~qarp.engines.OqtopusClientTransport` is the default and needs the
+``[oqtopus]`` extra (see `Installation <installation.html>`_); credentials are
+resolved by the SDK.  :class:`~qarp.engines.LocalOqtopusTransport` runs the
+same programs on the local simulator, with no extra and no credential — the
+dry run to develop against, and what the example notebook uses:
+
+.. code-block:: python
+
+   from qarp.algorithms import Sampler
+   from qarp.blocks import SimpleBlock
+   from qarp.engines import LocalOqtopusTransport, OqtopusEngine
+
+   ghz = SimpleBlock(3, name="ghz")
+   ghz.h(0).cx(0, 1).cx(1, 2)
+   ghz.build()
+
+   engine = OqtopusEngine("local", transport=LocalOqtopusTransport(n_qubits=3, seed=1),
+                          n_shots=4000)
+   engine.build([Sampler(ket=ghz)])
+   print(engine.run()[0])            # {(0, 0, 0): 0.50, (1, 1, 1): 0.50}
+
+   # The real thing: the SDK reads OQTOPUS_URL / OQTOPUS_API_TOKEN.
+   engine = OqtopusEngine("qulacs", n_shots=4000)
+
+What a remote device cannot do is refused with :class:`~qarp.errors.CapabilityError`
+before any job is submitted: ``StateVector`` and every other amplitude consumer,
+``n_shots=qarp.EXACT``, ``initial_state=``, mid-circuit measurement with reuse,
+and the adjoint gradient.  A job the service fails or cancels raises
+:class:`~qarp.errors.RemoteJobError`, carrying ``job_id``, ``status`` and the
+service message; a timed-out or interrupted wait cancels every outstanding job
+of that call before the error propagates.  There is no ``seed`` — hardware
+randomness is not seedable — and no ``device=``: the device is fetched, never
+passed.  ``mitigation_info=`` is forwarded verbatim on every job for the
+service's readout mitigation; the engine still expects integer counts summing
+to the shot count back (mitigated real-valued counts are not yet handled).

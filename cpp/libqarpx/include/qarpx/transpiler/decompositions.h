@@ -138,4 +138,49 @@ std::vector<Command> decompose_ry_rz_only(const Command& cmd);
 /// every other target).  Seeded by `decompositions_for` through the rules tag.
 std::unordered_map<GateType, DecompositionFn> clifford_t_rz_decompositions();
 
+// ── Phase-exact H ──
+
+/// H -> Rz(π) · Ry(π/2) · GPhase(π/2)  (circuit order).  Consumed by the
+/// multi-control basis, where Ry is native; not in the built-in table because
+/// every built-in target carries H.
+std::vector<Command> decompose_h_phase_correct(const Command& cmd);
+
+// ── sx_rz-target decompositions ──
+//
+// The hardware basis {X, SX, Rz, CX} has one non-diagonal single-qubit gate,
+// so every other single-qubit gate becomes an Rz·SX·Rz sandwich.  Each rule
+// carries the GPhase that makes it exact; the target drops it at the end.
+// Products below are in circuit (time) order.
+
+/// H -> Rz(π/2) · SX · Rz(π/2) · GPhase(π/4)
+std::vector<Command> decompose_h_sx_rz(const Command& cmd);
+
+/// Rx(θ) -> Rz(π/2) · SX · Rz(θ+π) · SX · Rz(π/2) · GPhase(π/2)
+std::vector<Command> decompose_rx_sx_rz(const Command& cmd);
+
+/// Ry(θ) -> SX · Rz(θ+π) · SX · Rz(π) · GPhase(π/2)
+std::vector<Command> decompose_ry_sx_rz(const Command& cmd);
+
+/// U(θ,φ,λ) -> Rz(λ) · SX · Rz(θ+π) · SX · Rz(φ+π) · GPhase((φ+λ+π)/2)
+std::vector<Command> decompose_u_sx_rz(const Command& cmd);
+
+/// Z -> Rz(π) · GPhase(π/2)
+std::vector<Command> decompose_z_rz(const Command& cmd);
+
+/// Y -> Rz(π) · X · GPhase(π)
+std::vector<Command> decompose_y_x_rz(const Command& cmd);
+
+/// S -> Rz(π/2) · GPhase(π/4);  Sdg -> Rz(-π/2) · GPhase(-π/4)
+std::vector<Command> decompose_s_rz(const Command& cmd);
+std::vector<Command> decompose_sdg_rz(const Command& cmd);
+
+/// T -> Rz(π/4) · GPhase(π/8);  Tdg -> Rz(-π/4) · GPhase(-π/8)
+std::vector<Command> decompose_t_rz(const Command& cmd);
+std::vector<Command> decompose_tdg_rz(const Command& cmd);
+
+/// Decomposition table for the sx_rz target: the built-in table with the
+/// rules above overriding H, Rx, Ry, U, Y, Z, S, Sdg, T, Tdg.  P keeps its
+/// built-in `GPhase·Rz` form.  Seeded by `decompositions_for` through the tag.
+std::unordered_map<GateType, DecompositionFn> sx_rz_decompositions();
+
 }  // namespace qarpx

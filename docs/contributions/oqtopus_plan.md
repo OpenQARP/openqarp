@@ -1,6 +1,6 @@
 # OQTOPUS integration — `OqtopusEngine` over `oqtopus-client`, `sx_rz` rebase target
 
-**Status:** 📋 Planned
+**Status:** 🚧 In progress — Phases 0–2 implemented on `LocalOqtopusTransport`; Phase 3 open
 **Author:** Stefano Scali (+ Claude)
 **Reviewer:** <named reviewer — their green-light on this plan in the Draft PR is the design approval>
 **Date:** 2026-09-22
@@ -19,8 +19,8 @@ Phase 0 — compiled backend (ABI bump):
 - `tests/test_engines/test_sampling_result.py` (new — the constructor)
 
 Phase 1 — pure-Python plumbing, offline:
-- `qarp/engines/_oqtopus/__init__.py`, `_transport.py`, `_device.py`, `_result.py` (new)
-- `qarp/devices/__init__.py` (export `device_from_oqtopus`)
+- `qarp/engines/_oqtopus/__init__.py`, `_transport.py`, `_result.py` (new)
+- `qarp/devices/_oqtopus.py` (new, `device_from_oqtopus`), `qarp/devices/__init__.py` (export)
 - `qarp/errors.py` (`RemoteJobError`)
 - `pyproject.toml` (`oqtopus` extra)
 - `tests/test_devices/test_oqtopus_device.py`, `tests/oqtopus_device_topology.py` (new — the
@@ -108,13 +108,18 @@ integration cannot land without them:
   returns `None`.  These declarations alone make the base template refuse
   `StateVector`, `n_shots=qarp.EXACT`, `initial_state` and the adjoint gradient
   with typed `CapabilityError`s — no per-call guards in the engine.
-- `_routed()` is `True`; `_compile_one` is `QarpEngine`'s device path verbatim
-  (`compile_for_device`, `_Layout(initial, final)`), plus one step: when the
-  compiled stream carries no `Measure`, a measure-all layer `c[i] = measure q[i]`
-  over the device register is appended (`Sampler` kets carry no `Measure`; the
-  local simulator measures everything at end-of-shot implicitly, a remote target
-  needs it spelled out).  `PauliAveraging` already measures explicitly and is
-  left alone.
+- `_routed()` is `True`; `_compile_one` runs `compile_for_device` and then
+  **owns the measurement layer**: terminal `Measure`s are lifted out of the
+  logical stream before routing and re-laid at the end on the final physical
+  wire of their logical qubit (`c[c] = measure q[final(l)]`); a
+  measurement-free circuit (`Sampler` kets) measures every logical qubit into
+  its own bit.  The per-circuit record the base threads through is a
+  `_Wiring(cbit_to_logical)`, not a `_Layout`: the service returns
+  classical-register keys, whose bit order is the *cbit* order, so an
+  explicitly measured circuit (`PauliAveraging` measures qubit `i` into
+  `c[i]`) comes back in logical order already and a final-map reindex would
+  be wrong.  `_n_qubits_list` entries are the block width — the width the
+  primitives read.
 - `_post_compile_check` calls the shared `_reject_true_mcm` — OQTOPUS exposes no
   feed-forward — and rejects `initial_state` through the base guards.
 - `_dispatch_one` and `_sweep` are the only remote code: emit each substituted
@@ -136,35 +141,39 @@ integration cannot land without them:
   service.  Readout mitigation returns counts in the submitted register
   layout, so the reindex step is unaffected.  `transpiler_info` is *not*
   exposed: a server that routes would invalidate the logical-order reindexing.
-- **Result contract.**  Counts → `qx.SamplingResult(n_qubits, counts, n_shots,
-  n_cbits)` via the new constructor; `qx.reindex_sampling_result` then applies
-  unchanged.  Bit order: OQTOPUS keys are Qiskit-style strings, `c[0]`
-  rightmost, so `int(key, 2)` has bit *i* = `c[i]` = qubit *i* — qarp's LSB
-  integer key (§1) with no reversal.  The conversion still goes through one
-  function (`_result.counts_to_sampling_result`) with its own oracle test, not
-  through an inline `int(k, 2)`.
+- **Result contract.**  Counts → `qx.SamplingResult(n_qubits, counts, n_shots)`
+  via the new constructor, keyed by logical qubit through the circuit's
+  `_Wiring`; nothing is reindexed afterwards.  Bit order: OQTOPUS keys are
+  Qiskit-style strings, `c[0]` rightmost, so under the identity wiring
+  `int(key, 2)` has bit *i* = `c[i]` = qubit *i* — qarp's LSB integer key (§1)
+  with no reversal.  The conversion goes through one function
+  (`_result.counts_to_sampling_result(counts, n_qubits=, n_shots=, wiring=)`)
+  with its own oracle tests, not through an inline `int(k, 2)`.
 - **Errors.**  Capability failures stay `CapabilityError`.  A job that ends
   `failed` or `cancelled` raises `qarp.errors.RemoteJobError(RuntimeError)`
   carrying `job_id`, `status` and the service `message`.  A transport
-  `TimeoutError` or `KeyboardInterrupt` during `wait` cancels every outstanding
-  job of that call before re-raising (`try/finally` in the dispatch helper).
+  `TimeoutError` or `KeyboardInterrupt` during `wait` — any exception leaving
+  submit or wait — cancels every outstanding job of that call before
+  re-raising.
 
 ### The transport boundary (§15)
 
 ```
 qarp/engines/_oqtopus/
     _transport.py   OqtopusTransport (Protocol), OqtopusClientTransport, LocalOqtopusTransport
-    _device.py      device_from_oqtopus(info) -> qx.Device
     _result.py      counts_to_sampling_result(...)
     _engine.py      OqtopusEngine
+qarp/devices/
+    _oqtopus.py     device_from_oqtopus(info) -> qx.Device
 ```
 
 `OqtopusTransport` is a four-method PEP 544 protocol (below).  The engine
-depends on the protocol only.  `LocalOqtopusTransport` reaches
-`SimpleBlock.from_qasm3` through an import inside `submit()`, never at module
-scope — engines carry no module-level block imports (the `QarpEngine`
-precedent), and `qarp/engines/` never imports `qarp.algorithms`
-(`test_layering.py`, extended to walk the new subpackage).  `OqtopusClientTransport` is the default and the
+depends on the protocol only.  `LocalOqtopusTransport` parses programs with
+`qx.QASM3Absorber` (the parser `SimpleBlock.from_qasm3` wraps) and runs them
+on `qx.QarpSimulator`, so it imports no block class at all, and
+`qarp/engines/` never imports `qarp.algorithms` (`test_layering.py`, extended
+to walk the new subpackage).  Service-shaped keys are built from the
+simulator's `cbit_history` (the classical register, `c[0]` rightmost).  `OqtopusClientTransport` is the default and the
 sole importer of `oqtopus_client`; it builds `OqtopusJobSpec.sampling(...)`,
 calls `submit_job`, polls `status()` and fetches `get_job()` once terminal
 (presigned result URLs expire after one hour — never fetch early).  Config
@@ -175,9 +184,12 @@ credential itself and stores none.
 `device_from_oqtopus(info)` is a pure function over the `device_info` JSON the
 service serves (fields `qubits[].id`, `couplings[].control/target`): it returns
 `qx.Device(n, Architecture(n, edges, name=device_id), gate_set=sx_rz_gateset(),
-directedness=True)`.  Exported from `qarp.devices` because it is a device
-builder, not an engine concern, and useful for `ResourceEstimator` runs against
-a real topology without any network call.
+directedness=True)`.  It lives under `qarp.devices` (`_oqtopus.py`) because it
+is a device builder, not an engine concern, and useful for `ResourceEstimator`
+runs against a real topology without any network call; `qarp.devices` cannot
+re-export it from the engines package without importing the engines (which
+import `qarp.devices`) during its own initialisation.  A device that publishes
+no topology but an `n_qubits` is served as all-to-all by the client transport.
 
 ### The `sx_rz` target (§11, §16)
 
@@ -272,16 +284,17 @@ class LocalOqtopusTransport:
     @property
     def log(self) -> list[dict]: ...  # every call, for structural assertions
 
-# qarp/engines/_oqtopus/_device.py   (re-exported as qarp.devices.device_from_oqtopus)
+# qarp/devices/_oqtopus.py   (exported as qarp.devices.device_from_oqtopus)
 def device_from_oqtopus(info: dict) -> qx.Device: ...
     # n = len(info["qubits"]); edges = [(c["control"], c["target"]) for c in info["couplings"]]
     # gate_set = qx.sx_rz_gateset(); directedness=True; Architecture name = info["device_id"]
     # ValueError on a qubit id outside range(n) or a coupling referencing one
 
 # qarp/engines/_oqtopus/_result.py
-def counts_to_sampling_result(counts: dict[str, int], *, n_qubits: int,
-                              n_shots: int) -> qx.SamplingResult: ...
-    # key -> int(key, 2); len(key) must equal n_qubits; sum(counts) must equal n_shots
+def counts_to_sampling_result(counts: dict[str, int], *, n_qubits: int, n_shots: int,
+                              wiring: Sequence[int | None] | None = None) -> qx.SamplingResult: ...
+    # wiring[c] = logical qubit measured into c[c] (None = unused bit); default identity,
+    # under which key -> int(key, 2).  len(key) must equal len(wiring); sum(counts) == n_shots
 
 # qarp/engines/_oqtopus/_engine.py
 class OqtopusEngine(Engine):
@@ -304,7 +317,7 @@ class OqtopusEngine(Engine):
     @property
     def provides_amplitudes(self) -> bool: return False
     def _routed(self) -> bool: return True
-    def _compile_one(self, flat, block_n_qubits): ...       # compile_for_device + measure-all
+    def _compile_one(self, flat, block_n_qubits): ...       # compile_for_device + measurement layer (_Wiring)
     def _post_compile_check(self, prim, compiled, layout): ...  # _reject_true_mcm
     def _dispatch_one(self, prim, substituted, l2p_list, ordinal): ...
     def _sweep(self, primitives, circuits_per_prim, l2p_per_prim, param_sets, shots_override): ...
@@ -320,7 +333,7 @@ qx.SamplingResult(n_qubits: int, counts: dict[int, int], n_shots: int, n_cbits: 
     # cbit_history stays empty (no per-shot register from a remote service)
 
 # pyproject.toml
-oqtopus = ["oqtopus-client>=1.2"]
+oqtopus = ["oqtopus-client>=1.3"]
 ```
 
 Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
@@ -350,6 +363,14 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
    never in CI.  Only the QPU run waits for credentials.  To check on first
    contact: whether `OqtopusConfig.from_file` accepts the stack's empty
    token, and if not, document `OQTOPUS_API_TOKEN` as the route.
+4. **Mitigated counts.**  With `mitigation_info` set, are the returned counts
+   still integers summing to `shots`?  Readout mitigation can yield real,
+   even negative, values; `counts_to_sampling_result` would reject those with
+   a shot-sum `ValueError` after a paid job.  Resolve on the local stack
+   (3a); until then the docs say integer counts are expected back.
+5. **`oqtopus-client` floor.**  Every SDK surface the transport uses was
+   verified against 1.3.0 only, hence the `>=1.3` pin; relax if an older
+   release is shown to carry them.
 
 ## Test plan
 
@@ -378,7 +399,9 @@ block) appear only as *additional* rows.
 | `Sampler(GHZ₃)` on `OqtopusEngine(local)`: `{000: ½, 111: ½}` within 5σ at 4000 shots, no other key | analytic | `test_oqtopus_engine.py::test_sampler_ghz` |
 | `PauliAveraging(Z₀)` on `Ry(θ)|0⟩`: `cos θ` within 5σ for θ ∈ {0.3, 1.1, 2.5} | analytic | `…::test_expectation_cos` |
 | Routed: line topology `0–1–2`, ket `X(0)·CX(0,2)` → single key `101` (logical order) | analytic + §14 reindex rule | `…::test_routed_counts_logical_order` |
-| Engine appends measure-all: submitted program contains `bit[n] c;` and `c[i] = measure q[i]` for every *device* qubit (`transport.log`) | §12.1 emission table | `…::test_measure_all_appended` |
+| Engine lays the measurement layer: a measurement-free block submits `bit[n] c;` and `c[i] = measure q[i]` for every *logical* qubit; a block measuring one qubit explicitly still measures the rest (uniform H⊗3 within 5σ) | §12.1 emission table; analytic | `…::test_measure_all_appended`, `…::test_partially_measured_block_still_reports_every_qubit` |
+| Transport whose `cancel` raises → the original `TimeoutError` still propagates; circuits compiled by another engine reused with `rebuild=False` → `CapabilityError` | contract | `…::test_failed_cancel_does_not_mask_the_timeout`, `…::test_foreign_compiled_circuits_are_refused` |
+| `OqtopusClientTransport()` with `OQTOPUS_URL` set and no config file resolves the env; `cancel` swallows transport errors | contract | `test_oqtopus_transport.py` |
 | `batch_run` over 3 parameter sets: `len(transport.log["submit"]) == 3 × n_circuits`, one `wait_all`; per-set values equal `run()` at the same params within 5σ | structural + analytic (`cos θ` rows) | `…::test_sweep_submits_all_then_waits` |
 | Parameter-shift VQE, 1 qubit, `H = Z`, ansatz `Ry(θ)`: converges to `θ ≈ π`, energy `−1 ± 5σ` | analytic minimum | `…::test_vqe_one_qubit_parameter_shift` |
 | `slow`: VQE H₂ (STO-3G, JW) on the local transport reaches `−1.137 ± 0.01` Ha at 8000 shots | published FCI energy (Szabo–Ostlund; the value already pinned in `tests/pccd_reference_energies.py`) | `…::test_vqe_h2_slow` |
@@ -446,6 +469,32 @@ the rest (an IBM-style rebase target and a constructible result).
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+Declared during implementation and folded into the sections above:
+
+- **Measurement layer and no reindex** (Design, "How it fits", "Result
+  contract").  The plan reindexed physical counts by the final map and left
+  explicitly measured circuits alone.  The service returns classical-register
+  keys, so an explicitly measured circuit comes back in cbit order, which a
+  final-map reindex would scramble.  The engine now lifts terminal `Measure`s
+  out before routing and re-lays them on the final wires with an explicit
+  `_Wiring`; `counts_to_sampling_result` gained a `wiring=` argument.
+- **`device_from_oqtopus` lives in `qarp/devices/_oqtopus.py`**, not under the
+  engines package (import cycle: `qarp.devices` ← engines ← `qarp.devices`).
+- **The sx_rz `H` rule is its own function** (`decompose_h_sx_rz`, one `SX`);
+  `decompose_h_phase_correct` still moved into the shared table for the
+  multi-control basis.  `Sdg`/`Tdg` get direct `Rz` rules; `P` keeps the
+  built-in one.
+- **`LocalOqtopusTransport` parses with `qx.QASM3Absorber`** rather than
+  `SimpleBlock.from_qasm3` (same parser, no block import).
+- **Cancellation on any exception** leaving submit/wait, not only timeout and
+  Ctrl-C.
+- **Client transport fallbacks**: a device without a published topology is
+  served all-to-all from `n_qubits`; a succeeded job without a payload is
+  reported with `counts=None` and raised as `RemoteJobError`; with no
+  `config`, `OqtopusConfig.from_env()` is tried before the SDK's config file
+  (the SDK alone reads only the file).
+- **Review fix pass**: every logical qubit a block leaves unmeasured is
+  measured too (the Sampler contract is the full register, as on
+  `QarpEngine`); a failing `cancel` never masks the error that triggered it;
+  circuits compiled by another engine and reused with `rebuild=False` raise
+  `CapabilityError` instead of crashing.

@@ -671,9 +671,10 @@ std::unordered_map<GateType, DecompositionFn> builtin_decompositions() {
 std::unordered_map<GateType, DecompositionFn> decompositions_for(const GateSet& target) {
     if (target.rules.empty()) return builtin_decompositions();
     if (target.rules == "clifford_t_rz") return clifford_t_rz_decompositions();
+    if (target.rules == "sx_rz") return sx_rz_decompositions();
     throw std::invalid_argument(
         "GateSet '" + target.name + "' names an unknown decomposition rule set '" +
-        target.rules + "' (known: \"\", \"clifford_t_rz\")");
+        target.rules + "' (known: \"\", \"clifford_t_rz\", \"sx_rz\")");
 }
 
 // ── Rz-only-target decompositions ─────────────────────────────────────────────
@@ -709,6 +710,118 @@ std::unordered_map<GateType, DecompositionFn> clifford_t_rz_decompositions() {
     auto table = builtin_decompositions();
     table[GateType::Rx] = decompose_rx_rz_only;
     table[GateType::Ry] = decompose_ry_rz_only;
+    return table;
+}
+
+// ── Phase-exact H ─────────────────────────────────────────────────────────────
+
+// H = e^{iπ/2} · Ry(π/2) · Rz(π) as a matrix product; circuit order below.
+std::vector<Command> decompose_h_phase_correct(const Command& cmd) {
+    uint32_t q = cmd.qubits[0];
+    return {
+        Command(GateType::Rz, q, Param(PI)),
+        Command(GateType::Ry, q, Param(PI_2)),
+        make_gphase(Param(PI_2)),
+    };
+}
+
+// ── sx_rz-target decompositions ───────────────────────────────────────────────
+//
+// SX = e^{iπ/4}·Rx(π/2) (§2.6) and Rz(π/2)·Rx(θ)·Rz(-π/2) = Ry(θ); every
+// identity below follows from those two and H = e^{iπ/4}·Rz(π/2)·SX·Rz(π/2).
+
+std::vector<Command> decompose_h_sx_rz(const Command& cmd) {
+    uint32_t q = cmd.qubits[0];
+    return {
+        Command(GateType::Rz, q, Param(PI_2)),
+        Command(GateType::SX, q),
+        Command(GateType::Rz, q, Param(PI_2)),
+        make_gphase(Param(PI_4)),
+    };
+}
+
+std::vector<Command> decompose_rx_sx_rz(const Command& cmd) {
+    uint32_t q = cmd.qubits[0];
+    Param theta = cmd.params[0];
+    return {
+        Command(GateType::Rz, q, Param(PI_2)),
+        Command(GateType::SX, q),
+        Command(GateType::Rz, q, theta + Param(PI)),
+        Command(GateType::SX, q),
+        Command(GateType::Rz, q, Param(PI_2)),
+        make_gphase(Param(PI_2)),
+    };
+}
+
+std::vector<Command> decompose_ry_sx_rz(const Command& cmd) {
+    uint32_t q = cmd.qubits[0];
+    Param theta = cmd.params[0];
+    return {
+        Command(GateType::SX, q),
+        Command(GateType::Rz, q, theta + Param(PI)),
+        Command(GateType::SX, q),
+        Command(GateType::Rz, q, Param(PI)),
+        make_gphase(Param(PI_2)),
+    };
+}
+
+std::vector<Command> decompose_u_sx_rz(const Command& cmd) {
+    uint32_t q = cmd.qubits[0];
+    Param theta  = cmd.params[0];
+    Param phi    = cmd.params[1];
+    Param lambda = cmd.params[2];
+    return {
+        Command(GateType::Rz, q, lambda),
+        Command(GateType::SX, q),
+        Command(GateType::Rz, q, theta + Param(PI)),
+        Command(GateType::SX, q),
+        Command(GateType::Rz, q, phi + Param(PI)),
+        make_gphase((phi + lambda + Param(PI)) * Param(0.5)),
+    };
+}
+
+std::vector<Command> decompose_z_rz(const Command& cmd) {
+    return {Command(GateType::Rz, cmd.qubits[0], Param(PI)), make_gphase(Param(PI_2))};
+}
+
+// Y = -X·Rz(π) as a matrix product: Rz(π) first, then X, then the sign.
+std::vector<Command> decompose_y_x_rz(const Command& cmd) {
+    uint32_t q = cmd.qubits[0];
+    return {
+        Command(GateType::Rz, q, Param(PI)),
+        Command(GateType::X, q),
+        make_gphase(Param(PI)),
+    };
+}
+
+std::vector<Command> decompose_s_rz(const Command& cmd) {
+    return {Command(GateType::Rz, cmd.qubits[0], Param(PI_2)), make_gphase(Param(PI_4))};
+}
+
+std::vector<Command> decompose_sdg_rz(const Command& cmd) {
+    return {Command(GateType::Rz, cmd.qubits[0], Param(-PI_2)), make_gphase(Param(-PI_4))};
+}
+
+std::vector<Command> decompose_t_rz(const Command& cmd) {
+    return {Command(GateType::Rz, cmd.qubits[0], Param(PI_4)), make_gphase(Param(PI / 8.0))};
+}
+
+std::vector<Command> decompose_tdg_rz(const Command& cmd) {
+    return {Command(GateType::Rz, cmd.qubits[0], Param(-PI_4)), make_gphase(Param(-PI / 8.0))};
+}
+
+std::unordered_map<GateType, DecompositionFn> sx_rz_decompositions() {
+    auto table = builtin_decompositions();
+    table[GateType::H]   = decompose_h_sx_rz;
+    table[GateType::Rx]  = decompose_rx_sx_rz;
+    table[GateType::Ry]  = decompose_ry_sx_rz;
+    table[GateType::U]   = decompose_u_sx_rz;
+    table[GateType::Z]   = decompose_z_rz;
+    table[GateType::Y]   = decompose_y_x_rz;
+    table[GateType::S]   = decompose_s_rz;
+    table[GateType::Sdg] = decompose_sdg_rz;
+    table[GateType::T]   = decompose_t_rz;
+    table[GateType::Tdg] = decompose_tdg_rz;
     return table;
 }
 
