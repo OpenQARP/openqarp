@@ -130,6 +130,12 @@ integration cannot land without them:
 - **No noise model, no `device=`.**  The device is fetched, never passed, so
   the §14 rule "an engine that does not consume `device.noise_model` must raise"
   is satisfied by construction (there is nothing to drop).
+- **`mitigation_info` pass-through.**  The constructor takes
+  `mitigation_info: Mapping[str, Any] | None` and every `submit` forwards it
+  verbatim; qarp neither reads nor validates its keys, they belong to the
+  service.  Readout mitigation returns counts in the submitted register
+  layout, so the reindex step is unaffected.  `transpiler_info` is *not*
+  exposed: a server that routes would invalidate the logical-order reindexing.
 - **Result contract.**  Counts → `qx.SamplingResult(n_qubits, counts, n_shots,
   n_cbits)` via the new constructor; `qx.reindex_sampling_result` then applies
   unchanged.  Bit order: OQTOPUS keys are Qiskit-style strings, `c[0]`
@@ -211,10 +217,24 @@ No edit to §12 (the emitter is used as-is) or §13.
 - The OQTOPUS `estimation` job type.  It re-spends the full `shots` per
   commuting group, serially, and returns one scalar with no per-term
   statistics; `PauliAveraging` over `sampling` jobs is strictly more
-  informative.  A later plan may add it as a fast path in the
-  `CudaqEngine.batch_expectation` style.
-- `multi_manual` packing, readout-error mitigation pass-through
-  (`mitigation_info`), server-side transpilation as an option, SSE jobs.
+  informative.  Cost accepted: an energy evaluation is one sampling job per
+  commuting group instead of one estimation job, and on a queued service the
+  per-job latency, not the shot count, is the price; `_sweep` submitting every
+  job up front is the mitigation.  A later plan may add estimation as a fast
+  path in the `CudaqEngine.batch_expectation` style; the client expresses an
+  estimation operator as `{pauli, coeff}` items, so that path converts qarp's
+  own operator directly, with no openfermion or quri-parts step.
+- `multi_manual` packing and server-side transpilation as an option
+  (`transpiler_info` stays fixed, see above).
+- Running qarp *inside* OQTOPUS's server-side execution (SSE) container, and
+  SSE jobs submitted from the engine.  The former is a deployment of this
+  engine, not a second integration: the operator pins `openqarp` in the SSE
+  runtime's `pyproject.toml` and the script inside the container constructs
+  `OqtopusEngine` with the in-cluster `OqtopusConfig`.  Two constraints it
+  places on qarp releases: OQTOPUS has no wheel upload, so PyPI is the only
+  route into the container, and a manylinux wheel for the container's Python
+  avoids a from-sdist C++ build at every image rebuild; a GPU build needs C++
+  build steps in the operator's Dockerfile, which is their work.
 - Any change to `Device` (stays passive data, §14).
 
 ## API sketch
@@ -229,7 +249,8 @@ class JobOutcome(TypedDict):          # what wait_all returns per job
 
 class OqtopusTransport(Protocol):
     def get_device(self, device_id: str) -> dict: ...            # the device_info JSON
-    def submit(self, *, program: str, shots: int, device_id: str, name: str) -> str: ...  # job_id
+    def submit(self, *, program: str, shots: int, device_id: str, name: str,
+               mitigation_info: Mapping[str, Any] | None = None) -> str: ...  # job_id
     def wait_all(self, job_ids: Sequence[str], *, timeout: float) -> list[JobOutcome]: ...
     def cancel(self, job_ids: Sequence[str]) -> None: ...
 
@@ -238,7 +259,8 @@ class OqtopusClientTransport:         # the only module that imports oqtopus_cli
                  *, poll_interval: float = 1.0, poll_backoff: float = 1.2,
                  max_poll_interval: float = 10.0): ...
     # submit(): OqtopusJobSpec.sampling(device_id, shots, program, name,
-    #           transpiler_info={"transpiler_lib": None}) -> submit_job().job_id
+    #           transpiler_info={"transpiler_lib": None},
+    #           mitigation_info=mitigation_info) -> submit_job().job_id
     # wait_all(): status() polling; get_job() only once terminal
 
 class LocalOqtopusTransport:
@@ -274,6 +296,7 @@ class OqtopusEngine(Engine):
         n_shots: int = 1_000,
         timeout: float = 600.0,                       # per dispatch / sweep call
         job_name: str = "qarp",                       # prefix; jobs are f"{job_name}:{prim}:{k}"
+        mitigation_info: Mapping[str, Any] | None = None,  # forwarded verbatim on every submit
     ): ...
     # n_shots is int only: Shots.EXACT raises CapabilityError at construction
     @property
@@ -311,15 +334,22 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
 1. **Program qubit index vs. `device_info.qubits[].id` / `physical_id`.**  The
    device-gateway example carries both.  Assumed: the QASM register index *is*
    `id`, and `couplings` reference `id`.  Verified only against the Qulacs
-   gateway source; a QPU gateway is UNVERIFIED.  Resolution: the live tier
-   (Phase 3) runs a one-CX-per-edge probe; until then the assumption is
+   gateway source; a QPU gateway is UNVERIFIED.  Resolution: the QPU run of
+   Phase 3 runs a one-CX-per-edge probe; until then the assumption is
    documented on `device_from_oqtopus`.
-2. **`transpiler_lib: None` on a QPU device.**  Verified for the Qulacs gateway
-   (`supported_gates` post-transpile is exactly the `sx_rz` set plus
-   `delay`); a QPU gateway rejecting untranspiled input would be a live-tier
-   finding, not a design change.
-3. **Live credentials, device ids, production base URL.**  None in hand; no
-   public sandbox exists.  Phase 3 stays 📋 until they do.
+2. **`transpiler_lib: None` on a QPU device.**  Verified for the Qulacs
+   gateway source (`supported_gates` post-transpile is exactly the `sx_rz`
+   set plus `delay`); the local-stack run of Phase 3 confirms it against the
+   running gateway.  A QPU gateway rejecting untranspiled input would be a
+   QPU-run finding, not a design change.
+3. **Hardware credentials and device ids.**  None in hand.  The local stack
+   from [oqtopus-cli](https://github.com/oqtopus-team/oqtopus-cli)
+   (`cloud-local` + `backend` templates, default `qulacs` device, API on
+   `http://127.0.0.1:8080`, token accepted empty by the service) is the
+   sandbox for everything but open item 1; it is set up outside the repo and
+   never in CI.  Only the QPU run waits for credentials.  To check on first
+   contact: whether `OqtopusConfig.from_file` accepts the stack's empty
+   token, and if not, document `OQTOPUS_API_TOKEN` as the route.
 
 ## Test plan
 
@@ -344,6 +374,7 @@ block) appear only as *additional* rows.
 | `LocalOqtopusTransport` status values ∈ the spec enum; `cancel` on an unknown id is a no-op; `log` records every call | the `jobs.JobStatus` enum from the spec | `test_oqtopus_transport.py` |
 | `OqtopusClientTransport.submit` builds a spec with `job_type == "sampling"` and `transpiler_info == {"transpiler_lib": None}` (client monkeypatched at `submit_job`) | `oqtopus_client.OqtopusJobSpec.to_model()` — the SDK as oracle | `test_oqtopus_transport.py` (`importorskip("oqtopus_client")`) |
 | Constructing `OqtopusClientTransport` without the SDK raises `ImportError` naming `pip install "openqarp[oqtopus]"` | contract (module blocked via `sys.modules`) | `test_oqtopus_transport.py` |
+| `OqtopusEngine(..., mitigation_info=m)` → every `submit` in `transport.log` carries `m` unchanged; `OqtopusClientTransport.submit` puts it in the spec's `mitigation_info` verbatim | structural; the SDK's `to_model()` as oracle | `test_oqtopus_engine.py::test_mitigation_info_forwarded`, `test_oqtopus_transport.py` |
 | `Sampler(GHZ₃)` on `OqtopusEngine(local)`: `{000: ½, 111: ½}` within 5σ at 4000 shots, no other key | analytic | `test_oqtopus_engine.py::test_sampler_ghz` |
 | `PauliAveraging(Z₀)` on `Ry(θ)|0⟩`: `cos θ` within 5σ for θ ∈ {0.3, 1.1, 2.5} | analytic | `…::test_expectation_cos` |
 | Routed: line topology `0–1–2`, ket `X(0)·CX(0,2)` → single key `101` (logical order) | analytic + §14 reindex rule | `…::test_routed_counts_logical_order` |
@@ -358,7 +389,8 @@ block) appear only as *additional* rows.
 | `import qarp.engines` does not import `oqtopus_client` (checked in `sys.modules`) | §15 laziness | `…::test_lazy_sdk_import` |
 | Engine layering: `qarp/engines/_oqtopus/*` imports nothing from `qarp.algorithms` | existing `test_layering.py` lint (extended to the subpackage) | `test_layering.py` |
 | Additional (round-trip): `Sampler` on a random 4-qubit Clifford circuit, local transport vs. `QarpEngine`, total-variation distance < 0.05 at 4000 shots | not an oracle — agreement only | `…::test_agrees_with_qarp_engine` |
-| Live (Phase 3, gated on `OQTOPUS_URL`, `OQTOPUS_API_TOKEN`, `QARP_OQTOPUS_DEVICE`; `slow`): Bell state on the named device, `P(00)+P(11) > 0.8`; one-CX-per-edge probe confirms open item 1 | analytic (loose bound — real hardware) | `test_oqtopus_live.py` |
+| Live, local stack (Phase 3a, gated on `OQTOPUS_URL`, `OQTOPUS_API_TOKEN`, `QARP_OQTOPUS_DEVICE=qulacs`; `slow`): `device_from_oqtopus(get_device("qulacs"))` builds; the Bell program submitted with `transpiler_lib: None` ends `succeeded`; `x q[0];` returns the single key `"01"`; Bell counts within 5σ of ½ each | analytic; the bit-order claim checked on the running gateway rather than its source | `test_oqtopus_live.py` |
+| Live, QPU (Phase 3b, same gating with a hardware device id; `slow`): Bell state on the named device, `P(00)+P(11) > 0.8`; one-CX-per-edge probe confirms open item 1 | analytic (loose bound — real hardware) | `test_oqtopus_live.py` |
 | Notebook `mwe_oqtopus.ipynb` runs on `LocalOqtopusTransport` in the nightly (`--nbmake`) | executed example surface (§15) | `examples/engines/` |
 
 ## Phases
@@ -386,7 +418,7 @@ the rest (an IBM-style rebase target and a constructible result).
 
 ### Phase 2 — the engine
 
-- [ ] `OqtopusEngine` per the API sketch; exports
+- [ ] `OqtopusEngine` per the API sketch, `mitigation_info` included; exports
 - [ ] Engine oracle rows above (incl. the `slow` H₂ row and the layering lint)
 - [ ] `docs/source/engines.rst` section "OqtopusEngine — remote execution";
       `installation.rst` paragraph for the extra
@@ -399,11 +431,18 @@ the rest (an IBM-style rebase target and a constructible result).
 - [ ] §14 and §15 edits
 - [ ] Index row → 🚧 at green-light, ✅ at merge
 
-### Phase 3 — live tier (blocked on credentials; open items 1–3)
+### Phase 3 — live tier (gated + `slow`, never in CI)
 
-- [ ] `test_oqtopus_live.py`, gated + `slow`, never in CI
-- [ ] Resolve open items 1 and 2 from the probe run; fold findings into
-      `device_from_oqtopus`'s docstring and this plan
+3a, local stack (unblocked; open items 2–3):
+
+- [ ] `test_oqtopus_live.py` against the oqtopus-cli stack, device `qulacs`
+- [ ] Close open item 2 for the Qulacs gateway; settle the empty-token
+      question of open item 3
+
+3b, QPU (blocked on credentials; open item 1):
+
+- [ ] The same file against a hardware device id; the one-CX-per-edge probe
+- [ ] Fold the findings into `device_from_oqtopus`'s docstring and this plan
 
 ## Deviations log
 
