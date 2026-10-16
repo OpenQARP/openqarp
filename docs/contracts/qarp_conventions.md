@@ -503,6 +503,15 @@ above.
   `ResetBlock`, `ConditionalBlock`. `AnyBlock` (= `qx.Block`) is the "any block" type for
   annotations and isinstance checks — it is not a base class. `CompositeBlock` is the
   user-facing assembly wrapper over `CompositeBlockBase`.
+- **`AnyBlock` or `QarpBlock`, by what the code reads.** A parameter that reads only `qx.Block`
+  members (engines, the planner, the estimator) takes `AnyBlock`, which admits raw `qarpx`
+  blocks. A parameter that reads members only the Python blocks have (`.symbols`,
+  `parameter_map`, `set_symbols` on a Python block) takes `QarpBlock`, the union of the six
+  Python block classes; it works with `isinstance` and rejects a raw block. A raw block reaches
+  a `QarpBlock` parameter by wrapping, `CompositeBlock([raw_block])`.
+- **One build lifecycle on every block.** `is_built` is a read-only property, raw or Python, and
+  `build()` returns the block. A composite takes no gates of its own: a gate method called on
+  one raises `TypeError`, since only its children's gates run.
 - **Pending ops apply at the `flatten()` boundary.** `substitute` / `replace` / `dagger` are
   deferred and applied when the block is flattened, so the C++ command buffer stays canonical and
   `build()` is idempotent. `dagger()` preserves the subclass identity. Corollary: a C++ container
@@ -739,6 +748,12 @@ How circuits run.
   (`cpp/libqarpx/python/bindings.cpp`) and `EXPECTED_QARPX_ABI` (`qarp/_abi.py`)
   together; `import qarp` fails fast on a mismatched or wrong-checkout build
   (`QARP_SKIP_ABI_CHECK=1` bypasses for deliberate cross-checkout runs).
+- **The `qarpx` stub moves with the bindings.** `cpp/libqarpx/python/qarpx.pyi` is generated
+  from the built module and committed; a commit that changes a binding regenerates it with
+  `python scripts/generate_stubs.py`, under the CI Python version, and the drift test fails
+  otherwise. A wrong or vague type is fixed in the binding (`nb::arg`, `nb::sig`), not in the
+  stub; `stubgen_patterns.txt` holds only what nanobind cannot express and values that vary
+  by build.
 - **A package's public surface is its `__all__`.** Every public
   `qarp/<pkg>/__init__.py` declares `__all__`; it is the sole definition of what
   that package exports — symbols and public namespaces alike.  A name absent

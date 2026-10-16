@@ -1,11 +1,11 @@
 # Ship type stubs for the compiled backend and type-check `qarp` against them
 
-**Status:** Planned
+**Status:** In progress
 **Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-10-15
 **Tier:** Structural
 **Branch:** improvement/compiled-backend-stubs
-**Green-lit:**
+**Green-lit:** f4b9d57 (2026-10-16), plan blob d01807223f141e4e496a998cc803fe37129574b2
 **Scope:** measured at `develop` `4093ad5` with the stub as designed (`-P`), plus the three
 test files #13 adds; anything the re-measure after #13 adds is declared as a deviation.
 - New: `cpp/libqarpx/python/qarpx.pyi` (generated, committed),

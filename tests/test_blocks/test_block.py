@@ -7,12 +7,14 @@ preservation).  This file keeps a small set of basic invariants that test the
 Python wrapper layer directly.
 """
 
+import copy
+
 import numpy as np
 import pytest
 from sympy import Symbol
 
 import qarpx as qx
-from qarp.blocks import SimpleBlock
+from qarp.blocks import CompositeBlock, ConditionalBlock, HnBlock, SimpleBlock
 
 
 def test_simple_block_construction():
@@ -277,7 +279,7 @@ def test_raw_simple_block_deepcopy():
     clone = copy.deepcopy(raw)
 
     assert type(clone) is qx.SimpleBlock
-    assert clone.is_built()
+    assert clone.is_built
     assert [str(c) for c in clone.commands()] == [str(c) for c in raw.commands()]
     # Independent buffers: mutating the original must not touch the clone.
     raw.x(0)
@@ -299,7 +301,7 @@ def test_transformed_block_deepcopy_as_simple_shell():
     clone = copy.deepcopy(tb)
     assert isinstance(clone, qx.Block)
     assert type(clone) is qx.SimpleBlock
-    assert clone.is_built()
+    assert clone.is_built
     assert [str(c) for c in clone.flatten()] == [str(c) for c in tb.flatten()]
 
 
@@ -391,7 +393,14 @@ def test_deepcopy_base_state_canary():
     import copy
 
     bound_props = {n for n, v in vars(qx.Block).items() if isinstance(v, property)}
-    assert bound_props == {"name", "n_qubits", "n_cbits", "target_qubits", "target_cbits"}, (
+    assert bound_props == {
+        "name",
+        "n_qubits",
+        "n_cbits",
+        "target_qubits",
+        "target_cbits",
+        "is_built",
+    }, (
         "qx.Block grew/lost a bound field — extend this canary and verify "
         "clone handling (subclass ctor fields are NOT auto-copied)."
     )
@@ -411,7 +420,7 @@ def test_deepcopy_base_state_canary():
     assert clone.n_cbits == 2
     assert list(clone.target_qubits) == [2, 0, 1]
     assert list(clone.target_cbits) == [1, 0]
-    assert clone.is_built()
+    assert clone.is_built
     assert [str(c) for c in clone.commands()] == [str(c) for c in b.commands()]
 
 
@@ -791,3 +800,93 @@ def test_default_block_names_carry_no_newlines():
     ]
     for b in blocks:
         assert "\n" not in b.name, b.name
+
+
+# ── Binding contract: build lifecycle, composites, Command ────────────────
+
+
+def test_raw_block_build_lifecycle():
+    """``is_built`` is a property on raw blocks too, and ``build()`` returns the block."""
+    b = qx.SimpleBlock(1, "raw")
+    b.h(0)
+    assert b.is_built is False
+    assert b.build() is b
+    assert b.is_built is True
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: CompositeBlock([HnBlock(1)], n_qubits=1),
+        lambda: qx.CompositeBlock([qx.SimpleBlock(1, "child")], 1),
+    ],
+    ids=["python", "raw"],
+)
+def test_gate_methods_on_a_composite_raise(make):
+    """A composite runs only its children's gates (§13), so it takes none of its own."""
+    comp = make()
+    with pytest.raises(TypeError, match="composite"):
+        comp.z(0)
+    with pytest.raises(TypeError, match="composite"):
+        comp.rz(0, 0.5)
+    with pytest.raises(TypeError, match="composite"):
+        comp.h([0])
+    assert list(comp.commands()) == []
+
+
+def test_else_only_conditional_deepcopies():
+    """Oracle: the hand-written stream of a conditional with only an else-branch X."""
+    body = SimpleBlock(1)
+    body.x(0)
+    body.build()
+    cond = ConditionalBlock([0], [True], None, else_body=body)
+    cond.build()
+    clone = copy.deepcopy(cond)
+    assert clone.then_body is None
+    assert [str(c) for c in clone.flatten()] == [
+        "BranchBegin [] if c0==1",
+        "BranchElse []",
+        "X [q0]",
+        "BranchEnd []",
+    ]
+
+
+def test_conditional_without_either_body_is_rejected():
+    with pytest.raises(TypeError):
+        qx.ConditionalBlock([0], [True], None)
+
+
+def test_command_reads_a_numpy_integer_as_a_qubit():
+    """Oracle: X on q0 then CX(q0, q1) takes |00⟩ to |11⟩, outcome 3."""
+    x = qx.Command(qx.GateType.X, 0)
+    cx = qx.Command(qx.GateType.CX, 0, np.int64(1))
+    assert list(cx.qubits) == [0, 1]
+    assert dict(qx.QarpSimulator().run([x, cx], 2, 20, 1).counts) == {3: 20}
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        (qx.GateType.Rz, 0, 1),
+        (qx.GateType.Rz, 0, np.int64(1)),
+        (qx.GateType.Rz, 0, True),
+        (qx.GateType.H, 0, 0.5),
+        (qx.GateType.CX, 0, qx.Param(1.0)),
+    ],
+    ids=["rz-int", "rz-numpy-int", "rz-bool", "h-angle", "cx-one-qubit"],
+)
+def test_command_rejects_a_wrong_qubit_or_parameter_count(args):
+    """Rz takes one qubit and one parameter, H one qubit and none, CX two qubits and none."""
+    with pytest.raises(ValueError, match="takes"):
+        qx.Command(*args)
+
+
+def test_command_builds_a_parametric_gate_from_a_param():
+    cmd = qx.Command(qx.GateType.Rz, 0, qx.Param(1.0))
+    assert list(cmd.qubits) == [0]
+    assert [p.value() for p in cmd.params] == [1.0]
+
+
+def test_command_equality_with_a_foreign_type():
+    assert (qx.Command() == 5) is False
+    assert (qx.Command() != 5) is True

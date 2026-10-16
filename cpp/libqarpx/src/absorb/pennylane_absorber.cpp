@@ -332,5 +332,8 @@ void register_pennylane_absorber(nb::module_& m) {
         .def("source_name", &PennylaneAbsorber::source_name)
         .def("absorb", &PennylaneAbsorber::absorb,
              "tape"_a,
+             // The SDK circuit type: typed Any so the stub imports no SDK.
+             nb::sig("def absorb(self, tape: typing.Any) -> "
+                     "tuple[list[qarpx.Command], int, int]"),
              "Parse a qml.tape.QuantumScript into a QARPx SimpleBlock.");
 }

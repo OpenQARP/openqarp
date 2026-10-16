@@ -15,12 +15,15 @@ class hamiltonians:
 
 
 from scipy.optimize import OptimizeResult
+from sympy import Symbol
 
+import qarpx as qx
 from qarp.algorithms import VFF
 from qarp.blocks import (
     ComputationalBasisStateBlock,
     HEABlock,
     HnBlock,
+    SimpleBlock,
     SPABlock,
 )
 from qarp.operators import JordanWigner
@@ -181,3 +184,17 @@ def test_wrong_length_parameter_vector_raises():
     vff = VFF(U, hea, optimizer=AdamOptimizer({"maxiter": 2, "lr": 0.1})).build()
     with pytest.raises(ValueError):
         vff.objective(np.zeros(len(vff._all_symbols) - 1))
+
+
+def test_vff_over_a_raw_unitary():
+    """Raw qarpx blocks build to themselves.  Oracle: the unitary VFF
+    diagonalises, a raw H, is the Hadamard matrix."""
+    h = qx.SimpleBlock(1, "h")
+    h.h(0)
+    ansatz = SimpleBlock(1)
+    ansatz.ry(0, Symbol("a"))
+    vff = VFF(h, ansatz.build(), verbose=False).build()
+    held = vff.primitives[0].ket.children()[1]
+    assert held is h
+    matrix = np.array(qx.QarpSimulator().unitary_matrix(held.flatten(), 1))
+    np.testing.assert_allclose(matrix, np.array([[1, 1], [1, -1]]) / np.sqrt(2), atol=1e-12)

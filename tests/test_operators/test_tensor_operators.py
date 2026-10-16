@@ -236,7 +236,7 @@ def test_orbital_rotation_spin_expansion_feeds_the_block():
     np.testing.assert_allclose(u[0::2, 1::2], 0.0)
     np.testing.assert_allclose(u[1::2, 0::2], 0.0)
     block = OrbitalRotationBlock(u)
-    np.testing.assert_allclose(block.u, u, atol=1e-12)
+    np.testing.assert_allclose(block.rotation_matrix, u, atol=1e-12)
 
 
 def test_orbital_rotation_guards():

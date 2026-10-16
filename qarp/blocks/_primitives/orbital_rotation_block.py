@@ -102,12 +102,12 @@ class OrbitalRotationBlock(CompositeBlockBase):
         """
         rotations, signs = givens_angles(u)
         # givens_angles has already rejected a non-negligible imaginary part.
-        self.u = np.asarray(u).real.astype(float)
+        self.rotation_matrix = np.asarray(u).real.astype(float)
         self._rotations = rotations
         self._signs = signs
         self._dagger_rotation = bool(dagger)
         super().__init__(
-            n_qubits=self.u.shape[0],
+            n_qubits=self.rotation_matrix.shape[0],
             target_qubits=target_qubits,
             name=name,
         )

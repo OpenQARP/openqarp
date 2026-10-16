@@ -28,4 +28,11 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+/// A gate added directly to a block that never executes its own gates (a
+/// CompositeBlock runs only its children).  Translated to TypeError.
+class composite_gate_error : public std::logic_error {
+public:
+    using std::logic_error::logic_error;
+};
+
 }  // namespace qarpx

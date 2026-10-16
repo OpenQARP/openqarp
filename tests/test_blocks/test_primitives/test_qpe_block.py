@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+import qarpx as qx
 from qarp.algorithms import Sampler
 from qarp.blocks import (
     ComputationalBasisStateBlock,
@@ -176,3 +177,19 @@ def test_qpe_various_sizes_build(n_ancilla, n_state):
     ).build()
     assert block.is_built
     assert block.n_qubits == n_ancilla + n_state
+
+
+def test_qpe_on_raw_blocks_recovers_a_quarter():
+    """Raw qarpx blocks build to themselves.  Oracle: P(π/2)|1⟩ = e^{2πi·1/4}|1⟩,
+    exactly representable with two ancillas."""
+    eigenstate = qx.SimpleBlock(1, "one")
+    eigenstate.x(0)
+    unitary = qx.SimpleBlock(1, "p")
+    unitary.p(0, np.pi / 2)
+    block = QPEBlock(eigenstate=eigenstate, unitary=unitary, n_ancilla=2, n_state=1).build()
+
+    engine = QarpEngine(seed=0, n_shots=200)
+    sampler = Sampler(ket=block, measured_qubits=[0, 1])
+    sampler.build()
+    engine.build([sampler])
+    assert _phi_from_sample(engine.run()[0], 2) == pytest.approx(0.25)

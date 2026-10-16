@@ -272,6 +272,14 @@ protected:
     std::vector<Command> commands_;
     bool built_ = false;
 
+    /// False for blocks whose own command buffer never executes; their
+    /// builder methods then throw `composite_gate_error`.
+    [[nodiscard]] virtual bool accepts_gates() const { return true; }
+
+    /// The command buffer every builder method appends to, guarded by
+    /// `accepts_gates()`.
+    std::vector<Command>& gate_buffer();
+
     /// Helper: append a command.
     void add_command(Command cmd);
 
