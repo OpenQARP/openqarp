@@ -197,7 +197,7 @@ through; the absorbers already return Python blocks.
 **Renamed attributes.**  The three attributes that hide gate methods get public names that do
 not collide: `state_preparation` becomes `state_preparation_block` on both amplitude blocks,
 and `OrbitalRotationBlock.u` becomes `rotation_matrix`.  Nothing in the repository reads them
-from outside.  Names to confirm: see *Open decisions*.
+from outside.
 
 **Library strictness.**  `mypy.ini` gains `[mypy-qarp.*]` with `check_untyped_defs = True`;
 `[mypy]` stays empty, and `tests/` keeps today's setting.  The flag adds 184 errors in
@@ -260,13 +260,8 @@ notebook cannot exercise.  The runtime changes are fixes, each with a regression
   site work on raw blocks would be a feature, with about 45 regression tests, and sites such
   as `mark_built` and `_publish_symbols` only make sense on Python blocks anyway.
   *(2026-10-16)*
-
-### Open decisions
-
-To settle before the green-light; each moves to *Decisions* when it is.
-
-1. **Names**: `QarpBlock` for the new type; `state_preparation_block` and `rotation_matrix`
-   for the renamed attributes.
+- **Names:** `QarpBlock` for the new type; `state_preparation_block` and `rotation_matrix`
+  for the renamed attributes.  *(2026-10-16)*
 
 ## API sketch
 
