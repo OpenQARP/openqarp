@@ -1,6 +1,6 @@
 # OQTOPUS integration — `OqtopusEngine` over `oqtopus-client`, `sx_rz` rebase target
 
-**Status:** 🚧 In progress — Phases 0–2 implemented on `LocalOqtopusTransport`; Phase 3 open
+**Status:** 🚧 In progress — Phases 0–3a done (3a on the oqtopus-cli local stack); Phase 3b (QPU) open
 **Author:** Stefano Scali (+ Claude)
 **Reviewer:** <named reviewer — their green-light on this plan in the Draft PR is the design approval>
 **Date:** 2026-09-22
@@ -350,24 +350,35 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
    gateway source; a QPU gateway is UNVERIFIED.  Resolution: the QPU run of
    Phase 3 runs a one-CX-per-edge probe; until then the assumption is
    documented on `device_from_oqtopus`.
-2. **`transpiler_lib: None` on a QPU device.**  Verified for the Qulacs
-   gateway source (`supported_gates` post-transpile is exactly the `sx_rz`
-   set plus `delay`); the local-stack run of Phase 3 confirms it against the
-   running gateway.  A QPU gateway rejecting untranspiled input would be a
+2. **`transpiler_lib: None` on a QPU device.**  Settled for the Qulacs
+   gateway on the running local stack: the `sx_rz` Bell program runs
+   verbatim, and the same program with a raw `h` ends `failed`
+   (`Unsupported instruction: h` in the gateway log), which is the evidence
+   that nothing is transpiled server-side.  `test_oqtopus_live.py` asserts
+   both; a QPU gateway behaving differently fails those rows and is a
    QPU-run finding, not a design change.
 3. **Hardware credentials and device ids.**  None in hand.  The local stack
    from [oqtopus-cli](https://github.com/oqtopus-team/oqtopus-cli)
    (`cloud-local` + `backend` templates, default `qulacs` device, API on
    `http://127.0.0.1:8080`, token accepted empty by the service) is the
    sandbox for everything but open item 1; it is set up outside the repo and
-   never in CI.  Only the QPU run waits for credentials.  To check on first
-   contact: whether `OqtopusConfig.from_file` accepts the stack's empty
-   token, and if not, document `OQTOPUS_API_TOKEN` as the route.
+   never in CI.  Only the QPU run waits for credentials.  Settled on first
+   contact: `OqtopusConfig(url=..., api_token="")` is accepted by the stack,
+   so `OQTOPUS_API_TOKEN` may be empty.  One trap: the database seeds
+   `qulacs` with a 16-qubit `device_info` carrying no couplings, and the
+   gateway replaces it with its own topology (16 qubits, 22 directed
+   couplings) shortly after it starts; a device built from the seed is
+   edgeless and the router refuses every CX.  Query the device only once
+   the gateway reports `active`.
 4. **Mitigated counts.**  With `mitigation_info` set, are the returned counts
    still integers summing to `shots`?  Readout mitigation can yield real,
    even negative, values; `counts_to_sampling_result` would reject those with
-   a shot-sum `ValueError` after a paid job.  Resolve on the local stack
-   (3a); until then the docs say integer counts are expected back.
+   a shot-sum `ValueError` after a paid job.  On the local stack
+   `mitigation_info={"readout": "pseudo_inverse"}` is echoed on the job and
+   the counts come back as integers summing to `shots` (the simulator has
+   no readout calibration to invert); `test_oqtopus_live.py` asserts it.
+   Hardware remains unverified, so the docs still say integer counts are
+   expected back.
 5. **`oqtopus-client` floor.**  Every SDK surface the transport uses was
    verified against 1.3.0 only, hence the `>=1.3` pin; relax if an older
    release is shown to carry them.
@@ -412,7 +423,7 @@ block) appear only as *additional* rows.
 | `import qarp.engines` does not import `oqtopus_client` (checked in `sys.modules`) | §15 laziness | `…::test_lazy_sdk_import` |
 | Engine layering: `qarp/engines/_oqtopus/*` imports nothing from `qarp.algorithms` | existing `test_layering.py` lint (extended to the subpackage) | `test_layering.py` |
 | Additional (round-trip): `Sampler` on a random 4-qubit Clifford circuit, local transport vs. `QarpEngine`, total-variation distance < 0.05 at 4000 shots | not an oracle — agreement only | `…::test_agrees_with_qarp_engine` |
-| Live, local stack (Phase 3a, gated on `OQTOPUS_URL`, `OQTOPUS_API_TOKEN`, `QARP_OQTOPUS_DEVICE=qulacs`; `slow`): `device_from_oqtopus(get_device("qulacs"))` builds; the Bell program submitted with `transpiler_lib: None` ends `succeeded`; `x q[0];` returns the single key `"01"`; Bell counts within 5σ of ½ each | analytic; the bit-order claim checked on the running gateway rather than its source | `test_oqtopus_live.py` |
+| Live, local stack (Phase 3a, gated on `OQTOPUS_URL`, `OQTOPUS_API_TOKEN`, `QARP_OQTOPUS_DEVICE=qulacs`; `slow`): `device_from_oqtopus(get_device("qulacs"))` builds; the `sx_rz` Bell program submitted with `transpiler_lib: None` ends `succeeded` and the same program with a raw `h` ends `failed`; `x q[0];` returns the single key `"01"`; the engine's Bell counts within 5σ of ½ each, with and without readout mitigation | analytic; the bit-order and pass-through claims checked on the running gateway rather than its source | `test_oqtopus_live.py` |
 | Live, QPU (Phase 3b, same gating with a hardware device id; `slow`): Bell state on the named device, `P(00)+P(11) > 0.8`; one-CX-per-edge probe confirms open item 1 | analytic (loose bound — real hardware) | `test_oqtopus_live.py` |
 | Notebook `mwe_oqtopus.ipynb` runs on `LocalOqtopusTransport` in the nightly (`--nbmake`) | executed example surface (§15) | `examples/engines/` |
 
@@ -456,11 +467,13 @@ the rest (an IBM-style rebase target and a constructible result).
 
 ### Phase 3 — live tier (gated + `slow`, never in CI)
 
-3a, local stack (unblocked; open items 2–3):
+3a, local stack (open items 2–4):
 
-- [ ] `test_oqtopus_live.py` against the oqtopus-cli stack, device `qulacs`
-- [ ] Close open item 2 for the Qulacs gateway; settle the empty-token
-      question of open item 3
+- [x] `test_oqtopus_live.py` against the oqtopus-cli stack, device `qulacs`
+      (cloud v1.8.0, engine v2.2.1, gateway v1.1.16): 6 passed, QPU probe
+      skipped
+- [x] Open item 2 closed for the Qulacs gateway; open item 3's empty token
+      accepted; open item 4 settled for the simulator only
 
 3b, QPU (blocked on credentials; open item 1):
 
@@ -498,3 +511,8 @@ Declared during implementation and folded into the sections above:
   `QarpEngine`); a failing `cancel` never masks the error that triggered it;
   circuits compiled by another engine and reused with `rebuild=False` raise
   `CapabilityError` instead of crashing.
+- **Phase 3a rows** (Test plan, open items 2–4).  The planned
+  "untranspiled Bell" row used `h`, which the gateway refuses under
+  `transpiler_lib: None`; the row now submits the `sx_rz` form and a second
+  row asserts the raw-`h` program ends `failed`.  A mitigation row covers
+  open item 4 on the simulator.

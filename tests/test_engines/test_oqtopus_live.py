@@ -25,7 +25,22 @@ pytestmark = [
     ),
 ]
 
+# Bell state in the device basis: H = Rz(π/2)·SX·Rz(π/2) up to global phase.
 BELL = """OPENQASM 3.0;
+include "stdgates.inc";
+qubit[2] q;
+bit[2] c;
+rz(pi/2) q[0];
+sx q[0];
+rz(pi/2) q[0];
+cx q[0], q[1];
+c[0] = measure q[0];
+c[1] = measure q[1];
+"""
+
+# Outside the device basis: with ``transpiler_lib: None`` the service must
+# hand it to the device untouched, which refuses it.
+BELL_RAW_H = """OPENQASM 3.0;
 include "stdgates.inc";
 qubit[2] q;
 bit[2] c;
@@ -76,6 +91,17 @@ def test_untranspiled_bell_program_is_accepted(transport, device_id):
     assert (counts.get("00", 0) + counts.get("11", 0)) / 1000 > 0.8
 
 
+def test_transpiler_lib_none_is_honoured(transport, device_id):
+    """A program outside the device basis ends ``failed``: nothing is
+    transpiled server-side, so the engine's own rebase is what runs."""
+    jid = transport.submit(
+        program=BELL_RAW_H, shots=100, device_id=device_id, name="qarp-live:raw-h"
+    )
+    (out,) = transport.wait_all([jid], timeout=600.0)
+    assert out["status"] == "failed", out
+    assert out["counts"] is None
+
+
 def test_bit_order_c0_rightmost(transport, device_id):
     jid = transport.submit(program=X0, shots=200, device_id=device_id, name="qarp-live:x0")
     (out,) = transport.wait_all([jid], timeout=600.0)
@@ -99,6 +125,26 @@ def test_engine_bell_end_to_end(transport, device_id):
     else:  # simulator: 5σ on p(00) at 1000 shots
         assert abs(out.get((0, 0), 0.0) - 0.5) < 5 * math.sqrt(0.25 / 1000)
         assert p == 1.0
+
+
+def test_mitigated_counts_are_integers(transport, device_id):
+    """Plan open item 4: with readout mitigation requested the counts still
+    come back as integers summing to the shot count."""
+    from qarp.engines import OqtopusEngine
+
+    eng = OqtopusEngine(
+        device_id,
+        transport=transport,
+        n_shots=1000,
+        timeout=600.0,
+        mitigation_info={"readout": "pseudo_inverse"},
+    )
+    b = SimpleBlock(2, name="bell")
+    b.h(0).cx(0, 1)
+    b.build()
+    eng.build([Sampler(ket=b)])
+    out = eng.run()[0]
+    assert abs(out.get((0, 0), 0.0) - 0.5) < 5 * math.sqrt(0.25 / 1000)
 
 
 @pytest.mark.skipif(os.environ.get("QARP_OQTOPUS_QPU") != "1", reason="QPU probe only")
