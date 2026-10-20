@@ -252,6 +252,29 @@ def _action_holds(node, span: list, placement: list[int]) -> bool:
     )
 
 
+def tree_signature(node) -> tuple:
+    """What ``plan`` reads from a built block's tree besides its stream, as
+    a hashable key: class, placement, pending dagger, action digest, and
+    each wired child's stream length, placement and source signature."""
+    kids: tuple = ()
+    if _has_pending_subs(node):
+        pass
+    elif isinstance(node, qx.CompositeBlock):
+        kids = tuple(
+            (len(k.flatten()), tuple(_placement(k)), tree_signature(_source(k)))
+            for k in node.children()
+        )
+    elif isinstance(node, qx.ControlledBlock):
+        kids = (tree_signature(_source(node.inner())),)
+    return (
+        type(node).__qualname__,
+        tuple(_placement(node)),
+        _is_daggered(node),
+        getattr(node, "_action_digest", None),
+        kids,
+    )
+
+
 def _declares_structure(node) -> bool:
     method = getattr(type(node), "structure", None)
     return method is not None and not getattr(method, "_qarp_default", False)
@@ -727,9 +750,19 @@ def _composition(node) -> Optional[list]:
         # trusted only from the class that also defines how the block is built.
         declarer = _owner(type(node), "structure")
         trusted = declarer is not None and declarer is _owner(type(node), "build_vanilla")
-        return node.structure() if trusted else None
+        if trusted:
+            return node.structure()
     children = getattr(node, "unbuilt_children", None)
     return children() if children is not None else None
+
+
+def _placed(part, qmap: list[int]) -> Optional[list[int]]:
+    """``part``'s placement in the root frame; None past the node's width,
+    which the planner declines rather than mirrors."""
+    placement = _placement(part)
+    if any(t < 0 or t >= len(qmap) for t in placement):
+        return None
+    return [qmap[t] for t in placement]
 
 
 def _collect_parts(
@@ -756,14 +789,18 @@ def _collect_parts(
         if isinstance(part, Repeat):
             if not _is_built(part.block):
                 return False
+            kid_map = _placed(part.block, qmap)
+            if kid_map is None:
+                return False
             step = list(part.block.flatten())
             repeated[len(entries)] = [c.remap_qubits(qmap) for c in step] if nested else step
-            kid_map = [qmap[t] for t in _placement(part.block)]
             entries.append(
                 (part.block, len(cmds), len(cmds), kid_map, part.count, _is_daggered(part.block))
             )
             continue
-        kid_map = [qmap[t] for t in _placement(part)]
+        kid_map = _placed(part, qmap)
+        if kid_map is None:
+            return False
         kid_parts = _composition(part)
         if kid_parts is not None:
             if not _collect_parts(part, kid_parts, kid_map, cmds, entries, repeated, owners):

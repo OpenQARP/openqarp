@@ -201,8 +201,9 @@ def _compile_one(self, block, prim) -> _Compiled:
   the engine runs each circuit's program and hands the results to `run()` in order, as on
   the built path, so the restriction the side door needed (it handed the bare block's counts
   to the primitive) no longer applies.
-- **Programs of the built path are cached on the engine** by `(stream digest, width, fusion
-  width, level)`, bounded to 64 entries; the unbuilt path is not cached, having no stream to
+- **Programs of the built path are cached on the engine** by `(stream digest, tree
+  signature, width, fusion width, level)`, bounded to 64 entries, the tree signature being
+  what `plan` reads from the tree besides the stream (`_program.tree_signature`); the unbuilt path is not cached, having no stream to
   digest and costing milliseconds.
 - **`QarpEngine.batch_run` evaluates each parameter set as `run()` does**, set 0 on `run()`'s
   seeds and each later set stepping every circuit's seed by its index.  `QarpEngine` does not

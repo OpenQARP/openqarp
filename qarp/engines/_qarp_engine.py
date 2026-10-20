@@ -228,8 +228,8 @@ class QarpEngine(Engine):
         self._n_shots = n_shots
         self._seed = seed
         self._structured = _program.resolve(structured)
-        # Programs of the built path by stream digest, so a rebuild of the
-        # same circuit (every batch_run) never plans twice.
+        # Programs of the built path by stream digest and tree signature (the
+        # plan reads both), so a rebuild of the same circuit never plans twice.
         self._plan_cache: OrderedDict[tuple, Optional[qx.Program]] = OrderedDict()
         self._primitives: list[Runnable] = []
 
@@ -366,7 +366,13 @@ class QarpEngine(Engine):
             return None
         n = blk.n_qubits
         width = _program.fusion_width_of(self._sim, n)
-        key = (qx._commands_digest(list(flat)), n, width, self._opt_level_number)
+        key = (
+            qx._commands_digest(list(flat)),
+            _program.tree_signature(blk),
+            n,
+            width,
+            self._opt_level_number,
+        )
         if key in self._plan_cache:
             self._plan_cache.move_to_end(key)
             return self._plan_cache[key]

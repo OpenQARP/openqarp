@@ -181,6 +181,39 @@ def test_a_declaration_from_the_building_class_is_still_lowered():
     assert not block.is_built
 
 
+def test_an_untrusted_declaration_is_ignored_not_refused():
+    """The declaration is distrusted, but the children the inherited build
+    wires are readable: X³ = X on qubits 2..4 (analytic) is planned with the
+    root never built."""
+    block = _Annotated([_XLayerThrice(3, target_qubits=[2, 3, 4])], n_qubits=5)
+    assert _program.plan_structure(block, 5) is not None
+    assert not block.is_built
+    planned, kernels = _sampled(block)
+    assert "permutation" in kernels
+    assert planned == pytest.approx({(0, 0, 1, 1, 1): 1.0}, abs=1e-12)
+
+
+# ── a part placed outside its node's frame ─────────────────────────────────
+
+
+def test_a_part_placed_past_the_frame_is_declined_not_an_error():
+    """A 2-wide child on qubits 0 and 3 of a 2-qubit root gates only its
+    qubit 0, so the gate path runs H on q0: {00, 10} at 1/2 each (analytic).
+    Planning declines and the default engine runs that same circuit."""
+
+    def circuit():
+        child = SimpleBlock(2, target_qubits=[0, 3])
+        child.h(0)
+        return CompositeBlock([child], n_qubits=2)
+
+    assert _program.plan_structure(circuit(), 2) is None
+    want = {(0, 0): 0.5, (1, 0): 0.5}
+    for structured in (True, False):
+        dist, kernels = _sampled(circuit(), structured=structured)
+        assert kernels == ["gates"]
+        assert dist == pytest.approx(want, abs=1e-12)
+
+
 # ── B5: planning declines when the built stream would move cbits ───────────
 
 

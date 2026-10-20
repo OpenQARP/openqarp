@@ -324,7 +324,6 @@ class ShiftPlan:
         # Renamed occurrences the symbol does not move (zero affine coefficient):
         # bound at the base point, never shifted.
         self._inert: list[tuple[str, str]] = []
-        self.circuits: list[list] = []
         # prim.compiled with each rewritten stream replaced; a circuit no
         # tracked symbol appears in keeps its record, program included.
         self.compiled: list = []
@@ -342,7 +341,6 @@ class ShiftPlan:
                     self.occurrences[sym].append(
                         Occurrence(ci, cmd_idx, param_idx, sym, coeffs[name], name)
                     )
-            self.circuits.append(current)
             self.compiled.append(
                 replace(compiled, commands=current, program=None, parametric=None)
                 if rewritten
@@ -361,7 +359,7 @@ class ShiftPlan:
     def stencil(self, sym: str) -> Stencil:
         out: Stencil = []
         for occ in self.occurrences[sym]:
-            gate = self.circuits[occ.circuit][occ.command].gate
+            gate = self.compiled[occ.circuit].commands[occ.command].gate
             for shift, coeff in shift_rule(gate, self.kind):
                 # angle = c·x + b: shift x by s/c, and ∂/∂x = c·∂/∂angle.
                 out.append(({occ.private: shift / occ.coeff}, coeff * occ.coeff))
