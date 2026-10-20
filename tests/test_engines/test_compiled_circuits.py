@@ -196,3 +196,46 @@ def test_a_record_reads_its_facts_from_its_stream():
     assert record.parametric and record.mid_circuit
     bound = CompiledCircuit(qx.substitute_all(list(b.flatten()), {"a": 0.1}), 1, ())
     assert not bound.parametric
+
+
+def _declaring_tree() -> CompositeBlock:
+    """A built modular multiplication (planned from its declaration) padded
+    to the planner's register minimum."""
+    pad = SimpleBlock(12)
+    pad.h(11)
+    mult = qarp.blocks.ModularMultiplicationBlock(2, 15, target_qubits=[0, 1, 2, 3])
+    return CompositeBlock([pad, mult], n_qubits=12).build()
+
+
+def _replayed_stream() -> SimpleBlock:
+    """A plain block with the declaring tree's gate stream, digest-equal to it."""
+    stream = list(_declaring_tree().flatten())
+
+    class _Replay(SimpleBlock):
+        def build_vanilla(self):
+            self.set_commands(stream)
+
+    return _Replay(12).build()
+
+
+def _kernels_alone(make) -> list:
+    s = Sampler(make())
+    eng = QarpEngine(n_shots=qarp.EXACT)
+    eng.build([s])
+    return eng.kernels(s)
+
+
+@pytest.mark.parametrize("first, second", [("declaring", "plain"), ("plain", "declaring")])
+def test_plan_cache_tells_trees_with_one_stream_apart(first, second):
+    # Same stream digest, different trees: the plan is read from the tree,
+    # so the second build must not inherit the first one's program.
+    makers = {"declaring": _declaring_tree, "plain": _replayed_stream}
+    assert qx._commands_digest(list(_declaring_tree().flatten())) == qx._commands_digest(
+        list(_replayed_stream().flatten())
+    )
+    want = _kernels_alone(makers[second])
+    eng = QarpEngine(n_shots=qarp.EXACT)
+    eng.build([Sampler(makers[first]())])
+    s = Sampler(makers[second]())
+    eng.build([s])
+    assert eng.kernels(s) == want

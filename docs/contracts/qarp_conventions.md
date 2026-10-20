@@ -747,7 +747,8 @@ How circuits run.
   is what avoids the ladder.  Two primitives build their ket in `circuits()`:
   `CuttingPrimitive`, whose cut reads the gate stream, and `PauliShadow`, whose symbol
   check needs a built block.  Programs of the built path are cached on the engine by the
-  stream's digest, so a rebuild of the same circuit (every `batch_run`) never plans twice.
+  stream's digest and the block tree's signature (the plan is read from both), so a rebuild
+  of the same circuit (every `batch_run`) never plans twice.
 
 ## 15. Project & repository conventions
 
