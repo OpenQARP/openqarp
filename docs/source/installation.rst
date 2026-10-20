@@ -280,7 +280,7 @@ the ``[oqtopus]`` extra, which installs the ``oqtopus-client`` SDK::
 
    pip install "openqarp[oqtopus]"
 
-The SDK is imported when ``OqtopusClientTransport`` is constructed, never at
+The SDK is imported when ``RemoteOqtopusTransport`` is constructed, never at
 import time; credentials are resolved by the SDK (``OQTOPUS_URL`` and
 ``OQTOPUS_API_TOKEN``, or its config file).  ``LocalOqtopusTransport`` runs
 the same engine on the local simulator without the extra or any credential.

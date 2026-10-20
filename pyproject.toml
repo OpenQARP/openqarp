@@ -85,7 +85,7 @@ openfermion = ["openfermion>=1.7.1,<1.8"]
 # from `full` / `full-dev`.
 cudaq-runtime = ["cuda-quantum-cu12>=0.9"]
 # OQTOPUS cloud client behind qarp.engines.OqtopusEngine (the one SDK a remote
-# engine may route through, §15).  Imported inside OqtopusClientTransport's
+# engine may route through, §15).  Imported inside RemoteOqtopusTransport's
 # constructor only; LocalOqtopusTransport needs nothing from it.  Kept out of
 # [full] / [full-dev] so the coverage floor is measured without it; the
 # nightly notebooks job installs it.

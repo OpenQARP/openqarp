@@ -4,7 +4,7 @@ Oracles: the OQTOPUS user-API sampling payload (``{"00": 506, "11": 494}``-
 style keys, ``c[0]`` rightmost, per the device-gateway ``_remap_counts``
 docstring), the ``jobs.JobStatus`` enum of the spec, analytic Bell
 statistics for the local transport, and the SDK's own ``to_model()`` for the
-client transport (``importorskip``).  Blocks are built inside tests.
+remote transport (``importorskip``).  Blocks are built inside tests.
 """
 
 import qarpx as qx
@@ -144,28 +144,28 @@ def test_local_requires_a_width():
         LocalOqtopusTransport()
 
 
-# ── OqtopusClientTransport ───────────────────────────────────────────────
+# ── RemoteOqtopusTransport ───────────────────────────────────────────────
 
 
-def test_client_transport_missing_sdk_names_the_extra(monkeypatch):
+def test_remote_transport_missing_sdk_names_the_extra(monkeypatch):
     import sys
 
     import pytest
 
-    from qarp.engines import OqtopusClientTransport
+    from qarp.engines import RemoteOqtopusTransport
 
     monkeypatch.setitem(sys.modules, "oqtopus_client", None)
     with pytest.raises(ImportError, match=r'pip install "openqarp\[oqtopus\]"'):
-        OqtopusClientTransport()
+        RemoteOqtopusTransport()
 
 
-def test_client_transport_submit_builds_a_sampling_spec(monkeypatch):
+def test_remote_transport_submit_builds_a_sampling_spec(monkeypatch):
     import pytest
 
     oc = pytest.importorskip("oqtopus_client")
-    from qarp.engines import OqtopusClientTransport
+    from qarp.engines import RemoteOqtopusTransport
 
-    t = OqtopusClientTransport(oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"))
+    t = RemoteOqtopusTransport(oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"))
     seen = {}
 
     class _Resp:
@@ -193,13 +193,13 @@ def test_client_transport_submit_builds_a_sampling_spec(monkeypatch):
     assert dict(model.mitigation_info) == {"readout": "pseudo_inverse"}
 
 
-def test_client_transport_wait_polls_then_fetches_once(monkeypatch):
+def test_remote_transport_wait_polls_then_fetches_once(monkeypatch):
     import pytest
 
     oc = pytest.importorskip("oqtopus_client")
-    from qarp.engines import OqtopusClientTransport
+    from qarp.engines import RemoteOqtopusTransport
 
-    t = OqtopusClientTransport(
+    t = RemoteOqtopusTransport(
         oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"), poll_interval=0.0
     )
     status_calls = {"a": 0, "b": 0}
@@ -233,13 +233,13 @@ def test_client_transport_wait_polls_then_fetches_once(monkeypatch):
     assert status_calls == {"a": 3, "b": 3}
 
 
-def test_client_transport_wait_times_out(monkeypatch):
+def test_remote_transport_wait_times_out(monkeypatch):
     import pytest
 
     oc = pytest.importorskip("oqtopus_client")
-    from qarp.engines import OqtopusClientTransport
+    from qarp.engines import RemoteOqtopusTransport
 
-    t = OqtopusClientTransport(
+    t = RemoteOqtopusTransport(
         oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"), poll_interval=0.0
     )
     monkeypatch.setattr(t._client, "status", lambda jid: oc.rest.models.JobsJobStatus.RUNNING)
@@ -261,25 +261,25 @@ def test_importing_qarp_engines_does_not_import_the_sdk():
     assert out.stdout.strip() == "False"
 
 
-def test_client_transport_resolves_env_before_config_file(monkeypatch, tmp_path):
+def test_remote_transport_resolves_env_before_config_file(monkeypatch, tmp_path):
     import pytest
 
     pytest.importorskip("oqtopus_client")
-    from qarp.engines import OqtopusClientTransport
+    from qarp.engines import RemoteOqtopusTransport
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))  # no config file here
     monkeypatch.setenv("OQTOPUS_URL", "http://127.0.0.1:1")
     monkeypatch.setenv("OQTOPUS_API_TOKEN", "t")
-    assert OqtopusClientTransport()._client.url == "http://127.0.0.1:1"
+    assert RemoteOqtopusTransport()._client.url == "http://127.0.0.1:1"
 
 
-def test_client_transport_cancel_swallows_transport_errors(monkeypatch):
+def test_remote_transport_cancel_swallows_transport_errors(monkeypatch):
     import pytest
 
     oc = pytest.importorskip("oqtopus_client")
-    from qarp.engines import OqtopusClientTransport
+    from qarp.engines import RemoteOqtopusTransport
 
-    t = OqtopusClientTransport(oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"))
+    t = RemoteOqtopusTransport(oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"))
 
     def boom(jid):
         raise ConnectionError(jid)

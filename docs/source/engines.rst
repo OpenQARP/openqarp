@@ -228,7 +228,7 @@ unchanged; ``batch_run`` submits every job of the sweep up front and waits
 once, which makes a parameter-shift gradient a single round trip.
 
 The engine talks to the service through a four-method transport.
-:class:`~qarp.engines.OqtopusClientTransport` is the default and needs the
+:class:`~qarp.engines.RemoteOqtopusTransport` is the default and needs the
 ``[oqtopus]`` extra (see `Installation <installation.html>`_); credentials are
 resolved by the SDK.  :class:`~qarp.engines.LocalOqtopusTransport` runs the
 same programs on the local simulator, with no extra and no credential — the

@@ -1,7 +1,7 @@
 """The OQTOPUS transport boundary (§15).
 
 ``OqtopusTransport`` is the four-method protocol the engine depends on.
-``OqtopusClientTransport`` is the only module in qarp that imports
+``RemoteOqtopusTransport`` is the only module in qarp that imports
 ``oqtopus_client``, inside its constructor; ``LocalOqtopusTransport`` runs
 the emitted programs on ``QarpSimulator`` and answers with the documented
 payload shapes, so users, the example notebook and the tests need no
@@ -20,7 +20,7 @@ import qarpx as qx
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 
 _MISSING_SDK = (
-    "OqtopusClientTransport needs the OQTOPUS client SDK, which is not "
+    "RemoteOqtopusTransport needs the OQTOPUS client SDK, which is not "
     'installed.  Install the extra:\n    pip install "openqarp[oqtopus]"\n'
     "or use LocalOqtopusTransport for a credential-free dry run."
 )
@@ -167,7 +167,7 @@ def _bitstring_counts(sr: qx.SamplingResult, n_cbits: int) -> dict[str, int]:
     return {format(k, f"0{sr.n_qubits}b"): n for k, n in sr.counts.items()}
 
 
-class OqtopusClientTransport:
+class RemoteOqtopusTransport:
     """The default transport: ``oqtopus_client`` over the OQTOPUS user API.
 
     ``config`` is an ``oqtopus_client.OqtopusConfig``; ``None`` resolves
@@ -211,7 +211,7 @@ class OqtopusClientTransport:
         n = dev.n_qubits
         if n is None:
             raise ValueError(
-                f"OqtopusClientTransport: device {device_id!r} publishes neither a "
+                f"RemoteOqtopusTransport: device {device_id!r} publishes neither a "
                 "device_info topology nor n_qubits"
             )
         return _all_to_all_device_info(int(n), device_id)
@@ -251,7 +251,7 @@ class OqtopusClientTransport:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
-                    f"OqtopusClientTransport: jobs still pending after {timeout}s: {pending}"
+                    f"RemoteOqtopusTransport: jobs still pending after {timeout}s: {pending}"
                 )
             time.sleep(min(interval, remaining))
             interval = min(interval * self._poll_backoff, self._max_poll_interval)

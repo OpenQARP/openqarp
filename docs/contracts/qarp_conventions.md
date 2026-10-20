@@ -666,7 +666,7 @@ How circuits run.
   (`to_qiskit()` / `PytketAbsorber` / …), imported inside the call, so `import qarp` pulls
   none of them and core code paths (blocks, transpiler, local engines) never route through
   an SDK.  The one exception is a *cloud client* SDK behind a remote engine: `oqtopus-client`
-  (the `oqtopus` extra) is imported inside `OqtopusClientTransport`'s constructor, never at
+  (the `oqtopus` extra) is imported inside `RemoteOqtopusTransport`'s constructor, never at
   module scope, and never by blocks, the transpiler or a local engine.
 - **Import name** is `qarpx`, conventionally `import qarpx as qx`.
 - **The qarpx ABI counter moves with the bindings.** Any commit that changes a binding

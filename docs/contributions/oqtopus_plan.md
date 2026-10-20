@@ -160,7 +160,7 @@ integration cannot land without them:
 
 ```
 qarp/engines/_oqtopus/
-    _transport.py   OqtopusTransport (Protocol), OqtopusClientTransport, LocalOqtopusTransport
+    _transport.py   OqtopusTransport (Protocol), RemoteOqtopusTransport, LocalOqtopusTransport
     _result.py      counts_to_sampling_result(...)
     _engine.py      OqtopusEngine
 qarp/devices/
@@ -173,7 +173,7 @@ depends on the protocol only.  `LocalOqtopusTransport` parses programs with
 on `qx.QarpSimulator`, so it imports no block class at all, and
 `qarp/engines/` never imports `qarp.algorithms` (`test_layering.py`, extended
 to walk the new subpackage).  Service-shaped keys are built from the
-simulator's `cbit_history` (the classical register, `c[0]` rightmost).  `OqtopusClientTransport` is the default and the
+simulator's `cbit_history` (the classical register, `c[0]` rightmost).  `RemoteOqtopusTransport` is the default and the
 sole importer of `oqtopus_client`; it builds `OqtopusJobSpec.sampling(...)`,
 calls `submit_job`, polls `status()` and fetches `get_job()` once terminal
 (presigned result URLs expire after one hour — never fetch early).  Config
@@ -189,7 +189,7 @@ is a device builder, not an engine concern, and useful for `ResourceEstimator`
 runs against a real topology without any network call; `qarp.devices` cannot
 re-export it from the engines package without importing the engines (which
 import `qarp.devices`) during its own initialisation.  A device that publishes
-no topology but an `n_qubits` is served as all-to-all by the client transport.
+no topology but an `n_qubits` is served as all-to-all by the remote transport.
 
 ### The `sx_rz` target (§11, §16)
 
@@ -266,7 +266,7 @@ class OqtopusTransport(Protocol):
     def wait_all(self, job_ids: Sequence[str], *, timeout: float) -> list[JobOutcome]: ...
     def cancel(self, job_ids: Sequence[str]) -> None: ...
 
-class OqtopusClientTransport:         # the only module that imports oqtopus_client
+class RemoteOqtopusTransport:         # the only module that imports oqtopus_client
     def __init__(self, config: "oqtopus_client.OqtopusConfig | None" = None,
                  *, poll_interval: float = 1.0, poll_backoff: float = 1.2,
                  max_poll_interval: float = 10.0): ...
@@ -305,7 +305,7 @@ class OqtopusEngine(Engine):
         self,
         device_id: str,
         *,
-        transport: OqtopusTransport | None = None,   # None -> OqtopusClientTransport()
+        transport: OqtopusTransport | None = None,   # None -> RemoteOqtopusTransport()
         n_shots: int = 1_000,
         timeout: float = 600.0,                       # per dispatch / sweep call
         job_name: str = "qarp",                       # prefix; jobs are f"{job_name}:{prim}:{k}"
@@ -338,7 +338,7 @@ oqtopus = ["oqtopus-client>=1.3"]
 
 Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
 `qarp.engines.OqtopusTransport`, `qarp.engines.LocalOqtopusTransport`,
-`qarp.engines.OqtopusClientTransport`, `qarp.devices.device_from_oqtopus`,
+`qarp.engines.RemoteOqtopusTransport`, `qarp.devices.device_from_oqtopus`,
 `qarp.errors.RemoteJobError`, `qarpx.sx_rz_gateset`.  Everything under
 `qarp/engines/_oqtopus/` is private.
 
@@ -404,15 +404,15 @@ block) appear only as *additional* rows.
 | `counts_to_sampling_result({"00": 506, "11": 494}, n_qubits=2, n_shots=1000).counts == {0: 506, 3: 494}`; `{"01": 7}` → `{1: 7}` | the OQTOPUS user-API spec example payload and the device-gateway `_remap_counts` docstring ("bit index 0 rightmost") | `test_oqtopus_transport.py::test_counts_bit_order` |
 | `LocalOqtopusTransport` on the spec's Bell program returns keys ⊆ `{"00", "11"}` at ≈ ½ each; on `x q[0];` returns `{"01": shots}` | OQTOPUS spec example; analytic | `test_oqtopus_transport.py::test_local_payload_shape` |
 | `LocalOqtopusTransport` status values ∈ the spec enum; `cancel` on an unknown id is a no-op; `log` records every call | the `jobs.JobStatus` enum from the spec | `test_oqtopus_transport.py` |
-| `OqtopusClientTransport.submit` builds a spec with `job_type == "sampling"` and `transpiler_info == {"transpiler_lib": None}` (client monkeypatched at `submit_job`) | `oqtopus_client.OqtopusJobSpec.to_model()` — the SDK as oracle | `test_oqtopus_transport.py` (`importorskip("oqtopus_client")`) |
-| Constructing `OqtopusClientTransport` without the SDK raises `ImportError` naming `pip install "openqarp[oqtopus]"` | contract (module blocked via `sys.modules`) | `test_oqtopus_transport.py` |
-| `OqtopusEngine(..., mitigation_info=m)` → every `submit` in `transport.log` carries `m` unchanged; `OqtopusClientTransport.submit` puts it in the spec's `mitigation_info` verbatim | structural; the SDK's `to_model()` as oracle | `test_oqtopus_engine.py::test_mitigation_info_forwarded`, `test_oqtopus_transport.py` |
+| `RemoteOqtopusTransport.submit` builds a spec with `job_type == "sampling"` and `transpiler_info == {"transpiler_lib": None}` (client monkeypatched at `submit_job`) | `oqtopus_client.OqtopusJobSpec.to_model()` — the SDK as oracle | `test_oqtopus_transport.py` (`importorskip("oqtopus_client")`) |
+| Constructing `RemoteOqtopusTransport` without the SDK raises `ImportError` naming `pip install "openqarp[oqtopus]"` | contract (module blocked via `sys.modules`) | `test_oqtopus_transport.py` |
+| `OqtopusEngine(..., mitigation_info=m)` → every `submit` in `transport.log` carries `m` unchanged; `RemoteOqtopusTransport.submit` puts it in the spec's `mitigation_info` verbatim | structural; the SDK's `to_model()` as oracle | `test_oqtopus_engine.py::test_mitigation_info_forwarded`, `test_oqtopus_transport.py` |
 | `Sampler(GHZ₃)` on `OqtopusEngine(local)`: `{000: ½, 111: ½}` within 5σ at 4000 shots, no other key | analytic | `test_oqtopus_engine.py::test_sampler_ghz` |
 | `PauliAveraging(Z₀)` on `Ry(θ)|0⟩`: `cos θ` within 5σ for θ ∈ {0.3, 1.1, 2.5} | analytic | `…::test_expectation_cos` |
 | Routed: line topology `0–1–2`, ket `X(0)·CX(0,2)` → single key `101` (logical order) | analytic + §14 reindex rule | `…::test_routed_counts_logical_order` |
 | Engine lays the measurement layer: a measurement-free block submits `bit[n] c;` and `c[i] = measure q[i]` for every *logical* qubit; a block measuring one qubit explicitly still measures the rest (uniform H⊗3 within 5σ) | §12.1 emission table; analytic | `…::test_measure_all_appended`, `…::test_partially_measured_block_still_reports_every_qubit` |
 | Transport whose `cancel` raises → the original `TimeoutError` still propagates; circuits compiled by another engine reused with `rebuild=False` → `CapabilityError` | contract | `…::test_failed_cancel_does_not_mask_the_timeout`, `…::test_foreign_compiled_circuits_are_refused` |
-| `OqtopusClientTransport()` with `OQTOPUS_URL` set and no config file resolves the env; `cancel` swallows transport errors | contract | `test_oqtopus_transport.py` |
+| `RemoteOqtopusTransport()` with `OQTOPUS_URL` set and no config file resolves the env; `cancel` swallows transport errors | contract | `test_oqtopus_transport.py` |
 | `batch_run` over 3 parameter sets: `len(transport.log["submit"]) == 3 × n_circuits`, one `wait_all`; per-set values equal `run()` at the same params within 5σ | structural + analytic (`cos θ` rows) | `…::test_sweep_submits_all_then_waits` |
 | Parameter-shift VQE, 1 qubit, `H = Z`, ansatz `Ry(θ)`: converges to `θ ≈ π`, energy `−1 ± 5σ` | analytic minimum | `…::test_vqe_one_qubit_parameter_shift` |
 | `slow`: VQE H₂ (STO-3G, JW) on the local transport reaches `−1.137 ± 0.01` Ha at 8000 shots | published FCI energy (Szabo–Ostlund; the value already pinned in `tests/pccd_reference_energies.py`) | `…::test_vqe_h2_slow` |
@@ -444,7 +444,7 @@ the rest (an IBM-style rebase target and a constructible result).
 
 ### Phase 1 — plumbing, offline
 
-- [ ] `OqtopusTransport` protocol, `LocalOqtopusTransport`, `OqtopusClientTransport`
+- [ ] `OqtopusTransport` protocol, `LocalOqtopusTransport`, `RemoteOqtopusTransport`
 - [ ] `device_from_oqtopus` + `tests/oqtopus_device_topology.py`
 - [ ] `counts_to_sampling_result`
 - [ ] `RemoteJobError`; `[oqtopus]` extra
@@ -459,7 +459,7 @@ the rest (an IBM-style rebase target and a constructible result).
 - [ ] `examples/engines/mwe_oqtopus.ipynb` on `LocalOqtopusTransport`
       (an inline copy of the example topology — `examples/` never imports
       `tests/`, §15 — GHZ sampling, one VQE step, and the
-      `OqtopusClientTransport` construction shown but not executed)
+      `RemoteOqtopusTransport` construction shown but not executed)
 - [ ] `nightly.yml`: install `[…,oqtopus]` in the notebooks job; run
       `tests/test_engines/test_oqtopus_transport.py` un-skipped there
 - [ ] §14 and §15 edits
@@ -501,7 +501,7 @@ Declared during implementation and folded into the sections above:
   `SimpleBlock.from_qasm3` (same parser, no block import).
 - **Cancellation on any exception** leaving submit/wait, not only timeout and
   Ctrl-C.
-- **Client transport fallbacks**: a device without a published topology is
+- **Remote transport fallbacks**: a device without a published topology is
   served all-to-all from `n_qubits`; a succeeded job without a payload is
   reported with `counts=None` and raised as `RemoteJobError`; with no
   `config`, `OqtopusConfig.from_env()` is tried before the SDK's config file
@@ -516,3 +516,7 @@ Declared during implementation and folded into the sections above:
   `transpiler_lib: None`; the row now submits the `sx_rz` form and a second
   row asserts the raw-`h` program ends `failed`.  A mitigation row covers
   open item 4 on the simulator.
+- **`RemoteOqtopusTransport`** is the name of the SDK-backed transport (file
+  layout, API, test plan).  It pairs with `LocalOqtopusTransport` on the
+  distinction a user cares about, where the circuits run, rather than on the
+  package it wraps.

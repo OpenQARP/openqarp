@@ -43,7 +43,7 @@ class OqtopusEngine(Engine):
     Args:
         device_id: The OQTOPUS device to run on.
         transport: An ``OqtopusTransport``; ``None`` builds
-            ``OqtopusClientTransport()`` (the SDK resolves credentials).
+            ``RemoteOqtopusTransport()`` (the SDK resolves credentials).
             ``LocalOqtopusTransport`` is the credential-free dry run.
         n_shots: Engine-default shot count; must be a positive ``int``.
         timeout: Seconds one ``run`` / ``batch_run`` call waits for its jobs
@@ -73,9 +73,9 @@ class OqtopusEngine(Engine):
         if not isinstance(n_shots, int) or n_shots <= 0:
             raise ValueError(f"OqtopusEngine: n_shots must be a positive int, got {n_shots!r}")
         if transport is None:
-            from ._transport import OqtopusClientTransport
+            from ._transport import RemoteOqtopusTransport
 
-            transport = OqtopusClientTransport()
+            transport = RemoteOqtopusTransport()
         self._device_id = device_id
         self._transport = transport
         self._n_shots = n_shots

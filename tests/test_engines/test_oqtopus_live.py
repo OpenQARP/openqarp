@@ -63,12 +63,12 @@ c[1] = measure q[1];
 @pytest.fixture(scope="module")
 def transport():
     oc = pytest.importorskip("oqtopus_client")
-    from qarp.engines import OqtopusClientTransport
+    from qarp.engines import RemoteOqtopusTransport
 
     config = oc.OqtopusConfig(
         url=os.environ["OQTOPUS_URL"], api_token=os.environ.get("OQTOPUS_API_TOKEN", "")
     )
-    return OqtopusClientTransport(config, poll_interval=0.5)
+    return RemoteOqtopusTransport(config, poll_interval=0.5)
 
 
 @pytest.fixture(scope="module")
