@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
@@ -44,11 +44,11 @@ class QPE(CompositeAlgorithm):
         self.n_ancilla = n_ancilla
         self.freqs = [x / (2**self.n_ancilla) for x in range(2 ** (self.n_ancilla))]
 
-        self.block = None
-        self.distribution = None
-        self.bitstring = None
-        self.result = None
-        self.result_probability = None
+        self.block: Optional[QPEBlock] = None
+        self.distribution: Any = None
+        self.bitstring: Any = None
+        self.result: Any = None
+        self.result_probability: Any = None
 
     def build(self):
         """

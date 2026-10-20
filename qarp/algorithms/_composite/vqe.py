@@ -4,7 +4,7 @@ import numpy as np
 
 from qarp.operators import QubitOperator
 
-from ...blocks import AnyBlock
+from ...blocks import AnyBlock, QarpBlock
 from ...engines import Engine
 from ...optimizers import Optimizer, ScipyOptimizer
 from .._primitives import PrimitiveAlgorithm, StateVector
@@ -15,7 +15,7 @@ class VQE(VQA):
     def __init__(
         self,
         operator: Union[QubitOperator, AnyBlock],
-        ket: AnyBlock,
+        ket: QarpBlock,
         initial_parameters: Optional[np.typing.NDArray[np.float64]] = None,
         gradient: Union[bool, str] = False,
         optimizer: Optional[Optimizer] = None,

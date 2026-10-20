@@ -1,7 +1,7 @@
 import copy
 import inspect
 from itertools import combinations
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -11,7 +11,7 @@ from qarp.operators import QubitOperator
 from ..._types import Consumes
 from ...algorithms._composite import CompositeAlgorithm
 from ...algorithms._primitives import PrimitiveAlgorithm, Sampler
-from ...blocks import AnyBlock, CompositeBlock, PauliBlock
+from ...blocks import CompositeBlock, PauliBlock, QarpBlock
 from ...engines import Engine
 from ...engines._gradients import gradient_method_from_flag
 from ...factories import PauliBlockFactory
@@ -368,7 +368,7 @@ def _precompute_group_layouts(groups, plain_paulis, n_qubits):
     matching ``list.index``), term coefficients, and a {0,1} qubit-support
     matrix of shape (n_terms, n_qubits).
     """
-    first_index = {}
+    first_index: Dict[Any, int] = {}
     for i, entry in enumerate(plain_paulis):
         first_index.setdefault(entry, i)
 
@@ -407,7 +407,7 @@ class PCE(CompositeAlgorithm):
         self,
         graph: Graph,
         order: int,
-        ket: AnyBlock,
+        ket: QarpBlock,
         merging: bool = False,
         classical_function: Callable = classical_function_max_cut,
         quantum_function: Callable = quantum_function_max_cut,
@@ -456,7 +456,7 @@ class PCE(CompositeAlgorithm):
 
         if ket.n_qubits is None:
             ket.build()
-        self.n_qubits: int = ket.n_qubits  # type: ignore[assignment]
+        self.n_qubits: int = ket.n_qubits
         n_nodes = graph.number_of_nodes()
         min_qubits = calculate_qubits(n_nodes, order, merging)
         assert min_qubits <= self.n_qubits
@@ -509,8 +509,8 @@ class PCE(CompositeAlgorithm):
         self.best_solution = [None]
         self.best_f = float("inf")
         self.best_energy = float("inf")
-        self.result = None
-        self.final_block: Optional[AnyBlock] = None
+        self.result: Any = None
+        self.final_block: Optional[QarpBlock] = None
 
         if not ket.symbols:
             raise ValueError(
@@ -578,8 +578,11 @@ class PCE(CompositeAlgorithm):
             The objective function to be minimized
         """
 
+        symbols = self.ket.symbols
+        assert symbols is not None  # checked non-empty at construction
+
         def f(x):
-            symbol_map = dict(zip(self.ket.symbols, x, strict=True))
+            symbol_map = dict(zip(symbols, x, strict=True))
             results = self.engine.run(symbol_map)
             if isinstance(self.primitive, Sampler):
                 # One distribution per commuting group, split back into terms.
@@ -623,8 +626,11 @@ class PCE(CompositeAlgorithm):
             The gradient function assisting the optimizer
         """
 
+        symbols = self.ket.symbols
+        assert symbols is not None  # checked non-empty at construction
+
         def f(x):
-            symbol_map = dict(zip(self.ket.symbols, x, strict=True))
+            symbol_map = dict(zip(symbols, x, strict=True))
             # Jacobian ∂⟨P_j⟩/∂θ_i, shape [n_ev][n_symbols], first: it refuses a
             # primitive with no gradient before its values reach numpy.
             jacobian = np.array(
@@ -657,7 +663,7 @@ class PCE(CompositeAlgorithm):
             raise RuntimeError("No optimization result — call run() first.")
         return self.ket.parameter_map(self.result.x)
 
-    def get_final_state_block(self) -> AnyBlock:
+    def get_final_state_block(self) -> QarpBlock:
         """The ket bound at the optimal parameters (set by ``run()``)."""
         if self.final_block is None:
             raise RuntimeError("No optimization result — call run() first.")
@@ -672,24 +678,27 @@ class PCE(CompositeAlgorithm):
         objective = self.get_objective_function()
         gradient_fn = self.get_gradient_function()
 
+        previous_energy: Optional[float] = None
+        previous_theta: Optional[np.ndarray] = None
+
         def callback(x):
+            nonlocal previous_energy, previous_theta
             # Reads the last-evaluation caches — no extra quantum work.
             energy = self._last_objective
+            assert energy is not None  # the optimizer evaluates before each callback
             gradnorm = self._last_gradnorm if self.gradient else None
             cost = self.classic_f(self.graph, self._last_solution)
-            dE = 0.0 if callback.previous_energy is None else energy - callback.previous_energy
+            dE = 0.0 if previous_energy is None else energy - previous_energy
             step_size = (
                 0.0
-                if callback.previous_theta is None
-                else float(np.linalg.norm(np.asarray(x) - callback.previous_theta))
+                if previous_theta is None
+                else float(np.linalg.norm(np.asarray(x) - previous_theta))
             )
             self._log_iteration(self.iter, energy, dE, step_size, gradnorm, cost=cost, label="PCE")
-            callback.previous_energy = energy
-            callback.previous_theta = np.asarray(x, dtype=float).copy()
+            previous_energy = energy
+            previous_theta = np.asarray(x, dtype=float).copy()
             self.iter += 1
 
-        callback.previous_energy = None
-        callback.previous_theta = None
         self.iter = 0
 
         self.result = self._minimize(
@@ -734,7 +743,7 @@ class iterativePCE(CompositeAlgorithm):
         self,
         graph: Graph,
         order: int,
-        ket: AnyBlock,
+        ket: QarpBlock,
         pce_cls: type = PCE,
         alpha0: float = 1.0,
         threshold: float = 0.9,
@@ -823,9 +832,9 @@ class iterativePCE(CompositeAlgorithm):
         self.solution_history: List[list] = []
         # Single inner algorithm, built once — rounds only change alpha
         # (classical post-processing) and the warm-start parameters.
-        self.pce = None
+        self.pce: Optional["PCE"] = None
         self._round_raw: Optional[np.ndarray] = None
-        self.result = None
+        self.result: Any = None
         self.best_solution = None
         self.best_f = None
 
@@ -949,7 +958,7 @@ class cPCE(PCE):
         self,
         graph: Graph,
         order: int,
-        ket: AnyBlock,
+        ket: QarpBlock,
         merging: bool = False,
         classical_function: Callable = classical_function,
         quantum_function: Callable = quantum_function,

@@ -18,7 +18,7 @@ import numpy as np
 
 from qarp.operators import QubitOperator
 
-from ...blocks import AnyBlock, CompositeBlock, TrotterBlock
+from ...blocks import AnyBlock, CompositeBlock, QarpBlock, TrotterBlock
 from ...engines import Engine, QarpEngine
 from ...errors import CapabilityError
 from .._primitives.state_vector import _operator_width, pauli_apply, pauli_expectation
@@ -70,7 +70,7 @@ class QITE(CompositeAlgorithm):
     def __init__(
         self,
         hamiltonian: QubitOperator,
-        initial_block: AnyBlock,
+        initial_block: QarpBlock,
         dtau: float,
         n_steps: int,
         *,

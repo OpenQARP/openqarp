@@ -476,7 +476,7 @@ class Engine(ABC):
 
     def build(
         self,
-        primitives: list[Runnable],
+        primitives: Sequence[Runnable],
         params: Mapping = {},
         rebuild: bool = True,
     ) -> None:

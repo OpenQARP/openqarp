@@ -1,7 +1,7 @@
 from collections import Counter, defaultdict
 from copy import deepcopy
 from math import copysign
-from typing import Dict, List, NamedTuple, Optional, Set, Tuple, Union, cast
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Union, cast
 
 import numpy as np
 
@@ -12,6 +12,7 @@ import numpy as np
 # `_estimate_modHij` and `_P_overlap_circuit`).  The `U_block` / `Udag_block`
 # / `Up_block` attribute aliases are wired in __init__ from `self.U`.
 import qarpx as qx
+from qarp._sampling_distribution import SamplingDistribution
 from qarp.algorithms._composite import CompositeAlgorithm
 from qarp.algorithms._primitives import (
     PrimitiveAlgorithm,
@@ -357,7 +358,7 @@ class MonteCarlo(CompositeAlgorithm):
             walker_states = self.walker_basis
         else:
             basis_data, circs, _ = generate_states_new_basis(self.U)
-            source = basis_data if self.mode == "Semiclassical" else circs
+            source: list[Any] = basis_data if self.mode == "Semiclassical" else circs
             walker_states = [
                 WalkerState(state_data=data, sign=1.0, label=str(i))
                 for i, data in enumerate(source)
@@ -404,6 +405,8 @@ class MonteCarlo(CompositeAlgorithm):
                     U_matrix = np.array(
                         qx.QarpSimulator().unitary_matrix(self.U.flatten(), self.U.n_qubits)
                     )
+                    # Only Semiclassical mode converts it to a matrix.
+                    assert isinstance(self.hamiltonian, QubitOperator)
                     hamiltonian_matrix = self.hamiltonian.sparse_matrix().toarray()
                     self.hamiltonian_estimate = U_matrix.conj().T @ hamiltonian_matrix @ U_matrix
 
@@ -487,7 +490,7 @@ class MonteCarlo(CompositeAlgorithm):
         estimator = deepcopy(self.primitive)
         estimator.ket = ket_composite
         estimator.bra = bra_composite
-        estimator.operator = self.hamiltonian  # type: ignore
+        estimator.operator = self.hamiltonian
 
         if isinstance(self.primitive, TermwiseHadamardTest):
             estimator.n_shots = self.n_shots
@@ -619,6 +622,7 @@ class MonteCarlo(CompositeAlgorithm):
                 f"ancilla: size the engine to n_qubits + 1 = {n_qubits}."
             ) from err
         distribution = self.engine.run()[0]
+        assert isinstance(distribution, SamplingDistribution)  # a Sampler result
         return {bits_to_label(bits): float(p) for bits, p in distribution.items() if p > 0}
 
     # For MC calculations, we need to estimate H_ij elements of the Hamiltonian in the new basis spanned by U
@@ -632,7 +636,7 @@ class MonteCarlo(CompositeAlgorithm):
         ).build()
 
         # This needs to be made a cache for storing already computed values, outside this function
-        Hij_result = defaultdict(float)
+        Hij_result: defaultdict[Any, float] = defaultdict(float)
 
         for i in range(len(self.pauli_strings)):
             coef, pauli_string = self.pauli_coeffs[i], self.pauli_strings[i]
@@ -844,7 +848,7 @@ class MonteCarlo(CompositeAlgorithm):
 
                     # Exploit Hermiticity
                     if self.hermitian:
-                        self._hamiltonian_cache[cache_key[::-1]] = (h_ij, sign)  # type: ignore
+                        self._hamiltonian_cache[cache_key[::-1]] = (h_ij, sign)
                 else:
                     h_ij, sign = self._hamiltonian_cache[cache_key]
 

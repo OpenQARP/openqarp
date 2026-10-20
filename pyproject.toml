@@ -281,6 +281,10 @@ exclude_lines = [
     "if __name__ == .__main__.:",
 ]
 
+[tool.pyright]
+# The committed qarpx stub; pyright and Pylance do not read mypy.ini.
+stubPath = "cpp/libqarpx/python"
+
 [tool.scikit-build]
 # The CMake project root is cpp/libqarpx, NOT the repository root.
 cmake.source-dir = "cpp/libqarpx"

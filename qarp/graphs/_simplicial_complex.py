@@ -232,12 +232,12 @@ class SimplicialComplex:
         upper = self.boundary_matrix(k + 1)
         return lower.T @ lower + upper @ upper.T
 
-    def get_simplices(self) -> List[Tuple[int]]:
+    def get_simplices(self) -> List[Tuple[int, ...]]:
         """
         Returns a sorted list of simplices in the complex.
 
         Returns:
-            List[Tuple[int]]: The list of simplices.
+            List[Tuple[int, ...]]: The list of simplices.
         """
         return sorted(
             self.simplices,  # type: ignore[arg-type]  # mypy's false positive

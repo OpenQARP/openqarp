@@ -7,6 +7,7 @@ block's own ``flatten()`` is the contract check of a declaration, not the
 oracle."""
 
 import inspect
+from typing import Callable
 
 import numpy as np
 import pytest
@@ -59,7 +60,7 @@ class _Asym(SimpleBlock):
 
 # Every block class overriding structure(), with small unmeasured instances
 # (unitary_matrix() is the oracle, and it has no column for a measurement).
-DECLARING = {
+DECLARING: dict[type, list[Callable[[], qb.QarpBlock]]] = {
     QPEBlock: [
         lambda: QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1, measure=False),
         lambda: QPEBlock(ComputationalBasisStateBlock([0, 1]), _Asym(2), 4, 2, measure=False),
@@ -376,15 +377,35 @@ def _raw_x_layer(n: int):
 
 
 def test_an_unbuilt_raw_qx_block_is_read_as_unbuilt():
-    """A raw ``qx.Block`` reports ``is_built`` as a method.  Under a Repeat it
-    refuses the unbuilt plan; as a plain part it is built in place, and X on
-    all 12 qubits sends |0…0⟩ to |1…1⟩ (analytic)."""
+    """Under a Repeat an unbuilt raw ``qx.Block`` refuses the unbuilt plan; as a
+    plain part it is built in place, and X on all 12 qubits sends |0…0⟩ to
+    |1…1⟩ (analytic)."""
     assert _program.plan_structure(_Declares([Repeat(_raw_x_layer(12), 3)], 12), 12) is None
     sampler = Sampler(CompositeBlock([_raw_x_layer(12)], n_qubits=12), n_shots=qarp.EXACT)
     engine = QarpEngine()
     engine.build([sampler])
     assert engine.kernels(sampler) == [["permutation"]]
     assert dict(engine.run()[0]) == {(1,) * 12: 1.0}
+
+
+# CX with control q0 and target q1, rows and columns in LSB order (§6).
+_CX = np.array([[1, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0], [0, 1, 0, 0]])
+
+
+def test_a_raw_controlled_block_plans_from_its_own_control_metadata():
+    """Three X gates under one control, on a raw ``qx.ControlledBlock``, plan
+    to CX on qubits 0 and 1."""
+    inner = qx.SimpleBlock(1, "xxx")
+    for _ in range(3):
+        inner.x(0)
+    block = qx.ControlledBlock(inner, 1, [True]).build()
+    plan = _program.plan(block, 12)
+    assert plan is not None
+    for x in range(4):
+        psi = np.zeros(1 << 12, dtype=complex)
+        psi[x] = 1.0
+        out = qx.QarpSimulator().program_statevector(plan.program(), 12, initial_state=psi)
+        np.testing.assert_allclose(out[:4], _CX[:, x], atol=1e-12)
 
 
 def test_plan_structure_descends_an_unbuilt_composite():

@@ -33,7 +33,8 @@ def compile_for_device(*args, router=None):
     if len(args) == 2 and isinstance(args[0], _qx.Block):
         block, device = args
         return _qx.compile_for_device(block.flatten(), block.n_qubits, device, router)
-    return _qx.compile_for_device(*args, router)
+    commands, n_qubits, device = args
+    return _qx.compile_for_device(commands, n_qubits, device, router)
 
 
 __all__ = [

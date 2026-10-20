@@ -118,7 +118,11 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
             # The blocks carry arg(coefficient) as a phase in their circuits, so
             # the classical weight is the magnitude only; weighting by the full
             # complex coefficient would apply the phase twice.
-            self.coefficients = [abs(op.coefficient) for op in self.operator]
+            coefficients = []
+            for op in pauli_blocks:
+                assert op.coefficient is not None  # include_coefficients=True sets it
+                coefficients.append(abs(op.coefficient))
+            self.coefficients = coefficients
 
         # An overlap has no operator terms: one operator-less child, which
         # HadamardTest builds as <bra|ket> directly (run() weights it by 1.0).

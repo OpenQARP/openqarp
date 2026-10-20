@@ -136,3 +136,9 @@ def test_control_state_int_follows_conventions_lsb_order():
         assert per_convention == [int(b) for b in state], (
             f"state={state} packed={packed:b} reads as {per_convention} under §6"
         )
+
+
+def test_an_unbuilt_raw_block_lists_its_recorded_gates():
+    raw = qx.SimpleBlock(1, "h")
+    raw.h(0)
+    assert [repr(c) for c in CircuitAdapter(raw).get_commands()] == ["H [q[0]]"]

@@ -213,6 +213,19 @@ def test_ghz_chain_zzzz_expectation_is_one():
     assert abs(result - 1.0) < 0.15
 
 
+def test_an_unbuilt_raw_ket_is_built_before_cutting():
+    """Two raw Bell pairs: ``<X0 X1>`` on |Φ+⟩ is exactly +1 (analytic)."""
+    ket = qx.SimpleBlock(4, "pairs")
+    ket.h(0)
+    ket.cx(0, 1)
+    ket.h(2)
+    ket.cx(2, 3)
+    cp = CuttingPrimitive(ket=ket, operator=QubitOperator("X0 X1"), max_subcircuit_qubits=2)
+    eng = QarpEngine(n_shots=4000, seed=42)
+    eng.build([cp])
+    assert eng.run()[0] == pytest.approx(1.0)
+
+
 def test_cutting_matches_uncut_pauli_averaging():
     """Cutting a circuit should reproduce the uncut expectation value (notebook setup)."""
     config.seed = 42

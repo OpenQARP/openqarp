@@ -120,12 +120,15 @@ def _builder_overloads():
             yield fn.name, [(a.arg, ast.unparse(a.annotation)) for a in fn.args.args[1:]]
 
 
-@pytest.mark.parametrize("param", [0.5, qx.Param(0.5)], ids=["float", "Param"])
+# Built inside the test: a qarpx object held by the parametrize list outlives
+# nanobind's shutdown and is reported as a leak.
+@pytest.mark.parametrize("make_param", [lambda: 0.5, lambda: qx.Param(0.5)], ids=["float", "Param"])
 @pytest.mark.parametrize(
     "name, params", list(_builder_overloads()), ids=lambda v: v if isinstance(v, str) else ""
 )
-def test_builder_overload_runs_as_the_stub_declares(name, params, param):
+def test_builder_overload_runs_as_the_stub_declares(name, params, make_param):
     """Each overload, called on a raw block by keyword with the declared types, appends."""
+    param = make_param()
     block = qx.SimpleBlock(3, "kw")
     ints = iter(range(3))
     kwargs = {
@@ -141,8 +144,17 @@ def test_builder_overload_runs_as_the_stub_declares(name, params, param):
 _SETUP = """\
 import numpy as np
 import qarpx as qx
+from sympy import Symbol
+from qarp.algorithms import VQD, VQE
+from qarp.blocks import CompositeBlock, QarpBlock, SimpleBlock
+from qarp.operators import QubitOperator
 b = qx.SimpleBlock(2, "b")
 inner = qx.SimpleBlock(1, "inner")
+op = QubitOperator("Z0")
+raw = qx.SimpleBlock(1, "raw")
+raw.rz(0, qx.Param.symbol("t"))
+hb = SimpleBlock(1)
+hb.rz(0, Symbol("u")).build()
 """
 _SNIPPETS = [
     # (statement, mypy error code or None, runs)
@@ -156,6 +168,17 @@ _SNIPPETS = [
     ('qx.SimpleBlock(1, "x") == 5', None, True),
     ("qx.ConditionalBlock([0], [True], None, else_body=inner)", None, True),
     ("qx.ConditionalBlock([0], [True], None)", "call-overload", False),
+    # QarpBlock: what reads `symbols` takes a Python block; a raw one is wrapped.
+    (
+        '[c.symbols for c in qx.CompositeBlock([inner], 1, "c").children() if isinstance(c, QarpBlock)]',
+        None,
+        True,
+    ),
+    ('[c.symbols for c in qx.CompositeBlock([inner], 1, "c").children()]', "attr-defined", False),
+    ("VQE(op, raw)", "arg-type", False),
+    ("VQE(op, CompositeBlock([raw]))", None, True),
+    ("VQE(op, hb | hb)", None, True),
+    ("VQD(op, [hb], [])", None, True),
 ]
 _KNOWN_FALSE_REJECTIONS = [
     # A numpy integer is not an int to mypy; nanobind converts it.
@@ -170,7 +193,7 @@ def _runs(statement: str) -> bool:
     exec(_SETUP, namespace)
     try:
         exec(statement, namespace)
-    except (TypeError, ValueError):
+    except (AttributeError, TypeError, ValueError):
         return False
     return True
 
@@ -182,7 +205,10 @@ def test_mypy_verdict_on_the_stub_matches_the_runtime(tmp_path):
     setup_lines = _SETUP.count("\n")
     source.write_text(_SETUP + "".join(f"{s}\n" for s, _, _ in snippets))
     config = tmp_path / "mypy.ini"
-    config.write_text(f"[mypy]\nmypy_path = {STUB.parent}\n")
+    # qarp from the checkout: an editable install's import hook is invisible to mypy.
+    config.write_text(
+        f"[mypy]\nmypy_path = {STUB.parent}:{REPO}\n[mypy-qarp.*]\nfollow_imports = silent\n"
+    )
     stdout, _, _ = api.run(
         [
             "--config-file",

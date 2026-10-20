@@ -528,7 +528,7 @@ class QPDDecomposition(PostProcessing):
         reconstruction_exp_val = np.zeros(self.n_valid_obs_terms)
 
         def subs(val):
-            if isinstance(val, (float, int, complex, Float)):
+            if isinstance(val, (float, int, Float)):
                 return float(val)
             return float(val.subs(symbol_map))
 

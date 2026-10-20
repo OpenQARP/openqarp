@@ -182,6 +182,7 @@ class QSE(CompositeAlgorithm):
 
         psi = self._ground_state_statevector()
         n = self._gs_n_qubits
+        assert n is not None  # cached with the statevector
         indices = np.tril_indices(len(self.excitation_operators))
         for k, (i, j) in enumerate(zip(*indices, strict=True)):
             val = pauli_expectation(psi, psi, primitives[k].operator, n)
@@ -210,9 +211,13 @@ class QSE(CompositeAlgorithm):
 
         psi = self._ground_state_statevector()
         n = self._gs_n_qubits
+        assert n is not None  # cached with the statevector
+        hamiltonian = self.hamiltonian
+        assert isinstance(hamiltonian, QubitOperator)  # build() rejects a block here
+        assert self.hamiltonian_matrix is not None  # allocated by build()
         ops = self.excitation_operators
         phi = np.array([pauli_apply(psi, e, n) for e in ops])
-        chi = np.array([pauli_apply(p, self.hamiltonian, n) for p in phi])
+        chi = np.array([pauli_apply(p, hamiltonian, n) for p in phi])
         s_mat = phi.conj() @ phi.T
         h_mat = phi.conj() @ chi.T
         # Mirror the lower triangle (as the generic path does) so both
@@ -235,6 +240,7 @@ class QSE(CompositeAlgorithm):
         Returns:
             A numpy array representing the Hamiltonian matrix H.
         """
+        assert self.hamiltonian_matrix is not None  # allocated by build()
         # Gram fast path (both primitives StateVector): one |g⟩ simulation and
         # mapped vectors fill H and S together, no primitives involved.
         if self._use_gram_fast_path:

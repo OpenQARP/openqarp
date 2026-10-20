@@ -14,7 +14,7 @@ import functools
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, overload
 
 import numpy as np
 
@@ -184,13 +184,6 @@ def _measurements_terminal(cmds) -> bool:
     return True
 
 
-def _is_built(block) -> bool:
-    # A raw qx.Block has is_built() as a method, always truthy unread;
-    # the Python blocks shadow it with a property.
-    built = block.is_built
-    return built() if callable(built) else built
-
-
 def _has_pending_ops(node) -> bool:
     return bool(
         getattr(node, "_is_dagger", False)
@@ -287,6 +280,10 @@ def _physical_gates(cmds) -> int:
 _OPT_LEVELS = {0: qx.OptLevel.O0, 1: qx.OptLevel.O1, 2: qx.OptLevel.O2}
 
 
+@overload
+def opt_level(level: None) -> None: ...
+@overload
+def opt_level(level: int) -> "qx.OptLevel": ...
 def opt_level(level) -> "Optional[qx.OptLevel]":
     """``qx.OptLevel`` for 0, 1 or 2; None for None; ``ValueError`` otherwise."""
     if level is None:
@@ -371,10 +368,8 @@ class _Planner:
         under a dagger."""
         if not isinstance(node, qx.ControlledBlock) or _has_pending_subs(node):
             return None
-        n_ctrl = node.n_controls() if callable(node.n_controls) else node.n_controls
-        state = getattr(node, "control_state", None)
-        if state is None:
-            state = node.ctrl_state() if callable(node.ctrl_state) else node.ctrl_state
+        n_ctrl = node.num_controls
+        state = node.ctrl_state
         if node.n_qubits > MAX_COMPOSE_QUBITS:
             return None
         inner = self._inner_permutation(node.inner())
@@ -473,7 +468,7 @@ class _Planner:
         at = start
         for part in parts:
             kid, count = (part.block, part.count) if isinstance(part, Repeat) else (part, 1)
-            if not _is_built(kid):
+            if not kid.is_built:
                 return None
             cmds = list(kid.flatten())
             kid_map = [qmap[t] for t in _placement(kid)]
@@ -572,10 +567,8 @@ class _Planner:
         under a dagger ``U`` is the daggered inner stream."""
         if not isinstance(kid, qx.ControlledBlock) or _has_pending_subs(kid):
             return None
-        n_ctrl = kid.n_controls() if callable(kid.n_controls) else kid.n_controls
-        state = getattr(kid, "control_state", None)
-        if state is None:
-            state = kid.ctrl_state() if callable(kid.ctrl_state) else kid.ctrl_state
+        n_ctrl = kid.num_controls
+        state = kid.ctrl_state
         if n_ctrl != 1 or not state[0]:
             return None
         inner = _source(kid.inner())
@@ -743,7 +736,7 @@ def _composition(node) -> Optional[list]:
     ``unbuilt_children()``.  None for a built block (planned from its tree,
     its declaration checked by digest) and for one whose parts are not
     readable before build."""
-    if _is_built(node) or _has_pending_ops(node):
+    if node.is_built or _has_pending_ops(node):
         return None
     if _declares_structure(node):
         # Unbuilt, a declaration has no stream to be checked against: it is
@@ -787,7 +780,7 @@ def _collect_parts(
     nested = qmap != list(range(len(qmap)))
     for part in parts:
         if isinstance(part, Repeat):
-            if not _is_built(part.block):
+            if not part.block.is_built:
                 return False
             kid_map = _placed(part.block, qmap)
             if kid_map is None:
@@ -810,7 +803,7 @@ def _collect_parts(
             continue
         # A plain part is built on its own: its stream is placed in the
         # node's frame by flatten(), then moved to the root frame.
-        if not _is_built(part):
+        if not part.is_built:
             part.build()
         kid_cmds = list(part.flatten())
         if any(c.is_parametric() for c in kid_cmds):

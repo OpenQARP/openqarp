@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
@@ -41,10 +41,10 @@ class DOSQPE(CompositeAlgorithm):
         self.n_ancilla = n_ancilla
         self.hamming_weight = hamming_weight
 
-        self.block = None
-        self.n_qubits = None
-        self.state = None
-        self.distribution = None
+        self.block: Optional[DOSQPEBlock] = None
+        self.n_qubits: Optional[int] = None
+        self.state: Optional[AnyBlock] = None
+        self.distribution: Any = None
 
     @property
     def freqs(self):
@@ -213,7 +213,8 @@ class DOSQPE(CompositeAlgorithm):
         )
 
         # manually add legend entries
-        for i in range(self.n_qubits + 1):  # type: ignore[arg-type]
+        assert self.n_qubits is not None  # set by build()
+        for i in range(self.n_qubits + 1):
             if i in unique_occ_numbers:
                 ax.plot([], [], color=colors[i], lw=3, label=f"Occ. #: {i}")
 

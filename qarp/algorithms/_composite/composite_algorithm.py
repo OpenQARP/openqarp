@@ -3,7 +3,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Iterable, Optional, Self, Union
 
 from ... import MPIConfig
-from ..._types import Consumes
+from ..._sampling_distribution import SamplingDistribution
+from ..._types import Consumes, PrimitiveResult
 from ...engines import Engine, QarpEngine
 from ...errors import CapabilityError
 from .. import PrimitiveAlgorithm
@@ -139,6 +140,12 @@ class CompositeAlgorithm(ABC):
         return sim
 
     # ── Shared optimization machinery ───────────────────────────────────
+
+    @staticmethod
+    def _real_part(value: PrimitiveResult) -> float:
+        """The real part of an expectation-valued primitive's result."""
+        assert not isinstance(value, SamplingDistribution)
+        return float(value.real)
 
     def _minimize(
         self,

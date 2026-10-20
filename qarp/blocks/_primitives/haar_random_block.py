@@ -204,6 +204,7 @@ class HaarRandomBlock(SimpleBlock):
         by π to convert to radians before passing to the qarpx builder.
         """
         n = self.n_qubits
+        assert self.t_design is not None  # build_vanilla dispatches here only with one
         depth = self.n_layers if self.n_layers is not None else n * self.t_design
 
         for layer_idx in range(depth):

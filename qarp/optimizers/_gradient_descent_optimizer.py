@@ -188,8 +188,8 @@ class EarlyStopper:
             current_s = current
 
         if current_s < self.best - self.es_tol:
-            self.best = current_s  # type: ignore
-            self.best_params = params.copy()  # type: ignore
+            self.best = current_s
+            self.best_params = params.copy()
             self.no_improve = 0
         else:
             self.no_improve += 1
@@ -418,7 +418,7 @@ class GradientDescentOptimizer(Optimizer):
                     break
         nit = step + 1
 
-        if stopper is not None and stopper.best < self._objective_wrapped(params):  # type: ignore
+        if stopper is not None and stopper.best < self._objective_wrapped(params):
             params = stopper.best_params
 
         results.fun = self._objective_wrapped(params)
@@ -556,6 +556,7 @@ class RMSPropOptimizer(GradientDescentOptimizer):
 
         """
         self._ensure_state(params)
+        assert self.avg_sq is not None  # _ensure_state allocates it
 
         self.avg_sq = self.beta * self.avg_sq + (1 - self.beta) * (grads**2)
         update = -self.lr * grads / (np.sqrt(self.avg_sq) + self.eps)
@@ -698,6 +699,7 @@ class AdamOptimizer(GradientDescentOptimizer):
         """
 
         self._ensure_state(params)
+        assert self.m is not None and self.v is not None  # _ensure_state allocates them
 
         self.m = self.beta1 * self.m + (1 - self.beta1) * grads
         self.v = self.beta2 * self.v + (1 - self.beta2) * (grads**2)
@@ -784,6 +786,7 @@ class AdamaxOptimizer(GradientDescentOptimizer):
 
         """
         self._ensure_state(params)
+        assert self.m is not None and self.u is not None  # _ensure_state allocates them
 
         self.m = self.beta1 * self.m + (1 - self.beta1) * grads
         self.u = np.maximum(self.beta2 * self.u, np.abs(grads))
@@ -881,6 +884,7 @@ class NadamOptimizer(GradientDescentOptimizer):
         t = step + 1
 
         self._ensure_state(params)
+        assert self.m is not None and self.v is not None  # _ensure_state allocates them
 
         self.m = self.beta1 * self.m + (1 - self.beta1) * grads
         self.v = self.beta2 * self.v + (1 - self.beta2) * (grads**2)

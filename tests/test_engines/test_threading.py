@@ -354,6 +354,7 @@ def _deep_ket(n_qubits: int, layers: int):
 
     ket = HEABlock(n_qubits, layers, real=False, linear=True, circular=False, use_cz=False)
     ket.build()
+    assert ket.symbols is not None
     return ket.set_symbols({s: 0.1 * (i % 7) for i, s in enumerate(ket.symbols)})
 
 

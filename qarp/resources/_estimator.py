@@ -147,7 +147,7 @@ class ResourceEstimator:
                     stages[Stage.OPTIMIZED].n_qubits if n_qubits is None else n_qubits
                 )
             if self._routed():
-                assert self._device is not None
+                assert self._device is not None and self._device.architecture is not None
                 opts = qx.RoutingOptions()
                 opts.arch = self._device.architecture
                 opts.directedness = self._device.directedness

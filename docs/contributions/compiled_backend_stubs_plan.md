@@ -278,7 +278,8 @@ mypy then rejects a raw block passed where Python members are read, such as
 those entry points by wrapping, `CompositeBlock([raw_block])`, which carries its symbols
 through; the absorbers already return Python blocks.  So that valid calls stay accepted:
 
-- `_BlockMixin.__mul__`, `__or__` and `_repeat` return the Python `CompositeBlock`;
+- `_BlockMixin.__mul__` and `__or__` return the Python `CompositeBlock`, and `_repeat`
+  returns `QarpBlock` (a count of one returns the block itself);
   `get_final_state_block()` and ADAPT-VQE's `_ansatz_wfn()` return `QarpBlock`.
 - Parameters that take several blocks take `Sequence[QarpBlock]`, since `List` is invariant
   (`VQD`'s `kets`).
@@ -288,7 +289,7 @@ through; the absorbers already return Python blocks.  So that valid calls stay a
   that class: `termwise_hadamard_test.py`'s `PauliBlock` list (`.coefficient`) and
   `qmegs.py`'s time-evolution unitary (`.operator`).
 
-**Library strictness.**  `mypy.ini` gains `[mypy-qarp.*]` with `check_untyped_defs = True` and
+**Library strictness.**  `mypy.ini` gains `[mypy-qarp,qarp.*]` with `check_untyped_defs = True` and
 `warn_unused_ignores = True`; `[mypy]` carries no strictness flags, and `tests/` keeps today's
 setting.  The flag adds 184 errors in `qarp/`.  Two patterns make up about 100 of the errors
 the binding and mixin fixes do not clear, and each is fixed one way across its files:
@@ -435,7 +436,7 @@ class QubitOperator:
 [mypy]
 mypy_path = $MYPY_CONFIG_FILE_DIR/cpp/libqarpx/python
 
-[mypy-qarp.*]
+[mypy-qarp,qarp.*]
 check_untyped_defs = True
 warn_unused_ignores = True
 ```
@@ -460,7 +461,7 @@ deviation.
 | Planning a raw `qx.ControlledBlock` over three X gates (`_program.plan(block, 12)`) gives CX | the analytic CX matrix | `tests/test_blocks/test_structure.py` |
 | `ResourceEstimator.estimate` on an unbuilt raw composite of H then CX counts one H and one CX | counted by hand | `tests/test_resources/test_estimator.py` |
 | `CircuitAdapter` over an unbuilt raw block holding one H lists one H gate | the hand-written circuit | `tests/test_plotting/test_circuit_adapter_residuals.py` |
-| `CuttingPrimitive` with an unbuilt raw H as ket and `X0` as operator gives ⟨X⟩ = 1 | ⟨+\|X\|+⟩ = 1 | `test_cutting_primitive.py` |
+| `CuttingPrimitive` with an unbuilt raw ket of two Bell pairs and `X0 X1` as operator gives 1 | ⟨Φ+\|XX\|Φ+⟩ = 1 | `test_cutting_primitive.py` |
 | `SWAPTestBlock` on raw blocks preparing \|0⟩ and \|+⟩ measures ancilla 0 with probability 3/4 | `(1 + \|⟨a\|b⟩\|²)/2` | `test_swap_test_block.py` |
 | `HadamardTestBlock` with a raw Z on \|1⟩ gives −1 | ⟨1\|Z\|1⟩ = −1 | `test_hadamard_test_block.py` |
 | `QPEBlock` with a raw X as eigenstate and a raw P(π/2) as unitary, 2 ancillas, reads phase 1/4 | analytic eigenphase | `test_qpe_block.py` |
@@ -476,7 +477,7 @@ deviation.
 | In a subprocess that imports only `qarpx`, two-qubit `Z0.sparse_matrix(2)` = diag(1, −1, 1, −1); `2·I` gives 2·𝟙 (1×1 inferred, 4×4 at `n_qubits=2`); the empty operator gives zeros; `Z1` at `n_qubits=1` and `Z0` at `n_qubits=0` raise `ValueError`; `n_qubits=2.0` raises `TypeError` | LSB Kronecker products, written by hand | `test_qubit_operator.py`; `test_fermion_operator.py` (two-mode n̂₀ = diag(0, 1, 0, 1)) |
 | `qx.__with_symengine__` equals whether `QubitOperator("X0", Symbol("a"))` constructs | the build's actual behaviour | `test_symbolic_coefficients.py` |
 | `op += Symbol("a")` rebinds `op`, and `hash(op)` raises `TypeError` | today's runtime behaviour | `test_qubit_operator.py` |
-| mypy rejects `VQE(op, raw_block)` and accepts `VQE(op, CompositeBlock([raw_block]))`, `VQE(op, hb \| hb)` and `VQD(op, [ComputationalBasisStateBlock(...)])`; each call is run, and only the first fails | the runtime | `tests/test_stubs.py` |
+| mypy rejects `VQE(op, raw_block)` and accepts `VQE(op, CompositeBlock([raw_block]))`, `VQE(op, hb \| hb)` and `VQD(op, [hb], [])` for a built Python block `hb`; each call is run, and only the first fails | the runtime | `tests/test_stubs.py` |
 
 ## Phases
 
@@ -506,17 +507,17 @@ to mypy, through `mypy_path` and the CMake install, only at the end of Phase 2.
 
 ### Phase 2 — Type-check `qarp` against the stub
 
-- [ ] After #13 lands: `develop` merged in; header and index row moved to #13's format; the
+- [x] After #13 lands: `develop` merged in; header and index row moved to #13's format; the
       lists below measured again, the difference declared; #13's `_is_built` helpers in
       `_program.py` and `_circuit_adapter.py` and its `callable(...)` shims for `n_controls`
-      and `ctrl_state` removed
-- [ ] The `TYPE_CHECKING` base aliases for the six classes; the mixin conflicts resolved;
+      and `ctrl_state` removed *(2026-10-20)*
+- [x] The `TYPE_CHECKING` base aliases for the six classes; the mixin conflicts resolved;
       string keys converted in `set_symbols`/`replace_symbols`; the mixin's gate overrides
-      annotated; `upccd_block.py`'s `symbols` attribute
-- [ ] `QarpBlock` defined and exported; the parameters that read Python-only members take it;
-      the Python-block returns and `Sequence` parameters typed; `vqe.py`
-- [ ] The `is_built` regression tests (estimator, plotter, cutting primitive)
-- [ ] Each flagged file fixed; the regression tests for the Python-side bugs.  Flagged at
+      annotated; `upccd_block.py`'s `symbols` attribute *(2026-10-20)*
+- [x] `QarpBlock` defined and exported; the parameters that read Python-only members take
+      it; the Python-block returns and `Sequence` parameters typed; `vqe.py` *(2026-10-20)*
+- [x] The `is_built` regression tests (estimator, plotter, cutting primitive) *(2026-10-20)*
+- [x] Each flagged file fixed; the regression tests for the Python-side bugs.  Flagged at
       `4093ad5`: `qarp/_program.py`, `qarp/absorb/_reconstruct.py`;
       `qarp/algorithms/_composite/`: `adapt_vqe.py`, `amplitude_amplification.py`,
       `amplitude_estimation.py`, `grover.py`, `mmqcels.py`, `montecarlo.py`, `pce.py`,
@@ -546,11 +547,12 @@ to mypy, through `mypy_path` and the CMake install, only at the end of Phase 2.
       `tests/test_blocks/test_structure.py`, `tests/test_cutting/test_qpd_decomposition.py`,
       `tests/test_emit/conftest.py`, `tests/test_emit/test_capability_contract.py`,
       `tests/test_engines/test_gradient_shift_rules.py`,
-      `tests/test_engines/test_structured_execution.py`, `tests/test_operators/test_qdrift.py`,
-      `tests/test_resources/test_modelers.py`, `tests/test_resources/test_synthesis.py`;
-      flagged on #13's tip: `test_lazy_circuits.py`, `test_unbuilt_planning.py`,
-      `test_compiled_circuits.py`
-- [ ] `check_untyped_defs` on for `qarp/`; the files above and, flagged only with it at
+      `tests/test_engines/test_structured_execution.py`,
+      `tests/test_operators/test_qdrift.py`, `tests/test_resources/test_modelers.py`,
+      `tests/test_resources/test_synthesis.py`; flagged on #13's tip:
+      `test_lazy_circuits.py`, `test_unbuilt_planning.py`, `test_compiled_circuits.py`
+      *(2026-10-20)*
+- [x] `check_untyped_defs` on for `qarp/`; the files above and, flagged only with it at
       `4093ad5`: `qarp/absorb/__init__.py`; `qarp/algorithms/_composite/`: `adapt_vqd.py`,
       `dos_qpe.py`, `projected_vqe.py`, `qpe.py`, `qse.py`;
       `qarp/blocks/_primitives/spa_block.py`,
@@ -559,12 +561,14 @@ to mypy, through `mypy_path` and the CMake install, only at the end of Phase 2.
       `qarp/graphs/_graph.py`, `qarp/graphs/_simplicial_complex.py`,
       `qarp/operators/compat.py`, `qarp/operators/functions.py`,
       `qarp/optimizers/_gradient_descent_optimizer.py`, `qarp/plotting/_circuit_plotter.py`
-- [ ] Unused `# type: ignore` comments removed, measured after the fixes
-- [ ] `test_block_refactor.py`'s note that mypy sees `AnyBlock` as `Any` corrected
-- [ ] Last: `mypy.ini` gets `mypy_path`, `warn_unused_ignores` and drops its `qarpx`
+      *(2026-10-20)*
+- [x] Unused `# type: ignore` comments removed, measured after the fixes *(2026-10-20)*
+- [x] `test_block_refactor.py`'s note that mypy sees `AnyBlock` as `Any` corrected
+      *(2026-10-20)*
+- [x] Last: `mypy.ini` gets `mypy_path`, `warn_unused_ignores` and drops its `qarpx`
       sections, its note carries the new rule and numbers; `[tool.pyright] stubPath`; CMake
       installs `qarpx-stubs/__init__.pyi`; `method-assign` dropped from the CI mypy command;
-      the `ci.yml` wheel probe
+      the `ci.yml` wheel probe *(2026-10-20)*
 
 ### Phase 3 — Docs
 
@@ -588,3 +592,30 @@ section and folded back here before merge; silent drift is the violation.
 - **Phase 1, absorber return type.**  The plan typed the raw absorbers' `absorb()` as
   returning `Block`; it returns `(commands, n_qubits, n_cbits)`, and the Python absorbers
   build the block.  Typed `tuple[list[Command], int, int]`; Design updated.
+
+- **Phase 2, re-measure after #13.**  With Phase 1's bindings, mypy reported 77 errors in 29
+  files on the merged tree (65 in 23 `qarp` files, 12 in 6 test files), and with
+  `check_untyped_defs` 221 in 40 `qarp` files; no file outside the lists was flagged.  The
+  mixin aliases then flagged `tests/test_engines/test_threading.py` (an unchecked
+  `Optional`), fixed with an `assert`.
+- **Phase 2, files outside the Scope.**  `composite_algorithm.py` gains `_real_part`, the one
+  narrowing of a scalar primitive result the variational algorithms share;
+  `layer_block.py`'s `parameters` takes `Sequence[Angle]`, since `VFF` passes `qx.Param`s;
+  unused `# type: ignore` comments go from `grouped_transition_hadamard_test.py`,
+  `_spectral_estimation.py`, `_vumpo.py` and the `boxed` and `controlled_block` renderers.
+- **Phase 2, two runtime changes.**  `AdaptVQD.run()` returns the energy as a float, as
+  documented and as `AdaptVQE` does, instead of `complex(E+0j)`; pinned in
+  `test_adapt_vqd.py`.  `CircuitAdapter` reads `num_controls` and `ctrl_state`, which both
+  block kinds carry, so a raw `ControlledBlock` plots as a controlled box instead of a plain
+  one.
+- **Phase 2, `_repeat`.**  Returns `QarpBlock`, not `CompositeBlock`: a count of one returns
+  the block itself.  Design updated.
+- **Phase 2, `mypy.ini` section.**  `[mypy-qarp,qarp.*]`: `qarp.*` alone does not match the
+  top-level package.  Design updated.
+- **Phase 2, two test rows.**  The cutting-primitive test uses two raw Bell pairs and
+  `X0 X1`: cutting needs two subcircuits and an entangling gate.  The `VQD` snippet passes a
+  built parameterized block with `weights=[]`: a `ComputationalBasisStateBlock` has no
+  symbols, so `VQD` rejects it at runtime.  Test plan updated.
+- **Phase 2, a `qarpx` object built at import in a test.**  A `qx.Param` held by a
+  `parametrize` list outlives nanobind's shutdown and is reported as a leak; Phase 1's two
+  such lists (`test_block.py`, `test_stubs.py`) build their values inside the test.

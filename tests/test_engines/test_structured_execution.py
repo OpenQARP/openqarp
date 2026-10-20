@@ -14,6 +14,7 @@ import qarpx as qx
 from qarp import _program
 from qarp.algorithms import PauliAveraging, Sampler, StateVector
 from qarp.blocks import (
+    AnyBlock,
     CompositeBlock,
     ComputationalBasisStateBlock,
     ConditionalBlock,
@@ -60,7 +61,7 @@ class _Rotations(SimpleBlock):
 
 
 def _mixed_tree(n: int) -> CompositeBlock:
-    parts = []
+    parts: list[AnyBlock] = []
     for _ in range(2):
         parts.append(_Increment(4, target_qubits=[0, 2, 4, 6]))
         parts.append(
@@ -572,7 +573,7 @@ def test_a_controlled_permutation_places_its_inner_block(plan_small_registers):
 
 
 def _ladder(steps, inner, ctrl_state=True) -> CompositeBlock:
-    kids = [_spread(10)]
+    kids: list[AnyBlock] = [_spread(10)]
     for control, targets in steps:
         kids.append(
             ControlledBlock(inner(), 1, ctrl_state=[ctrl_state], target_qubits=[control, *targets])
