@@ -152,9 +152,10 @@ that stubgen emits the right type:
   shape, so each signature text is written once.
 - Return types: of the 13 bindings that return `object`, `QubitOperator.terms`,
   `.coefficient` (both operator classes) and `Block.__deepcopy__` get their real types.  The
-  absorbers' `absorb()` returns `Block`.  The emitters' `emit()` return and the absorbers'
-  framework argument are typed `Any`, so the stub imports no optional framework.  Nullable
-  returns say `| None` (`ConditionalBlock.then_body`, `else_body`).
+  raw absorbers' `absorb()` returns `tuple[list[Command], int, int]`, the commands and
+  register sizes the Python absorbers build the block from.  The emitters' `emit()` return
+  and the absorbers' framework argument are typed `Any`, so the stub imports no optional
+  framework.  Nullable returns say `| None` (`ConditionalBlock.then_body`, `else_body`).
 - `build()` returns the block, as the Python blocks do, and its signature says
   `typing.Self`.  This fixes the seven crashes above and the mixin's `build` conflict.
 - `is_built` becomes a read-only property, as on the Python blocks.  The same commit changes
@@ -484,21 +485,24 @@ to mypy, through `mypy_path` and the CMake install, only at the end of Phase 2.
 
 ### Phase 1 — Conventions, bindings and the stub
 
-- [ ] §13 and §15 edits
-- [ ] `nanobind` pinned in `[dev]` and `[full-dev]`; `scripts/generate_stubs.py` with its
+- [x] §13 and §15 edits *(2026-10-16)*
+- [x] `nanobind` pinned in `[dev]` and `[full-dev]`; `scripts/generate_stubs.py` with its
       guards and `--check`; pattern file; drift and pin tests; `.gitattributes`; ruff
-      exclusion
-- [ ] Bindings: the argument helper, `Param | float`, return types, `build()` returning the
+      exclusion *(2026-10-16)*
+- [x] Bindings: the argument helper, `Param | float`, return types, `build()` returning the
       block, `is_built` as a property, `sparse_matrix` (the Python assignments removed),
       `ConditionalBlock` overloads, the `Command` checks and dispatch, `Command`'s duplicate
-      equality removed; the stub's own 20 errors gone
-- [ ] Same commit as `is_built`: `_block.py`'s `fget` read, the five test call sites, the canary
-- [ ] SymEngine methods bound unconditionally and `__with_symengine__`, with
-      `test_symbolic_coefficients.py` switched in the same commit
-- [ ] Composites take no gates (C++ and the error translation), with the C++ test
-- [ ] The three renames, with `test_tensor_operators.py`
-- [ ] ABI 14 → 15 in `bindings.cpp` and `qarp/_abi.py`
-- [ ] The generated keyword table and the binding regression tests from the Test plan
+      equality removed; the stub's own 20 errors gone *(2026-10-16)*
+- [x] Same commit as `is_built`: `_block.py`'s `fget` read, the five test call sites, the
+      canary *(2026-10-16)*
+- [x] SymEngine methods bound unconditionally and `__with_symengine__`, with
+      `test_symbolic_coefficients.py` switched in the same commit *(2026-10-16)*
+- [x] Composites take no gates (C++ and the error translation), with the C++ test
+      *(2026-10-16)*
+- [x] The three renames, with `test_tensor_operators.py` *(2026-10-16)*
+- [x] ABI 14 → 15 in `bindings.cpp` and `qarp/_abi.py` *(2026-10-16)*
+- [x] The generated keyword table and the binding regression tests from the Test plan
+      *(2026-10-16)*
 
 ### Phase 2 — Type-check `qarp` against the stub
 
@@ -578,6 +582,9 @@ to mypy, through `mypy_path` and the CMake install, only at the end of Phase 2.
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+Deviations from the green-lit plan are declared in the PR's "Deviations from plan"
+section and folded back here before merge; silent drift is the violation.
+
+- **Phase 1, absorber return type.**  The plan typed the raw absorbers' `absorb()` as
+  returning `Block`; it returns `(commands, n_qubits, n_cbits)`, and the Python absorbers
+  build the block.  Typed `tuple[list[Command], int, int]`; Design updated.
