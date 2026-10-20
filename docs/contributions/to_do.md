@@ -28,18 +28,7 @@ the same window.
   good.
 - **Plan text on the plan-only branches.**  `pauli_engine_plan.md` and
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
-  `prepare_structured_qpe`; the counter is 14 after structured execution and
-  the hook is gone.  Fix when each branch rebases.
-- **`is_built` is a method on a raw `qx.Block`.**  The Python blocks shadow
-  it with a property, so code that reads `block.is_built` without calling it
-  takes an unbuilt raw block for built, and `flatten()` then raises:
-  `ResourceEstimator.estimate` (`qarp/resources/_estimator.py`),
-  `CuttingPrimitive.build` (`cutting_primitive.py`) and `CircuitAdapter`
-  (`qarp/plotting/_circuit_adapter.py`).  Bind it with `def_prop_ro`
-  (`cpp/libqarpx/python/bindings.cpp`), which bumps the ABI counter; the
-  `_is_built` helpers in `qarp/_program.py` and `_circuit_adapter.py` then
-  go, and `tests/test_blocks/test_block.py` stops calling it.  A regression
-  test per call site, each with an unbuilt raw block.
+  `prepare_structured_qpe`; the counter is 15 and the hook is gone.  Fix when each branch rebases.
 
 ## Breaking changes waiting for a minor release
 
@@ -92,12 +81,10 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   default from them.
 - **`check_untyped_defs` for `tests/`.**  `compiled_backend_stubs_plan.md`
   turns it on for `qarp/` only, so unannotated test bodies, which is nearly
-  every test, are still unchecked.  With the stub in place at `4093ad5` it
-  reported 1813 errors in 202 test files; many share causes that plan removes
-  (`build()`'s return value, floats passed as `Param`, `is_built` read
-  without calling it), so measure again once it lands.  It touches nearly
-  every test file, so it gets its own plan; land it after the layout move,
-  which would otherwise conflict with it in every test file.
+  every test, are still unchecked.  It reports 762 errors in 134 test files
+  on macOS, 416 of them `arg-type`.  It touches nearly half the test files,
+  so it gets its own plan; land it after the layout move, which would
+  otherwise conflict with it across them.
 - **`Sampler(postselect=PostSelection(...))`.**  Applying post-selection
   inside `Sampler.run()` waited on a result type that could carry
   `success_rate` without breaking the dict return; `SamplingDistribution`

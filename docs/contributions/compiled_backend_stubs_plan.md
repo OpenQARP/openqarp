@@ -1,6 +1,6 @@
 # Ship type stubs for the compiled backend and type-check `qarp` against them
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-10-15
 **Tier:** Structural
@@ -572,17 +572,20 @@ to mypy, through `mypy_path` and the CMake install, only at the end of Phase 2.
 
 ### Phase 3 — Docs
 
-- [ ] `AGENTS.md` and `CONTRIBUTING.md`: the regenerate command beside the mypy command, the
+- [x] `AGENTS.md` and `CONTRIBUTING.md`: the regenerate command beside the mypy command, the
       mypy command without `method-assign`, `[dev]`'s description, and `QarpBlock` beside
-      `AnyBlock` in `AGENTS.md`'s landmines
-- [ ] `installation.rst`: `[dev]`'s description
-- [ ] `qarp_philosophy.rst`: `QarpBlock` beside `AnyBlock`
-- [ ] `CHANGELOG.md`: Added (typed `qarpx`, keyword arguments on the raw methods, `QarpBlock`,
+      `AnyBlock` in `AGENTS.md`'s landmines *(2026-10-20)*
+- [x] `installation.rst`: `[dev]`'s description *(2026-10-20)*
+- [x] `qarp_philosophy.rst`: `QarpBlock` beside `AnyBlock` *(2026-10-20)*
+- [x] `CHANGELOG.md`: Added (typed `qarpx`, keyword arguments on the raw methods, `QarpBlock`,
       `qx.__with_symengine__`, `ConditionalBlock` without `then_body`); Changed (each runtime
       change under *Who sees a change* with its migration, `Engine.build` taking a
       `Sequence`, `VQE(op, raw_block)` rejected by mypy); Fixed (each bug in *Why*)
-- [ ] `docs/contributions/README.md`: the roadmap moves this work into the 0.2 cycle
-- [ ] `to_do.md`: the `is_built` entry leaves; the `tests/` strictness entry stays
+      *(2026-10-20)*
+- [x] `docs/contributions/README.md`: the roadmap moves this work into the 0.2 cycle
+      *(2026-10-20)*
+- [x] `to_do.md`: the `is_built` entry leaves; the `tests/` strictness entry stays
+      *(2026-10-20)*
 
 ## Deviations log
 
@@ -619,3 +622,9 @@ section and folded back here before merge; silent drift is the violation.
 - **Phase 2, a `qarpx` object built at import in a test.**  A `qx.Param` held by a
   `parametrize` list outlives nanobind's shutdown and is reported as a leak; Phase 1's two
   such lists (`test_block.py`, `test_stubs.py`) build their values inside the test.
+- **Phase 3, `to_do.md`.**  The `tests/` strictness entry carries the count measured on the
+  landed tree, 762 errors in 134 test files on macOS, in place of the count at `4093ad5`.
+  The plan-only branches entry names ABI 15.
+- **Phase 3, CHANGELOG.**  Bugs that are also runtime changes (gate methods on a composite,
+  `Command`'s dispatch, the renamed attributes) are listed once, under Changed with their
+  migration.  The two Phase 2 runtime changes are under Fixed.

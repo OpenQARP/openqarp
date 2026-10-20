@@ -106,14 +106,17 @@ lands during a release freeze: the tree should not churn while a tag is being
 cut.
 
 **First post-launch window** — cleanup with no public surface change, cleared
-before any layout move.  Type stubs for the compiled backend, then the
-configuration and agent-guide tidy-up.
+before any layout move.  The configuration and agent-guide tidy-up.
 
 **The 0.2 cycle** — layout, so paths break once rather than twice.  The `src/`
 source root and the `cpp/` flattening.  `Sampler` also returns a read-only
 `SamplingDistribution` from this cycle
 ([`sampler_distribution_plan.md`](sampler_distribution_plan.md)), which breaks
-`isinstance(result, dict)` and mutating a result.
+`isinstance(result, dict)` and mutating a result.  The compiled backend
+ships type stubs from this cycle
+([`compiled_backend_stubs_plan.md`](compiled_backend_stubs_plan.md)), with
+runtime changes to raw `qarpx` blocks, `qx.Command` and three renamed block
+attributes.
 
 **The 1.0 item** — one public import name, with `qarpx` kept as a deprecating
 shim for a full release.
