@@ -43,3 +43,25 @@ def test_fanout_seeding_is_reproducible():
     eng_b = QarpEngine(seed=11)
     eng_b.build([_hadamard_sampler(), _hadamard_sampler()])
     assert [dict(d) for d in eng_b.run()] == first
+
+
+def test_batch_run_seeds_match_run_after_an_exact_readout():
+    # An EXACT readout draws no seed in either call, so a lowered circuit and
+    # a gate-path circuit after it sample the same tapes in both.
+    import numpy as np
+
+    import qarp
+    from qarp.blocks import ComputationalBasisStateBlock, HnBlock, QPEBlock
+
+    u = SimpleBlock(1, name="U")
+    u.p(0, 2 * np.pi * 0.3)
+    lowered = Sampler(QPEBlock(ComputationalBasisStateBlock([1]), u, 3, 1), n_shots=200)
+    prims = [Sampler(HnBlock(3), n_shots=qarp.EXACT), lowered, Sampler(HnBlock(3), n_shots=50)]
+    eng = QarpEngine(seed=5)
+    eng.build(prims)
+    assert eng.kernels(lowered)[0] != ["gates"] and not lowered.compiled_circuits[0]
+    by_run = [dict(r) for r in eng.run()]
+    (by_sweep,) = eng.batch_run(prims, [{}])
+    assert [dict(r) for r in by_sweep[1:]] == by_run[1:]
+    # φ = 0.3 is not on the 3-bit grid: the shots spread over several bins.
+    assert len(by_run[1]) > 1

@@ -3,7 +3,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <ctime>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -197,9 +196,19 @@ TEST(BlasThreads, WorksFromInsideAnOpenMPRegion) {
 
 TEST(BlasThreads, IdleWorkersDoNotSpin) {
     expect_all_jobs_ran_together(8);
-    const std::clock_t before = std::clock();  // CPU time of every thread
+    // Another thread of the process is busy for the whole window, like
+    // OpenBLAS's own workers after load: only the pool's workers may count.
+    std::atomic<bool> stop{false};
+    std::thread busy([&stop] {
+        while (!stop.load(std::memory_order_relaxed)) {
+        }
+    });
+    const double before = qarpx::blas_pool_worker_cpu_seconds();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    const double busy_ms = 1000.0 * static_cast<double>(std::clock() - before) / CLOCKS_PER_SEC;
+    const double busy_ms = 1000.0 * (qarpx::blas_pool_worker_cpu_seconds() - before);
+    stop.store(true, std::memory_order_relaxed);
+    busy.join();
+    if (before < 0.0) GTEST_SKIP() << "worker CPU time is not readable on this platform";
     EXPECT_LT(busy_ms, 20.0) << "idle pool used " << busy_ms << " ms of CPU in 200 ms";
 }
 

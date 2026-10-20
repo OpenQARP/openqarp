@@ -140,11 +140,18 @@ def test_routed_device_rejects_seeded_primitive():
         eng.build([sampler])
 
 
-def test_batch_run_finite_shots_rejects_seeded_primitive():
-    sampler = Sampler(ket=_h0_block(), initial_state=_random_state(2))
-    eng = QarpEngine()
-    with pytest.raises(CapabilityError, match="batch_run"):
-        eng.batch_run([sampler], [{}], n_shots=100)
+def test_batch_run_finite_shots_samples_from_the_seeded_state():
+    """Ry(θ)|1⟩ = −sin(θ/2)|0⟩ + cos(θ/2)|1⟩ (analytic): θ = 0 leaves every
+    shot on 1 and θ = π moves every shot to 0, so each set reads its own θ
+    from the seeded state."""
+    theta = Symbol("theta")
+    b = SimpleBlock(1)
+    b.ry(0, theta)
+    sampler = Sampler(ket=b, initial_state=np.array([0.0, 1.0], dtype=complex))
+    eng = QarpEngine(seed=11)
+    at_zero, at_pi = eng.batch_run([sampler], [{"theta": 0.0}, {"theta": np.pi}], n_shots=100)
+    assert dict(at_zero[0]) == {(1,): 1.0}
+    assert dict(at_pi[0]) == {(0,): 1.0}
 
 
 def test_routed_run_rejects_post_build_initial_state_mutation():

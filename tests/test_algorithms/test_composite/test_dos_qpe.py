@@ -48,15 +48,20 @@ def test_dosqpe_ladder_as_controlled_powers_matches_the_analytic_spectrum(n_shot
     u.build()
     shots = qarp.EXACT if n_shots == "exact" else n_shots
     dos = DOSQPE(unitary=u, n_ancilla=3, engine=QarpEngine(seed=0, n_shots=shots)).build()
-    assert dos.block is None
-    assert dos._structured_run._program.kinds().count("controlled_powers") == 1
+    assert not dos.block.is_built
+    assert dos.engine.kernels(dos.primitive)[0].count("controlled_powers") == 1
     dist = dos.run()
     expected = {(0, 0, 0): 0.5, (1, 1, 0): 0.5}
-    if n_shots == "exact":
-        assert dict(dist) == pytest.approx(expected, abs=1e-10)
-    else:
-        keys = set(dist) | set(expected)
-        assert 0.5 * sum(abs(dist.get(k, 0.0) - expected.get(k, 0.0)) for k in keys) < 0.05
+
+    def close(d):
+        if n_shots == "exact":
+            return dict(d) == pytest.approx(expected, abs=1e-10)
+        keys = set(d) | set(expected)
+        return 0.5 * sum(abs(d.get(k, 0.0) - expected.get(k, 0.0)) for k in keys) < 0.05
+
+    assert close(dist)
+    # batch_run serves the planned block too, one distribution per set.
+    assert all(close(dists[0]) for dists in dos.engine.batch_run([dos.primitive], [{}, {}]))
 
 
 def test_dosqpe_recovers_synthesized_spectrum():
@@ -129,14 +134,19 @@ def _run_dicke_dosqpe():
 def test_dosqpe_dicke_probe_exact_sector_dos():
     """Dicke |2,1⟩ probe = maximally mixed over the hamming-weight-1 sector:
     the exact DOS is half weight at each sector eigenphase (1/4 and 1/2),
-    both exactly representable at n_ancilla=4."""
-    _, dist = _run_dicke_dosqpe()
+    both exactly representable at n_ancilla=4; ``run`` and every
+    ``batch_run`` set serve the ladder planned, never built."""
+    dosqpe, dist = _run_dicke_dosqpe()
+    assert not dosqpe.block.is_built
+    assert dosqpe.engine.kernels(dosqpe.primitive)[0].count("controlled_powers") == 1
 
     bits_quarter = tuple((4 >> b) & 1 for b in range(4))  # φ = 4/16
     bits_half = tuple((8 >> b) & 1 for b in range(4))  # φ = 8/16
-    assert dist.get(bits_quarter, 0.0) == pytest.approx(0.5, abs=1e-9)
-    assert dist.get(bits_half, 0.0) == pytest.approx(0.5, abs=1e-9)
-    assert sum(dist.values()) == pytest.approx(1.0)
+    swept = [d[0] for d in dosqpe.engine.batch_run([dosqpe.primitive], [{}, {}])]
+    for d in [dist, *swept]:
+        assert d.get(bits_quarter, 0.0) == pytest.approx(0.5, abs=1e-9)
+        assert d.get(bits_half, 0.0) == pytest.approx(0.5, abs=1e-9)
+        assert sum(d.values()) == pytest.approx(1.0)
 
 
 def test_dosqpe_plot_before_run_raises():
@@ -206,8 +216,8 @@ def test_dosqpe_noisy_engine_keeps_the_gate_path():
         n_ancilla=2,
         engine=QarpEngine(n_qubits=4, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
-    assert dosqpe._structured_run is None and dosqpe.block.is_built
-    assert dosqpe.engine._programs[id(dosqpe.primitive)] == [None]
+    assert dosqpe.block.is_built
+    assert dosqpe.engine.kernels(dosqpe.primitive) == [["gates"]]
     dist = dosqpe.run()
     assert sum(dist.values()) == pytest.approx(1.0)
 

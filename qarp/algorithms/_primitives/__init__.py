@@ -7,8 +7,8 @@
 2. **Estimation strategy** (*how*): the class.  Protocol primitives
    (``Sampler``, ``PauliAveraging``, ``HadamardTest``, ``SWAPTest``,
    ``MirrorTest``, ``InterferometricTest``, ``Termwise*``,
-   ``CuttingPrimitive``) build measurement circuits and consume **counts**
-   (``consumes = Consumes.COUNTS``).  ``StateVector`` consumes **amplitudes**
+   ``CuttingPrimitive``) derive measurement circuits, which the engine plans
+   or builds, and consume **counts** (``consumes = Consumes.COUNTS``).  ``StateVector`` consumes **amplitudes**
    directly (``Consumes.AMPLITUDES``) — no measurement circuits, always
    exact, the only strategy eligible for adjoint backprop.
 3. **Readout mode** (*finite shots vs the ∞-shot limit*): the ``n_shots``

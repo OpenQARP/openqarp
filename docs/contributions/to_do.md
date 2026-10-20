@@ -30,10 +30,16 @@ the same window.
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
   `prepare_structured_qpe`; the counter is 14 after structured execution and
   the hook is gone.  Fix when each branch rebases.
-- **No shim for `prepare_structured`.**  The lazy-circuits plan asks whether
-  the hook gets a one-release shim; the release order answers it: the hook
-  never reaches a release, so it is a plain removal.  Record that in the
-  plan's decisions at the sit-down.
+- **`is_built` is a method on a raw `qx.Block`.**  The Python blocks shadow
+  it with a property, so code that reads `block.is_built` without calling it
+  takes an unbuilt raw block for built, and `flatten()` then raises:
+  `ResourceEstimator.estimate` (`qarp/resources/_estimator.py`),
+  `CuttingPrimitive.build` (`cutting_primitive.py`) and `CircuitAdapter`
+  (`qarp/plotting/_circuit_adapter.py`).  Bind it with `def_prop_ro`
+  (`cpp/libqarpx/python/bindings.cpp`), which bumps the ABI counter; the
+  `_is_built` helpers in `qarp/_program.py` and `_circuit_adapter.py` then
+  go, and `tests/test_blocks/test_block.py` stops calling it.  A regression
+  test per call site, each with an unbuilt raw block.
 
 ## Breaking changes waiting for a minor release
 
@@ -73,11 +79,9 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   it as a `SimpleBlock` leaf; its layers are a composition that a
   `CompositeBlockBase` tree expresses.  `isinstance` answers change; ships
   with the symbol-contract regression test.
-- **One `Runnable` change for the engine boundary.**  The lazy-circuits plan
-  groups `Runnable` by boundary and moves `Target` below the engine layer;
-  `pauli_engine_plan.md` adds `Consumes.OBSERVABLE` and makes
-  `StateVector.consumes` a property.  Settle both at one sit-down so a
-  third-party engine adapts once.
+- **`Consumes.OBSERVABLE` on the engine boundary.**
+  `pauli_engine_plan.md` adds the member and makes `StateVector.consumes` a
+  property, so a third-party engine that dispatches on `consumes` adapts.
 
 ## Additive, no window needed
 
@@ -99,3 +103,23 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   `success_rate` without breaking the dict return; `SamplingDistribution`
   carries `n_shots` the same way.  Post-selected qubits must be measured and
   leave the key.
+- **`QarpEngine`'s plan cache is bounded by count, not size.**
+  `_PLAN_CACHE_SIZE` (`qarp/engines/_qarp_engine.py`) keeps 64 programs of
+  the built path, whatever their tables weigh: sixteen distinct 22-qubit
+  permutation circuits held 517 MB after every primitive was gone, and 64
+  such tables at 26 qubits reach 32 GB.  Bound it by the bytes its
+  permutation tables and dense matrices hold.
+- **`_plan_unbuilt` is not cached.**  Every `Engine.build` collects an
+  unbuilt circuit's parts again, flattening its plain parts: `PauliAveraging`
+  flattens a shared ket once more per group on every build, and a
+  parametric ket is flattened only to be declined.  A cache would need a
+  key for an unbuilt composition, which has no stream to digest.
+- **A parametric planned program copies its tables on every binding.**
+  `Program::substituted` (`cpp/libqarpx/src/simulator/program.cpp`) copies
+  every permutation table and dense matrix by value, and `QarpEngine`
+  substitutes a parametric program once per `run(params)` and per
+  `batch_run` set.  Structural kernels never hold a parameter, so a built
+  circuit with one rotation beside a large permutation copies the
+  permutation each time: about 0.013 s per 2^22-entry table per set.  Hold
+  the tables behind a shared pointer, so substitution copies only the gate
+  kernels.

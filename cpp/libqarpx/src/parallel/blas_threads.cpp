@@ -13,6 +13,12 @@
 #ifndef _WIN32
 #include <pthread.h>
 #endif
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+#ifdef __linux__
+#include <time.h>
+#endif
 
 namespace qarpx {
 
@@ -22,6 +28,27 @@ namespace {
 constexpr std::chrono::microseconds kIdleSpin{50};
 
 std::atomic<std::uint64_t> g_invocations{0};
+
+// CPU time of one live thread; below zero where it cannot be read.
+double thread_cpu_seconds([[maybe_unused]] std::thread::native_handle_type handle) {
+#if defined(__linux__)
+    clockid_t cpu_clock;
+    timespec ts{};
+    if (pthread_getcpuclockid(handle, &cpu_clock) != 0 || clock_gettime(cpu_clock, &ts) != 0)
+        return -1.0;
+    return static_cast<double>(ts.tv_sec) + 1e-9 * static_cast<double>(ts.tv_nsec);
+#elif defined(__APPLE__)
+    thread_basic_info_data_t info{};
+    mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+    if (thread_info(pthread_mach_thread_np(handle), THREAD_BASIC_INFO,
+                    reinterpret_cast<thread_info_t>(&info), &count) != KERN_SUCCESS)
+        return -1.0;
+    return static_cast<double>(info.user_time.seconds + info.system_time.seconds) +
+           1e-6 * static_cast<double>(info.user_time.microseconds + info.system_time.microseconds);
+#else
+    return -1.0;
+#endif
+}
 
 // A call is one word: its sequence number above kJobBits and its job count
 // below, so a worker learns from a single load whether a call needs it.
@@ -77,6 +104,17 @@ public:
     std::size_t workers() {
         std::lock_guard<std::mutex> lock(mutex_);
         return workers_.size();
+    }
+
+    double worker_cpu_seconds() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        double total = 0.0;
+        for (std::thread& worker : workers_) {
+            const double seconds = thread_cpu_seconds(worker.native_handle());
+            if (seconds < 0.0) return -1.0;
+            total += seconds;
+        }
+        return total;
     }
 
     std::mutex& mutex() { return mutex_; }
@@ -218,6 +256,11 @@ std::uint64_t blas_callback_invocations() {
 std::size_t blas_pool_workers() {
     const std::lock_guard<std::mutex> lock(g_one_call_at_a_time);
     return g_pool->workers();
+}
+
+double blas_pool_worker_cpu_seconds() {
+    const std::lock_guard<std::mutex> lock(g_one_call_at_a_time);
+    return g_pool->worker_cpu_seconds();
 }
 
 }  // namespace qarpx

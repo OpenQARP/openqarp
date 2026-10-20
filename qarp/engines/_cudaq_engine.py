@@ -23,13 +23,14 @@ from typing import Optional, Union
 import qarpx as qx
 from qarp.operators import QubitOperator
 
-from .._types import Consumes, PrimitiveResult, Shots
+from .._types import Consumes, PrimitiveResult, Shots, Target
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
     _exact_result,
     _operator_n_qubits,
     _qubit_operator_to_observable,
+    _substituted,
 )
 from ._runnable import Runnable
 
@@ -43,14 +44,10 @@ def _is_gpu_expectation(prim) -> bool:
     (OVERLAP, TRANSITION_AMPLITUDE, non-QubitOperator) falls back to
     ``run_from_amplitudes`` with the GPU simulator injected.
 
-    ``target`` is matched by name string (not by importing the ``Target`` enum)
-    to avoid an import cycle: ``qarp.algorithms`` imports back from
-    ``qarp.engines`` — the same reason ``_gradients`` compares
-    ``prim.target.name``.
     """
     return (
         getattr(prim, "consumes", None) is Consumes.AMPLITUDES
-        and getattr(getattr(prim, "target", None), "name", None) == "EXPECTATION_VALUE"
+        and getattr(prim, "target", None) is Target.EXPECTATION_VALUE
         and isinstance(getattr(prim, "operator", None), QubitOperator)
     )
 
@@ -93,7 +90,8 @@ def _check_statevector_host(prim) -> None:
     TRANSITION_AMPLITUDE / EXACT readout) copies ``2**n`` amplitudes to host.
     EXPECTATION_VALUE is exempt — ``batch_expectation`` keeps everything on-device.
     """
-    _check_statevector_host_width(max(prim._n_qubits_list, default=0), type(prim).__name__)
+    width = max((c.n_qubits for c in prim.compiled), default=0)
+    _check_statevector_host_width(width, type(prim).__name__)
 
 
 def _require_cudaq():
@@ -186,9 +184,6 @@ class CudaqEngine(Engine):
         self._n_shots = n_shots
         self._seed = seed
         self._primitives: list[Runnable] = []
-        # All-to-all simulator: never routed, entries stay None — kept so the
-        # base template's bookkeeping is uniform across engines.
-        self._l2p_per_primitive: list[list[None]] = []
 
     # ── Template hooks (build()/run() live on the base Engine) ─────────────
 
@@ -202,8 +197,8 @@ class CudaqEngine(Engine):
         optimisation could ZYZ-decompose fused ``Custom`` gates back to
         Rz/Ry/Rz and re-enable fusion.)
 
-        No routing: an all-to-all simulator needs none, so l2p is always None
-        and there is no reindex step in run()/batch_run().  A gate the
+        No routing: an all-to-all simulator needs none, so the layout is
+        always None and there is no reindex step in run()/batch_run().  A gate the
         CUDA-Q gate set cannot reach raises ``CapabilityError`` (§14).
         """
         return self._transpiler.transpile(flat), block_n_qubits, None
@@ -215,7 +210,7 @@ class CudaqEngine(Engine):
         _check_statevector_host_width(n_qubits, "a statevector fast path")
         return self._sim
 
-    def _post_compile_check(self, prim: Runnable, compiled, l2p) -> None:
+    def _post_compile_check(self, prim: Runnable, compiled, layout) -> None:
         # lower() (cudaq_simulator.cpp) handles unitary gates plus
         # end-of-circuit measurement only — reject the rest with a clear
         # message rather than emitting a circuit that silently drops them.
@@ -225,11 +220,13 @@ class CudaqEngine(Engine):
             reason=("The CUDA-Q lowerer handles unitary gates plus end-of-circuit sampling only."),
         )
 
-    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int, params):
+    def _dispatch_one(self, prim: Runnable, compiled, ordinal: int, params):
+        substituted = _substituted(compiled, params)
+        widths = [c.n_qubits for c in compiled]
         if prim.consumes is Consumes.AMPLITUDES:
             if _is_gpu_expectation(prim):
                 # Pad to the operator width (idle qubits stay |0>).
-                n_q = max(prim._n_qubits_list[0], _operator_n_qubits(prim.operator))
+                n_q = max(widths[0], _operator_n_qubits(prim.operator))
                 obs = _qubit_operator_to_observable(prim.operator, n_q)
                 # One already-substituted circuit; empty param set = no-op.
                 val = self._sim.batch_expectation(substituted[0], n_q, obs, [{}])[0]
@@ -242,12 +239,12 @@ class CudaqEngine(Engine):
             _check_statevector_host(prim)
             sampling_results = [
                 _exact_result(self._sim, cmds, n_q)
-                for cmds, n_q in zip(substituted, prim._n_qubits_list, strict=True)
+                for cmds, n_q in zip(substituted, widths, strict=True)
             ]
         else:
             sampling_results = [
                 self._sim.run(cmds, n_q, n_shots, self._circuit_seed(ordinal + k))
-                for k, (cmds, n_q) in enumerate(zip(substituted, prim._n_qubits_list, strict=True))
+                for k, (cmds, n_q) in enumerate(zip(substituted, widths, strict=True))
             ]
             ordinal += len(sampling_results)
         return prim.run(sampling_results), ordinal
@@ -255,8 +252,7 @@ class CudaqEngine(Engine):
     def _sweep(
         self,
         primitives,
-        circuits_per_prim,
-        l2p_per_prim,
+        compiled_per_prim,
         param_sets,
         shots_override,
     ) -> list[list[PrimitiveResult]]:
@@ -279,12 +275,12 @@ class CudaqEngine(Engine):
         prim_data: list[tuple[str, list]] = []
         ordinal = 0
         for prim_idx, prim in enumerate(primitives):
-            circuits = circuits_per_prim[prim_idx]
+            compiled = compiled_per_prim[prim_idx]
             if _is_gpu_expectation(prim):
                 # Pad to the operator width (idle qubits stay |0>).
-                n_q = max(prim._n_qubits_list[0], _operator_n_qubits(prim.operator))
+                n_q = max(compiled[0].n_qubits, _operator_n_qubits(prim.operator))
                 obs = _qubit_operator_to_observable(prim.operator, n_q)
-                vals = self._sim.batch_expectation(circuits[0], n_q, obs, list(param_sets))
+                vals = self._sim.batch_expectation(compiled[0].commands, n_q, obs, list(param_sets))
                 prim_data.append(("expect", list(vals)))
             elif prim.consumes is Consumes.AMPLITUDES:
                 _check_statevector_host(prim)
@@ -296,9 +292,9 @@ class CudaqEngine(Engine):
                 shots = self._resolve_shots(prim, shots_override)
                 circ_batch = [
                     self._sim.batch_run(
-                        cmds, n_q, shots, param_sets, self._circuit_seed(ordinal + k)
+                        c.commands, c.n_qubits, shots, param_sets, self._circuit_seed(ordinal + k)
                     )
-                    for k, (cmds, n_q) in enumerate(zip(circuits, prim._n_qubits_list, strict=True))
+                    for k, c in enumerate(compiled)
                 ]
                 ordinal += len(circ_batch)
                 prim_data.append(("sample", circ_batch))
@@ -308,22 +304,21 @@ class CudaqEngine(Engine):
             set_results: list[PrimitiveResult] = []
             for prim_idx, prim in enumerate(primitives):
                 kind, data = prim_data[prim_idx]
-                circuits = circuits_per_prim[prim_idx]
+                compiled = compiled_per_prim[prim_idx]
                 if kind == "expect":
                     set_results.append(complex(data[set_idx]))
                 elif kind == "amps":
-                    substituted = [qx.substitute_all(cmds, ps) if ps else cmds for cmds in circuits]
+                    substituted = _substituted(compiled, ps)
                     set_results.append(prim.run_from_amplitudes(substituted, simulator=self._sim))
                 elif kind == "exact":
-                    substituted = [qx.substitute_all(cmds, ps) if ps else cmds for cmds in circuits]
                     sampling_results = [
-                        _exact_result(self._sim, cmds, n_q)
-                        for cmds, n_q in zip(substituted, prim._n_qubits_list, strict=True)
+                        _exact_result(self._sim, cmds, c.n_qubits)
+                        for cmds, c in zip(_substituted(compiled, ps), compiled, strict=True)
                     ]
                     set_results.append(prim.run(sampling_results))
                 else:  # "sample"
                     sampling_results = [
-                        data[circ_idx][set_idx] for circ_idx in range(len(circuits))
+                        data[circ_idx][set_idx] for circ_idx in range(len(compiled))
                     ]
                     set_results.append(prim.run(sampling_results))
             results_by_set.append(set_results)

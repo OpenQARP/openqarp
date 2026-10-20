@@ -8,13 +8,12 @@ If an ``operator`` is provided, the ket register is replaced with
 ``ket · operator`` (so the test estimates ``|⟨bra|U|ket⟩|²``).
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
 import qarpx as qx
 
 from ..._types import Shots
-from ...blocks import AnyBlock
-from ...blocks._block import CompositeBlockBase
+from ...blocks import AnyBlock, CompositeBlock
 from ...blocks._primitives import SWAPTestBlock
 from .primitive_algorithm import PrimitiveAlgorithm
 from .target import Target
@@ -52,29 +51,22 @@ class SWAPTest(PrimitiveAlgorithm):
         if self.operator is not None and not isinstance(self.operator, qx.Block):
             raise TypeError("operator must be a Block instance or None")
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         self._validate_inputs()
 
         # If operator is provided, the ket register effectively prepares
         # ``ket`` then applies ``operator`` — wrap them in a composite.
         if self.operator is not None:
             n_state = self.ket.n_qubits
-            ket_built = self.ket.build()
-            ket_built.target_qubits = list(range(n_state))
-            op_built = self.operator.build()
-            op_built.target_qubits = list(range(n_state))
-            ket_register = CompositeBlockBase(n_qubits=n_state, name="ket+operator")
-            ket_register.add_child(ket_built)
-            ket_register.add_child(op_built)
-            ket_register.build()
+            self.ket.target_qubits = list(range(n_state))
+            self.operator.target_qubits = list(range(n_state))
+            ket_register = CompositeBlock(
+                [self.ket, self.operator], n_qubits=n_state, name="ket+operator"
+            )
         else:
-            ket_register = self.ket.build()
+            ket_register = self.ket
 
-        block = SWAPTestBlock(bra=self.bra, ket=ket_register, measure=True)
-        block.build()
-
-        self.sub_blocks = [block]
-        return self
+        return [SWAPTestBlock(bra=self.bra, ket=ket_register, measure=True)]
 
     def run(self, results: list) -> float:
         """``2·P(ancilla=0) − 1 = |⟨bra|ket⟩|²``.

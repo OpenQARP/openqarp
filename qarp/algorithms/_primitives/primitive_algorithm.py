@@ -1,9 +1,9 @@
 """``PrimitiveAlgorithm`` ABC.
 
-Subclasses populate ``self.sub_blocks`` with ``qx.Block`` instances (qarpx C++ core)
-in ``build()`` and post-process the engine's per-sub-block results in
-``run(results)`` — ``qx.SamplingResult`` entries, or ``ExactResult`` entries
-under ``n_shots=qarp.EXACT``.  ``Consumes.AMPLITUDES`` primitives are
+Subclasses derive their circuits in ``circuits()`` — block trees over the
+inputs as given, nothing built — and post-process the engine's per-circuit
+results in ``run(results)``: ``qx.SamplingResult`` entries, or ``ExactResult``
+entries under ``n_shots=qarp.EXACT``.  ``Consumes.AMPLITUDES`` primitives are
 evaluated through ``run_from_amplitudes`` instead (the engine never samples
 for them).
 """
@@ -24,14 +24,22 @@ class PrimitiveAlgorithm(ABC):
 
     Subclasses must implement:
 
-    - ``build()`` — populate self.sub_blocks with qx.Block instances
-    - ``run(results)`` — post-process the engine's per-sub-block results
+    - ``circuits()`` — the circuits to run, as block trees over the inputs
+      as given; the engine plans a declared structure before building (§14)
+      and builds only what planning refuses
+    - ``run(results)`` — post-process the engine's per-circuit results
       (qx.SamplingResult, or ExactResult under n_shots=qarp.EXACT) → scalar
 
     Attributes:
-        sub_blocks:         Populated by build(); list of qx.Block to compile.
-        compiled_circuits:  Set by QarpEngine.build(); list of command lists.
-        _n_qubits_list:     Set by QarpEngine.build(); n_qubits per circuit.
+        sub_blocks:         Set by build() from circuits(); block trees, built
+                            by the engine where planning refuses.
+        compiled:           Set by Engine.build(); one ``CompiledCircuit``
+                            per circuit.
+        compiled_circuits:  Each circuit's command list, read from
+                            ``compiled``; empty for one lowered from a
+                            declaration.
+        _n_qubits_list:     Each circuit's simulator width, read from
+                            ``compiled``.
 
     Class capability metadata (override on the subclass; class-level so it
     survives the ``deepcopy``-then-mutate pattern QSE/MonteCarlo/QMEGS use):
@@ -67,10 +75,6 @@ class PrimitiveAlgorithm(ABC):
       already returns ``|⟨bra|ket⟩|²`` rather than the amplitude ``⟨bra|ket⟩``.
       Consumers that need the squared overlap (VQD/ADAPT-VQD deflation) must not
       square such a value again.  Default ``False`` (amplitude-returning).
-    - ``samples_block``: ``True`` iff the primitive's only circuit is its block as
-      given and ``run()`` returns the distribution of that block's recorded
-      measurements.  Only such a primitive can take a structured run
-      (``Engine.prepare_structured``, §14).  Default ``False``; ``Sampler`` sets it.
     """
 
     supported_targets: frozenset[Target] = frozenset()
@@ -80,7 +84,6 @@ class PrimitiveAlgorithm(ABC):
     gradient_kind: str = "none"
     requires_noiseless: bool = False
     returns_probability: bool = False
-    samples_block: bool = False
     # Ket-seeding amplitudes — class-level None so engines can read the field
     # on every primitive.  ``accepts_initial_state`` is the enforcement point
     # (checked in ``Engine._validate_primitive``): estimator primitives with
@@ -109,8 +112,7 @@ class PrimitiveAlgorithm(ABC):
         self.n_shots = n_shots
         self.target = target
         self.sub_blocks: list = []
-        self.compiled_circuits: list[list] = []
-        self._n_qubits_list: list[int] = []
+        self.compiled: list = []
 
     @property
     def bra(self) -> Any:
@@ -170,11 +172,28 @@ class PrimitiveAlgorithm(ABC):
         return self.target
 
     @abstractmethod
+    def circuits(self) -> list:
+        """The circuits this primitive runs, as block trees over its inputs
+        as given.  Nothing is built here: a block handed in unbuilt stays
+        unbuilt until the engine, which plans a declared structure first
+        (§14 *Structured execution*) and builds only what planning refuses.
+        """
+
     def build(self) -> "PrimitiveAlgorithm":
-        """Construct circuits: populate self.sub_blocks with qx.Block instances.
+        """Derive the circuits into ``sub_blocks`` without building a block.
 
         Returns ``self`` so callers can chain ``primitive.build()``.
         """
+        self.sub_blocks = list(self.circuits())
+        return self
+
+    @property
+    def compiled_circuits(self) -> list[list]:
+        return [c.commands for c in self.compiled]
+
+    @property
+    def _n_qubits_list(self) -> list[int]:
+        return [c.n_qubits for c in self.compiled]
 
     @abstractmethod
     def run(self, results: list) -> PrimitiveResult:

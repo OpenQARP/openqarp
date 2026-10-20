@@ -64,7 +64,7 @@ Sit-down held: <!-- yes / no — structural tier requires yes -->
       named BEFORE implementation exists)
 - [ ] Conventions checked (`qarp_conventions.md` §13–§17); any convention
       change named explicitly in the Design section
-- [ ] Index row added in `docs/contributions/README.md` (📋 Planned)
+- [ ] Status Planned; index row added in `docs/contributions/README.md`
 
 <!-- Reviewer — paste into a PR COMMENT, not an Approve review (an Approve
      on the Draft would count as the merge approval at Gate 2):
@@ -77,9 +77,9 @@ Green-lit at <commit sha>
       missing, nothing unrelated is in
 - [ ] Every oracle in the test plan is independent of the implementation
 
-     After that comment the author fills the plan's Green-lit header (sha,
-     date, plan blob id) and flips the index row to 🚧 In progress, in one
-     commit.  Implementation starts after that commit. -->
+     After that comment the author fills the plan's Green-lit header (date,
+     plan blob id) and sets its Status to In progress, in one commit.
+     Implementation starts after that commit. -->
 
 ## Deviations from plan
 
@@ -95,9 +95,9 @@ Green-lit at <commit sha>
       oracle (analytic / published / openfermion / scipy — round-trips are
       additional, never the oracle)
 - [ ] Example in `examples/`
-- [ ] Plan file updated: deviations folded back, phase boxes dated, status
-      and index row flipped to ✅ Landed (a push after the Approve dismisses
-      it, so the plan file is finished before marking ready)
+- [ ] Plan file updated: deviations folded back, phase boxes dated, Status
+      set to Landed (a push after the Approve dismisses it, so the plan
+      file is finished before marking ready)
 - [ ] `ruff check .`, `ruff format --check .`, mypy, `pytest` green locally
 - [ ] `qarp_conventions.md` **has not been edited** — or, if it has, the change
       was named in the plan and green-lit
