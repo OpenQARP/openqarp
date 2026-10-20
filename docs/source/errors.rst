@@ -52,8 +52,6 @@ and the emit boundary is reached when you call ``to_<sdk>()``.
      - ``{Primitive} carries initial_state, but {Engine} cannot seed its register: state injection is a QarpSimulator capability (QarpEngine only).  Encode the state as gates instead (SynthesizedStateBlock).``
    * - A primitive carries ``initial_state`` and the router placed its register (the *initial* logical→physical map is not the identity; a final map moved only by SWAPs is fine — the seed still lands on the right wires)
      - ``{Primitive} carries initial_state in logical qubit order, but the router placed the register (initial_logical_to_physical is not the identity).  Use an architecture-free device.``
-   * - A primitive carries ``initial_state`` on a finite-shot sweep, which runs in C++ ``batch_run``
-     - ``{Primitive} carries initial_state, but the finite-shot sweep runs in C++ batch_run, which cannot seed the register.  Use n_shots=qarp.EXACT or per-step run() calls.``
    * - **(compile time)** The device cannot run the circuit at all — it does not fit, a gate cannot be rebased onto the device gate set (the diagnostic lists every unreachable gate, sorted), routing fails (disconnected coupling map, bad initial mapping, a 3+-qubit gate reaching the router), or an asymmetric two-qubit gate would run against a directed edge. Raised by the C++ passes themselves, so ``qx.compile_for_device``, ``qx.route``, ``Transpiler.transpile`` and ``Block.optimize`` all raise it directly
      - whatever ``qx.compile_for_device`` reported (``check_fits`` / rebase / route / ``assert_directions``); the offending command rides on ``.command``
    * - **(gradient time)** ``run_gradient`` is asked for a method the engine does not declare (``"adjoint"`` on ``CudaqEngine``, a reserved name such as ``"metric-tensor"``), for ``"adjoint"`` on a primitive it does not cover, or for ``"parameter-shift"`` on a gate angle that is not affine in its symbols or on a primitive whose ``gradient_kind`` is ``"none"``, see `Gradient refusals`_ below
@@ -254,10 +252,8 @@ silently corrupt the result rather than fail:
     # seed would silently corrupt the result.  Seed the register via Sampler
     # or StateVector instead.
 
-Three further restrictions apply even to ``Sampler`` and ``StateVector``. State injection is
+Two further restrictions apply even to ``Sampler`` and ``StateVector``. State injection is
 a ``QarpSimulator`` capability, so any other engine (``supports_initial_state = False``) rejects
 it and wants the state encoded as gates via ``SynthesizedStateBlock``. Injected amplitudes are
 in **logical** qubit order, so a routed circuit rejects them for the same reason
-`Amplitudes versus routing`_ rejects ``StateVector``. And a finite-shot parameter sweep runs
-in the C++ ``batch_run``, which cannot seed the register, so it wants ``n_shots=qarp.EXACT``
-or per-step ``run()`` calls instead.
+`Amplitudes versus routing`_ rejects ``StateVector``.

@@ -13,17 +13,16 @@ template — you never approve or block; write findings, not verdicts.
 ## Procedure
 
 1. Read the plan fully: Scope, Design, API sketch, Test plan (oracle
-   column), Phases, Deviations log.  Take the green-lit sha and blob from
-   the plan's `**Green-lit:**` header and verify the sha against the
+   column), Phases, Deviations log.  Take the green-lit sha from the
    reviewer's own `Green-lit at <sha>` comment on the PR
-   (`gh pr view <n> --comments`) — the header is author-written, the
-   comment is not.  Then verify the blob: `git rev-parse <sha>:<plan file>`
-   must print the header's blob (if the sha is not in the local history the
-   branch was rebased; `git fetch origin <sha>` retrieves it, GitHub keeps a
-   PR's rewritten commits).  A mismatch on either is the top finding: the
-   author may have pointed the review at a later revision of the plan.  If
-   there is no green-light comment the PR never cleared Gate 1 — report that
-   and stop.
+   (`gh pr view <n> --comments`) and the blob from the plan's
+   `**Green-lit:**` header — the header is author-written, the comment is
+   not.  `git rev-parse <sha>:<plan file>` must print the header's blob (if
+   the sha is not in the local history the branch was rebased;
+   `git fetch origin <sha>` retrieves it, GitHub keeps a PR's rewritten
+   commits).  A mismatch is the top finding: the author may have pointed the
+   review at a later revision of the plan.  If there is no green-light
+   comment the PR never cleared Gate 1 — report that and stop.
 2. Get the change set: `git diff <target>...<branch> --stat` and then the
    full diff of the files that matter. Target is `develop` unless told
    otherwise. The plan file is part of this diff by design — never report
@@ -60,8 +59,7 @@ template — you never approve or block; write findings, not verdicts.
      inheritance (never `Block` internally), sorted-tuple `.symbols` and
      `parameter_map` usage, SDK imports only in adapters, `zip(strict=)` justified.
    - **Plan hygiene**: deviations folded back into the plan file; phase
-     checkboxes dated; status/index row updated if this PR completes the
-     plan.
+     checkboxes dated; Status set to Landed if this PR completes the plan.
 5. Do not relitigate the design itself — the Draft-PR green-light approved
    it. If the design looks wrong in hindsight, flag it as exactly that: a
    question for the humans, separate from conformance findings.
@@ -70,10 +68,10 @@ template — you never approve or block; write findings, not verdicts.
 
 - **Verdict-free summary** (2–3 sentences: what the PR does, overall
   conformance impression).
-- **Deviations claim** — one line: the green-lit sha and blob used, and
-  whether the PR's "Deviations from plan" section accounts for every
-  difference found (an empty section is the claim "implemented exactly as
-  green-lit").
+- **Deviations claim** — one line: the green-lit sha (from the comment) and
+  blob used, and whether the PR's "Deviations from plan" section accounts
+  for every difference found (an empty section is the claim "implemented
+  exactly as green-lit").
 - **Findings**, most severe first, each with file:line, what the plan says,
   what the code does.
 - **Unverifiable items** — anything you could not check (e.g. behaviour

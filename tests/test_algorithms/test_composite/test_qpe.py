@@ -6,7 +6,8 @@ import pytest
 matplotlib.use("Agg")
 
 from qarp.algorithms import QPE, Sampler, dirichlet_kernel_squared
-from qarp.blocks import ComputationalBasisStateBlock, SimpleBlock, TrotterBlock
+from qarp.blocks import ComputationalBasisStateBlock, QPEBlock, SimpleBlock, TrotterBlock
+from qarp.endianness import bits_to_label
 from qarp.engines import QarpEngine
 
 
@@ -89,19 +90,56 @@ def _phase_u(phi=0.375):
     return u
 
 
-def _programs(qpe):
-    return qpe.engine._programs[id(qpe.primitive)]
+def _kernels(qpe):
+    return qpe.engine.kernels(qpe.primitive)
 
 
 def _structured_kinds(qpe):
-    """The kernels of the structured run; the block was never built."""
-    assert qpe.block is None
-    return qpe._structured_run._program.kinds()
+    """The kernels of the planned program; the block was never built."""
+    assert not qpe.block.is_built
+    return _kernels(qpe)[0]
 
 
 def _block_path(qpe):
-    """The structured run was refused and the block built."""
-    return qpe._structured_run is None and qpe.block is not None and qpe.block.is_built
+    """Planning the declaration was refused, so the engine built the block."""
+    return qpe.block.is_built
+
+
+def _phase_of(dist, n_ancilla: int) -> float:
+    return bits_to_label(max(dist, key=dist.get)) / 2**n_ancilla
+
+
+@pytest.mark.parametrize("n_ancilla", [10, 12, 14])
+def test_engine_build_of_a_declared_qpe_block_never_builds_the_ladder(n_ancilla):
+    """The gate path builds 2**n_ancilla - 1 copies of U (seconds at 14);
+    the engine plans the declaration instead, so the ladder is one kernel
+    whatever the ancilla count, and reads φ = 3/8 exactly (analytic)."""
+    import qarp
+
+    engine = QarpEngine(n_shots=qarp.EXACT)
+    block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), n_ancilla, 1)
+    sampler = Sampler(block, measured_qubits=list(range(n_ancilla)))
+    engine.build([sampler])
+    assert not block.is_built
+    assert engine.kernels(sampler)[0].count("controlled_powers") == 1
+    assert _phase_of(engine.run()[0], n_ancilla) == 0.375
+
+
+@pytest.mark.parametrize("n_shots", ["exact", 500])
+def test_run_and_batch_run_serve_a_planned_qpe(n_shots):
+    import qarp
+
+    shots = qarp.EXACT if n_shots == "exact" else n_shots
+    qpe = QPE(
+        state=ComputationalBasisStateBlock([1]),
+        unitary=_phase_u(),
+        n_ancilla=4,
+        engine=QarpEngine(seed=0, n_shots=shots),
+    ).build()
+    assert not qpe.block.is_built
+    assert qpe.run() == pytest.approx(0.375, abs=1e-12)
+    swept = qpe.engine.batch_run([qpe.primitive], [{}, {}])
+    assert [_phase_of(dists[0], 4) for dists in swept] == [0.375, 0.375]
 
 
 @pytest.mark.parametrize("n_ancilla", [3, 11])
@@ -135,7 +173,7 @@ def test_qpe_at_twenty_ancillas_builds_without_its_ladder():
         n_ancilla=20,
         engine=QarpEngine(n_shots=qarp.EXACT),
     ).build()
-    assert qpe.block is None
+    assert not qpe.block.is_built
     assert qpe.run() == pytest.approx(0.375, abs=1e-12)
     assert qpe.result_probability == pytest.approx(1.0, abs=1e-8)
 
@@ -179,7 +217,7 @@ def test_qpe_noisy_engine_keeps_the_gate_path():
         n_ancilla=11,
         engine=QarpEngine(n_qubits=12, noise_model=NoiseModel.bit_flip(0.02), n_shots=200, seed=0),
     ).build()
-    assert _block_path(qpe) and _programs(qpe) == [None]
+    assert _block_path(qpe) and _kernels(qpe) == [["gates"]]
     qpe.run()
     assert sum(qpe.distribution.values()) == pytest.approx(1.0)
 
@@ -217,7 +255,7 @@ def test_qpe_routed_engine_keeps_the_gate_path():
     )
     qpe.primitive.n_shots = 100
     qpe.build()
-    assert _block_path(qpe) and _programs(qpe) == [None]
+    assert _block_path(qpe) and _kernels(qpe) == [["gates"]]
 
 
 def test_qpe_seeded_primitive_reads_the_seeded_eigenstate():

@@ -14,7 +14,7 @@ touching those areas.
 - **One PR per contribution, two gates inside it.**  Open a *Draft* PR whose
   first commit is the plan; the reviewer green-lights the design there with a
   `Green-lit at <sha>` comment (never an Approve review), the author records
-  the sha and the plan file's blob id in the plan header, and only then does
+  the date and the plan file's blob id in the plan header, and only then does
   implementation start — on the same branch, in the same PR.  Mark the PR
   ready when the implementation is done; that is the second gate, and the
   only place a GitHub Approve is given.  Checkboxes in the PR description are

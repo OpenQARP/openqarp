@@ -14,7 +14,7 @@ is delegated to the C++ Clifford synthesiser via
 :mod:`qarp.operators`.
 """
 
-from typing import List, Optional, Self, Union
+from typing import List, Optional, Union
 
 import numpy as np
 
@@ -22,8 +22,7 @@ import qarpx as qx
 from qarp.operators import QubitOperator
 
 from ..._types import Shots, outcome_arrays
-from ...blocks import AnyBlock, SimpleBlock
-from ...blocks._block import CompositeBlockBase
+from ...blocks import AnyBlock, CompositeBlock, SimpleBlock
 from ...operators._grouping import (
     FullyCommuting,
     GroupingStrategy,
@@ -117,21 +116,18 @@ class PauliAveraging(PrimitiveAlgorithm):
             self._coeffs.append(c)
         self._coeffs_array = np.asarray(self._coeffs, dtype=np.float64)
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         self._validate_inputs()
-        self.ket.build()
         n_qubits = self.ket.n_qubits
 
         self._decompose_operator()
         if not self._terms:
             # Pure-constant operator — no measurement circuits needed; run()
-            # returns the constant.  Make build() idempotent by clearing
-            # sub_blocks.
-            self.sub_blocks = []
+            # returns the constant.
             self._groups = []
             self._group_masks = []
             self._group_signs = []
-            return self
+            return []
 
         # 1. Partition Pauli terms into commuting groups via the injected
         #    strategy.  ``pauli_strings`` feeds the per-group diagonalisation.
@@ -141,7 +137,7 @@ class PauliAveraging(PrimitiveAlgorithm):
         # 2. For each group, diagonalise it to the Z basis (tested C++ Clifford)
         #    and build a circuit:  ket → Clifford → measure-all.  The diagonal
         #    Z-masks and signs feed the parity post-processor in run().
-        self.sub_blocks = []
+        circuits = []
         self._group_masks = []
         self._group_signs = []
         for grp in self._groups:
@@ -149,18 +145,14 @@ class PauliAveraging(PrimitiveAlgorithm):
             clifford, z_masks, signs = diagonalise_group(group_paulis, n_qubits)
             self._group_masks.append(z_masks)
             self._group_signs.append(signs)
-            self.sub_blocks.append(self._build_group_circuit(n_qubits, clifford))
+            circuits.append(self._group_circuit(n_qubits, clifford))
 
-        return self
+        return circuits
 
-    def _build_group_circuit(self, n_qubits: int, clifford: list) -> AnyBlock:
-        """``ket → diagonalising Clifford → measure all qubits``."""
+    def _group_circuit(self, n_qubits: int, clifford: list) -> AnyBlock:
+        """``ket → diagonalising Clifford → measure all qubits``, unbuilt."""
         full_qubits = list(range(n_qubits))
-        composite = CompositeBlockBase(n_qubits=n_qubits, name="PauliAvgGroup")
-
-        ket_built = self.ket.build()
-        ket_built.target_qubits = full_qubits
-        composite.add_child(ket_built)
+        self.ket.target_qubits = full_qubits
 
         # Basis-change Clifford that simultaneously diagonalises the group.
         basis_change = SimpleBlock(n_qubits, name="basis_change")
@@ -168,17 +160,16 @@ class PauliAveraging(PrimitiveAlgorithm):
         basis_change.mark_built()
         basis_change.target_qubits = full_qubits
         basis_change._publish_symbols()
-        composite.add_child(basis_change)
 
         # Measure every qubit into cbit i.  Using the variadic Measure
         # overload — one nanobind crossing.
         measure_layer = SimpleBlock(n_qubits, name="measure")
         measure_layer.measure([(q, q) for q in range(n_qubits)])
         measure_layer.target_qubits = full_qubits
-        composite.add_wired_child(measure_layer)
 
-        composite.build()
-        return composite
+        return CompositeBlock(
+            [self.ket, basis_change, measure_layer], n_qubits=n_qubits, name="PauliAvgGroup"
+        )
 
     def run(self, results: list) -> float:
         """Per-group expectation, weighted sum, plus the constant term.

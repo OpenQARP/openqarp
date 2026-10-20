@@ -101,7 +101,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
         ):
             raise ValueError("coefficients must match the length of operator list")
 
-    def build(self) -> "TermwiseHadamardTest":
+    def circuits(self) -> list:
         self._validate_inputs()
         # The constructor stores a SAMPLING placeholder (the operator may still
         # be an unexpanded QubitOperator there); the real target — a weighted
@@ -124,7 +124,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
         # HadamardTest builds as <bra|ket> directly (run() weights it by 1.0).
         terms: list = [None] if target is Target.OVERLAP else self.operator
         self.sub_algorithms = []
-        self.sub_blocks = []
+        circuits: list = []
         for op in terms:
             child = HadamardTest(
                 bra=self.bra,
@@ -136,8 +136,8 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
             )
             child.build()
             self.sub_algorithms.append(child)
-            self.sub_blocks.extend(child.sub_blocks)
-        return self
+            circuits.extend(child.sub_blocks)
+        return circuits
 
     def run(self, results: list) -> complex:
         if not self.sub_algorithms:

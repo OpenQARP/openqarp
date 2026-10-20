@@ -12,7 +12,7 @@ the engine's simulator (CPU ``qx.QarpSimulator`` by default; GPU when
 injected by :class:`CudaqEngine`) and contracts the resulting amplitudes.
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
 import numpy as np
 
@@ -20,8 +20,7 @@ import qarpx as qx
 from qarp.operators import QubitOperator
 
 from ..._types import Consumes
-from ...blocks import AnyBlock
-from ...blocks._block import CompositeBlockBase
+from ...blocks import AnyBlock, CompositeBlock
 from ...errors import CapabilityError
 from .primitive_algorithm import PrimitiveAlgorithm
 from .target import Target
@@ -239,20 +238,14 @@ class StateVector(PrimitiveAlgorithm):
             raise TypeError("operator must be a QubitOperator, a Block, or None")
 
     def _compose_ket_operator(self) -> AnyBlock:
-        """``ket∘U`` composite (same composition pattern as HadamardTest)."""
+        """``ket∘U`` as an unbuilt tree (same composition pattern as HadamardTest)."""
         n_qubits = self.ket.n_qubits
-        ko = CompositeBlockBase(n_qubits=n_qubits, name="ket+operator")
-        ket_built = self.ket.build()
-        ket_built.target_qubits = list(range(n_qubits))
-        op_built = self.operator.build()
-        op_built.target_qubits = list(range(n_qubits))
-        ko.add_child(ket_built)
-        ko.add_child(op_built)
-        ko.build()
-        return ko
+        self.ket.target_qubits = list(range(n_qubits))
+        self.operator.target_qubits = list(range(n_qubits))
+        return CompositeBlock([self.ket, self.operator], n_qubits=n_qubits, name="ket+operator")
 
-    def build(self) -> Self:
-        """Populate ``sub_blocks`` with [ket] (or [bra, ket] for overlap-type).
+    def circuits(self) -> list:
+        """The circuits: [ket] (or [bra, ket] for overlap-type), unbuilt.
 
         Re-disambiguates ``self.target`` from the current ``bra`` / ``operator``
         / ``ket`` attributes so callers (VQA-family composites) that mutate the
@@ -301,26 +294,21 @@ class StateVector(PrimitiveAlgorithm):
             else None
         )
 
-        self.ket.build()
         if self._block_op:
             # Circuit-valued U: the ket-side circuit is ket∘U.  EV needs the
             # bare ket too; TRANSITION needs bra instead (never a bare ket).
             ko = self._compose_ket_operator()
             if self.target == Target.EXPECTATION_VALUE:
-                self.sub_blocks = [self.ket, ko]
-            else:  # TRANSITION_AMPLITUDE (bra ≠ ket, guaranteed by infer_target)
-                self.bra.build()
-                self.sub_blocks = [ko, self.bra]
-            return self
+                return [self.ket, ko]
+            return [ko, self.bra]  # TRANSITION_AMPLITUDE (bra ≠ ket, by infer_target)
 
-        self.sub_blocks = [self.ket]
+        circuits = [self.ket]
         if (
             self.target in (Target.OVERLAP, Target.TRANSITION_AMPLITUDE)
             and self.bra is not self.ket
         ):
-            self.bra.build()
-            self.sub_blocks.append(self.bra)
-        return self
+            circuits.append(self.bra)
+        return circuits
 
     def run(self, results: list) -> Union[complex, float]:
         """Convenience entry point: evaluate the build-time compiled circuits.
