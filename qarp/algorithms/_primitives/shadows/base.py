@@ -24,7 +24,7 @@ import numpy as np
 
 from qarp.operators import QubitOperator
 
-from ....blocks import AnyBlock
+from ....blocks import AnyBlock, QarpBlock
 from ..primitive_algorithm import PrimitiveAlgorithm
 from ..target import Target
 from ._estimators import n_batches_for
@@ -44,7 +44,7 @@ class ShadowProtocol(PrimitiveAlgorithm):
     def __init__(
         self,
         operator: Union[str, QubitOperator],
-        ket: Optional[AnyBlock] = None,
+        ket: Optional[QarpBlock] = None,
         *,
         dataset: Optional[ShadowDataset] = None,
         n_settings: int = 1000,
@@ -53,6 +53,11 @@ class ShadowProtocol(PrimitiveAlgorithm):
     ):
         if operator is None:
             raise ValueError("PauliShadow requires an operator.")
+        if ket is not None and not isinstance(ket, QarpBlock):
+            raise TypeError(
+                "PauliShadow reads the ket's symbols, which a raw qx block lacks: "
+                "wrap it, CompositeBlock([ket])."
+            )
         super().__init__(
             ket=ket,
             operator=operator,

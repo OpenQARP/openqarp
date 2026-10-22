@@ -25,7 +25,7 @@ The load-bearing rules in one place; details in the linked sections.
 
 | Rule | Where |
 |------|-------|
-| Import as `import qarpx as qx`; every Python block **is** a C++ `qarpx::Block` subclass (annotate with `AnyBlock`) | §13 |
+| Import as `import qarpx as qx`; every Python block **is** a C++ `qarpx::Block` subclass (annotate with `AnyBlock`, or `QarpBlock` where Python-only members are read) | §13 |
 | No `pytket` (or any SDK) in `qarp/` code paths; not a runtime or `[full-dev]` dependency — test-only `[integrations]` extra | §15 |
 | **Endianness is LSB** — qubit 0 is the least-significant bit and the first statevector element | §1 |
 | **Rotations are `exp(-iθP/2)`; all angles in radians**; `Rz(θ) = e^{-iθ/2}·P(θ)` | §2.3–§2.4 |
@@ -510,8 +510,9 @@ above.
   Python block classes; it works with `isinstance` and rejects a raw block. A raw block reaches
   a `QarpBlock` parameter by wrapping, `CompositeBlock([raw_block])`.
 - **One build lifecycle on every block.** `is_built` is a read-only property, raw or Python, and
-  `build()` returns the block. A composite takes no gates of its own: a gate method called on
-  one raises `TypeError`, since only its children's gates run.
+  `build()` returns the block. A block that holds other blocks (composite, controlled,
+  conditional) takes no gates of its own: a gate method or `set_commands` called on one raises
+  `TypeError`, since only the blocks it holds run.
 - **Pending ops apply at the `flatten()` boundary.** `substitute` / `replace` / `dagger` are
   deferred and applied when the block is flattened, so the C++ command buffer stays canonical and
   `build()` is idempotent. `dagger()` preserves the subclass identity. Corollary: a C++ container

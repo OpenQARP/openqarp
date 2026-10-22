@@ -40,7 +40,8 @@ All notable changes to OpenQARP are recorded here. The format follows
   `qarpx` as the `qarpx-stubs` package, so an editor shows the signatures
   of `import qarpx as qx` and mypy and pyright check calls into it.
 - The raw `qarpx` block methods take keyword arguments, with the names the
-  Python blocks use (`q`, `angle`, ...).
+  Python blocks use (`q`, `angle`, ...).  `cu`'s `gamma` is required on a
+  raw block and defaults to 0 on a Python one.
 - `qarp.blocks.QarpBlock`, the union of the Python block classes, for
   annotating code that reads members a raw `qx` block lacks (`.symbols`,
   `parameter_map`).  It works with `isinstance`.
@@ -84,17 +85,21 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `is_built` is a read-only property on raw `qx` blocks, as on the Python
   blocks.  `b.is_built()` and `qx.Block.is_built(b)` become `b.is_built`.
 - `build()` on a raw `qx` block returns the block instead of `None`.
-- A gate method called on a composite block raises `TypeError`; the gate
-  was recorded and never run.  Add it to a child block instead.
+- A gate method or `set_commands` called on a block that holds other
+  blocks (composite, controlled, conditional) raises `TypeError`; the gate
+  was recorded and never run.  Add it to a block it holds instead.
 - Three attributes no longer hide gate methods of the same name:
   `AmplitudeAmplificationBlock.state_preparation` and
   `AmplitudeEstimationBlock.state_preparation` are `state_preparation_block`,
   and `OrbitalRotationBlock.u` is `rotation_matrix`.
 - `qx.Command` checks a gate's qubit and parameter counts and raises
-  `ValueError` on a mismatch, and reads a numpy integer or a `bool` in the
-  second position as a qubit.  `Command(CX, 0, np.int64(1))` builds the CX;
-  it built a one-qubit CX carrying angle 1.  `Command(Rz, 0, 1)` raises;
-  pass the angle as a float or a `qx.Param`.
+  `ValueError` on a mismatch; MCZ and Barrier, which take any number of
+  qubits, are checked for taking no parameter.  It reads anything integer
+  (`__index__`: an `int`, a numpy integer, a `bool`, a sympy `Integer`, a
+  0-d integer array) in the second position as a qubit.
+  `Command(CX, 0, np.int64(1))` builds the CX; it built a one-qubit CX
+  carrying angle 1.  `Command(Rz, 0, 1)` raises; pass the angle as a float
+  or a `qx.Param`.
 - `qx.Command == other` returns `False` for an object of another type; it
   raised `TypeError`.
 - `QubitOperator.substitute` and `free_symbols`, and their
@@ -108,7 +113,9 @@ All notable changes to OpenQARP are recorded here. The format follows
   annotates the parameter `list` widens it to `Sequence`.
 - The variational algorithms annotate their block parameters with
   `QarpBlock`.  A raw block there raised `AttributeError` and still does;
-  wrap it, `CompositeBlock([raw_block])`.
+  wrap it, `CompositeBlock([raw_block])`.  `PauliShadow` takes a
+  `QarpBlock` ket and raises `TypeError` on a raw one, with the same
+  migration.
 - mypy finds the `qarpx` stub, so an `ignore_missing_imports` for `qarpx`
   no longer applies, and a call the stub does not describe (an `np.int64`
   qubit index, an attribute set on a block) is reported.  To opt out, set
@@ -157,6 +164,11 @@ All notable changes to OpenQARP are recorded here. The format follows
   returned a complex.
 - A raw `qx.ControlledBlock` plots as a controlled box; it plotted as a
   plain box.
+- `MirrorTest` daggers a raw bra that isn't built; it raised.
+- Circuit cutting keeps a gate on three or more qubits whole: it rebuilt
+  each kept gate from at most two qubits, so a CCZ became a CZ carrying an
+  angle.  A gate across the cut on three or more qubits raises, as a
+  two-qubit one does.
 
 ## [0.1.1] - 2026-09-25
 

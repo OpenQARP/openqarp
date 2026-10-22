@@ -233,5 +233,5 @@ def test_rotation_matrix_holds_the_input():
     u = np.eye(2)
     block = OrbitalRotationBlock(u)
     np.testing.assert_array_equal(block.rotation_matrix, u)
-    with pytest.raises(TypeError, match="composite"):
+    with pytest.raises(TypeError, match="runs only the gates"):
         block.u(0, 0.1, 0.2, 0.3)

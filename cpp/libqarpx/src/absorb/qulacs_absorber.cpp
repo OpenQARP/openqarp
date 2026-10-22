@@ -586,5 +586,5 @@ void register_qulacs_absorber(nb::module_& m) {
              // The SDK circuit type: typed Any so the stub imports no SDK.
              nb::sig("def absorb(self, circuit: typing.Any) -> "
                      "tuple[list[qarpx.Command], int, int]"),
-             "Convert a qulacs.QuantumCircuit to a QARPx SimpleBlock.");
+             "Convert a qulacs.QuantumCircuit to (commands, n_qubits, n_cbits).");
 }

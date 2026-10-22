@@ -103,9 +103,7 @@ class PrimitiveAlgorithm(ABC):
         # ket / bra / operator are interpreted per-subclass: most hold a single
         # Block, but some hold a list of Blocks (Termwise*) or an openfermion
         # QubitOperator (StateVector, PauliAveraging, CuttingPrimitive).  They
-        # are typed ``Any`` so each subclass can store and narrow them freely —
-        # Block itself is already dynamic (its qarpx C++ base is untyped), so a
-        # narrower annotation here would only add spurious None-checks.
+        # are typed ``Any`` so each subclass can store and narrow them freely.
         self.ket = ket
         self.bra = bra
         self.operator = operator

@@ -220,3 +220,19 @@ def test_mirror_test_composite_bra_dagger_and_deepcopy():
 
     mt_copy = copy.deepcopy(mt.sub_blocks[0])
     assert len(list(mt_copy.flatten())) == len(list(mt.sub_blocks[0].flatten()))
+
+
+def test_an_unbuilt_raw_bra_is_daggered():
+    """Raw H as bra and ket: both prepare |+⟩, so P(all zeros) = |⟨+|+⟩|² = 1.
+    Without the bra† the circuit is H alone and gives 1/2."""
+    import qarpx as qx
+
+    def plus():
+        block = qx.SimpleBlock(1, "plus")
+        block.h(0)
+        return block
+
+    mt = MirrorTest(bra=plus(), ket=plus().build(), n_shots=1000)
+    eng = QarpEngine(n_shots=1000, seed=1)
+    eng.build([mt])
+    assert eng.run()[0] == 1.0

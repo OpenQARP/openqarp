@@ -33,6 +33,11 @@ def compile_for_device(*args, router=None):
     if len(args) == 2 and isinstance(args[0], _qx.Block):
         block, device = args
         return _qx.compile_for_device(block.flatten(), block.n_qubits, device, router)
+    if len(args) != 3:
+        raise TypeError(
+            "compile_for_device takes (block, device) or (commands, n_qubits, device), "
+            f"got {len(args)} positional arguments"
+        )
     commands, n_qubits, device = args
     return _qx.compile_for_device(commands, n_qubits, device, router)
 

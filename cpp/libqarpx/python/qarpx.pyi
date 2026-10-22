@@ -1701,7 +1701,7 @@ class PennylaneAbsorber:
     def source_name(self) -> str: ...
 
     def absorb(self, tape: Any) -> tuple[list[Command], int, int]:
-        """Parse a qml.tape.QuantumScript into a QARPx SimpleBlock."""
+        """Parse a qml.tape.QuantumScript into (commands, n_qubits, n_cbits)."""
 
 class PytketEmitter:
     def __init__(self) -> None: ...
@@ -1726,7 +1726,7 @@ class PytketAbsorber:
     def source_name(self) -> str: ...
 
     def absorb(self, circuit: Any) -> tuple[list[Command], int, int]:
-        """Parse a pytket.Circuit into a QARPx SimpleBlock."""
+        """Parse a pytket.Circuit into (commands, n_qubits, n_cbits)."""
 
 class QulacsEmitter:
     def __init__(self) -> None: ...
@@ -1751,7 +1751,7 @@ class QulacsAbsorber:
     def source_name(self) -> str: ...
 
     def absorb(self, circuit: Any) -> tuple[list[Command], int, int]:
-        """Convert a qulacs.QuantumCircuit to a QARPx SimpleBlock."""
+        """Convert a qulacs.QuantumCircuit to (commands, n_qubits, n_cbits)."""
 
 class QiskitEmitter:
     def __init__(self) -> None: ...

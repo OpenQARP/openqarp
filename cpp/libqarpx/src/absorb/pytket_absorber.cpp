@@ -399,5 +399,5 @@ void register_pytket_absorber(nb::module_& m) {
              // The SDK circuit type: typed Any so the stub imports no SDK.
              nb::sig("def absorb(self, circuit: typing.Any) -> "
                      "tuple[list[qarpx.Command], int, int]"),
-             "Parse a pytket.Circuit into a QARPx SimpleBlock.");
+             "Parse a pytket.Circuit into (commands, n_qubits, n_cbits).");
 }

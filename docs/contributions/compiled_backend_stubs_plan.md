@@ -196,11 +196,12 @@ that stubgen emits the right type:
 These are binding changes, so `QARPX_ABI_VERSION` and `EXPECTED_QARPX_ABI` move from 14 to 15
 together (§15).
 
-**Composites take no gates of their own.**  A gate method called on a `CompositeBlock` raises
-`TypeError`, in C++ so raw composites raise too: `Block`'s append path throws a new error from
-`core/errors.h` when the block is a composite, and the binding translates it.  Any library
-site that adds a gate to a composite is a bug of the same kind and is fixed in the same
-commit.
+**Blocks that hold blocks take no gates of their own.**  A gate method or `set_commands`
+called on a `CompositeBlock`, `ControlledBlock` or `ConditionalBlock` raises `TypeError`, in
+C++ so raw blocks raise too: `Block`'s append path and `set_commands` throw a new error from
+`core/errors.h` when the block's own buffer never executes (`accepts_gates()`), and the
+binding translates it.  Any library site that adds a gate to such a block is a bug of the same
+kind and is fixed in the same commit.
 
 **Renamed attributes.**  The three attributes that hide gate methods get public names that do
 not collide: `state_preparation` becomes `state_preparation_block` on both amplitude blocks,
@@ -253,7 +254,8 @@ The split surfaces conflicts between the mixin and its C++ base in all six class
 
 With the mixin first in the method order, its untyped gate overrides would hide the
 bindings' types from every Python block.  The 15 overrides (`rz`, `ry`, …), `mcx` and `ccz` are
-annotated to match the stub.
+annotated to match the stub.  Their angles are `qx.Param | float | Expr`, and sympy ships no
+types, so mypy accepts any angle on a Python block; the runtime check stays the only one there.
 
 **Which blocks a parameter accepts** (§13).  `AnyBlock` (= `qx.Block`) keeps meaning any
 block, raw `qarpx` blocks included, and annotates code that reads only C++ members: engines,
@@ -451,7 +453,8 @@ deviation.
 |---|---|---|
 | `generate_stubs.py --check` passes in a subprocess under Python 3.12; under `CI`, a Python mismatch or missing generator fails | the built module, read by the pinned generator | `tests/test_stubs.py` |
 | Every extra that lists `nanobind` pins the CMake `GIT_TAG` | `cpp/libqarpx/CMakeLists.txt` | `tests/test_stubs.py` |
-| Generated from the stub: every `Block` method is called on a raw block by keyword, with a float and a `Param` for each `Param \| float` argument, and runs | the runtime: each call is run | `tests/test_stubs.py` |
+| Generated from the stub: every `Block` method is called on a raw and on a Python block by keyword, with a float and a `Param` for each `Param \| float` argument, and runs; each of the 40 single-gate builders appends one command with the stub's gate, qubits in argument order and parameter count | the runtime, and the stub's argument order | `tests/test_stubs.py` |
+| The generator refuses another Python, nanobind version, ABI or checkout, and a pattern that matches nothing; `--check` fails on a stale stub and leaves it | each guard's message | `tests/test_stubs.py` |
 | mypy snippets through `mypy.api.run` give the expected error codes: a wrong argument type rejected, `isinstance(x, QarpBlock)` narrowing, `ConditionalBlock` with neither body rejected; the known false rejections (an `np.int64` qubit, `nb::dynamic_attr` attributes) are listed | each snippet is also run, and mypy's verdict matches the runtime's | `tests/test_stubs.py` |
 | `qarp/` type-checks with the stub, `check_untyped_defs` and `warn_unused_ignores`, `tests/` with the stub, and the stub itself has no errors | mypy over the code, with the stub on `mypy_path` | CI `mypy` job |
 | mypy run from a temporary directory against the installed wheel reveals `qx.SimpleBlock(1).n_qubits` as `int` | the binding's C++ type | `ci.yml` `mypy` job |
@@ -459,25 +462,31 @@ deviation.
 | Each of the six Python block classes keeps its runtime MRO: `_BlockMixin` is not in it, and its second entry is the `qx` class | the runtime class | `tests/test_blocks/test_block.py` |
 | `isinstance(b, QarpBlock)` is true for each Python block class and false for a raw `qx.SimpleBlock` | the runtime classes | `tests/test_blocks/test_block.py` |
 | Planning a raw `qx.ControlledBlock` over three X gates (`_program.plan(block, 12)`) gives CX | the analytic CX matrix | `tests/test_blocks/test_structure.py` |
+| A ladder of nine raw C-P(θ) blocks onto qubit 11 plans as one controlled-powers kernel | \|x⟩ gains e^{iθ(x0+…+x8)} when x11 = 1 | `tests/test_blocks/test_structure.py` |
+| A raw `ControlledBlock` with controls on \|1⟩ and \|0⟩ plots as a controlled box with two controls and state 0b01 | §6 (LSB) | `tests/test_plotting/test_circuit_adapter_residuals.py` |
+| `MirrorTest` with an unbuilt raw H as bra and a raw H as ket gives 1 | \|⟨+\|+⟩\|² = 1; 1/2 without the bra† | `test_mirror_test.py` |
+| `PauliShadow` rejects a raw Bell ket with `TypeError`; wrapped, ⟨Z0 Z1⟩ is within 0.2 of 1 | ⟨Φ+\|Z0 Z1\|Φ+⟩ = 1 | `test_shadows/test_base.py` |
+| Filtering a four-qubit X…X · CCZ(1, 2, 3) to qubits 1–3 keeps the CCZ; a CCZ across the cut raises | CCZ flips \|111⟩ only | `tests/test_cutting/test_reconstructer.py` |
+| A string-key rename reaches `TrotterAnsatzBlock`'s and `UCCBlock`'s pairing | the pairing written by hand | `test_trotter_block.py`, `test_ucc_block.py` |
 | `ResourceEstimator.estimate` on an unbuilt raw composite of H then CX counts one H and one CX | counted by hand | `tests/test_resources/test_estimator.py` |
 | `CircuitAdapter` over an unbuilt raw block holding one H lists one H gate | the hand-written circuit | `tests/test_plotting/test_circuit_adapter_residuals.py` |
 | `CuttingPrimitive` with an unbuilt raw ket of two Bell pairs and `X0 X1` as operator gives 1 | ⟨Φ+\|XX\|Φ+⟩ = 1 | `test_cutting_primitive.py` |
-| `SWAPTestBlock` on raw blocks preparing \|0⟩ and \|+⟩ measures ancilla 0 with probability 3/4 | `(1 + \|⟨a\|b⟩\|²)/2` | `test_swap_test_block.py` |
+| `SWAPTestBlock` on raw blocks preparing \|+⟩ and \|−⟩ measures ancilla 0 with probability 1/2; losing either input's gates gives 3/4 | `(1 + \|⟨a\|b⟩\|²)/2` | `test_swap_test_block.py` |
 | `HadamardTestBlock` with a raw Z on \|1⟩ gives −1 | ⟨1\|Z\|1⟩ = −1 | `test_hadamard_test_block.py` |
 | `QPEBlock` with a raw X as eigenstate and a raw P(π/2) as unitary, 2 ancillas, reads phase 1/4 | analytic eigenphase | `test_qpe_block.py` |
 | `DOSQPEBlock` with a raw H as the state block (\|+⟩), a raw Z as the unitary and one ancilla gives eigenphases 0 and 1/2 with weight 1/2 each | analytic spectrum of Z, \|⟨±\|+⟩\|² weights | `test_dos_qpe_block.py` |
 | `generate_states_new_basis` with a raw X on one qubit gives \|1⟩ and \|0⟩ | analytic | `tests/test_algorithms/test_utils.py` |
-| `VFF` built over a raw H holds, as the unitary it diagonalises, the Hadamard matrix | analytic H | `test_vff.py` |
+| `VFF` over a raw H, at a = π/4, θ = π, reads \|00⟩ with probability 1 | \|Tr(V†U)\|²/4 with V = −iH; 0 without U | `test_vff.py` |
 | A deep copy of an else-only conditional flattens to a conditional X | the hand-written command | `tests/test_blocks/test_block.py` |
-| A gate method on a Python and on a raw composite raises `TypeError`; on each renamed block, `state_preparation(...)` and `u(...)` raise `TypeError` and the renamed attribute holds the input | composites take no gates (§13); the constructor's input | `test_block.py`, each block's test file, `test_tensor_operators.py` |
+| A gate method and `set_commands` on a Python and on a raw composite, controlled and conditional block raise `TypeError`; on each renamed block, `state_preparation(...)` and `u(...)` raise `TypeError` and the renamed attribute holds the input | blocks that hold blocks take no gates (§13); the constructor's input | `test_block.py`, each block's test file, `test_tensor_operators.py` |
 | Composite rejection in C++ | as above | `cpp/libqarpx/tests/cpp/test_core.cpp` |
-| `Command(CX, 0, np.int64(1))` after X on q0 gives counts {3}; `Command(Rz, 0, 1)`, `Command(Rz, 0, np.int64(1))`, `Command(Rz, 0, True)`, `Command(H, 0, 0.5)` and `Command(CX, 0, Param(1.0))` raise `ValueError`; `Command(Rz, 0, Param(1.0))` builds | CX\|10⟩ = \|11⟩; each gate's qubit and parameter count | `tests/test_blocks/test_block.py` |
+| `Command(CX, 0, np.int64(1))` after X on q0 gives counts {3}; `Command(Rz, 0, 1)`, `Command(Rz, 0, np.int64(1))`, `Command(Rz, 0, True)`, `Command(H, 0, 0.5)`, `Command(CX, 0, Param(1.0))`, `Command(MCZ, 0, 1, 0.5)`, `Command(Barrier, 0, 0.5)` and `Command(GPhase, 3)` raise `ValueError`; `Command(Rz, 0, Param(1.0))` builds | CX\|10⟩ = \|11⟩; each gate's qubit and parameter count | `tests/test_blocks/test_block.py` |
 | `Command() == 5` is `False` | Python's equality protocol | `tests/test_blocks/test_block.py` |
 | `set_symbols({"a": 0.5})` and `replace_symbols` with a string key leave `.symbols` = `(b,)` and `parameter_map` over `b` only, on a block with `rz(a)`, `ry(b)` | counted by hand | `tests/test_blocks/test_block.py` |
 | In a subprocess that imports only `qarpx`, two-qubit `Z0.sparse_matrix(2)` = diag(1, −1, 1, −1); `2·I` gives 2·𝟙 (1×1 inferred, 4×4 at `n_qubits=2`); the empty operator gives zeros; `Z1` at `n_qubits=1` and `Z0` at `n_qubits=0` raise `ValueError`; `n_qubits=2.0` raises `TypeError` | LSB Kronecker products, written by hand | `test_qubit_operator.py`; `test_fermion_operator.py` (two-mode n̂₀ = diag(0, 1, 0, 1)) |
 | `qx.__with_symengine__` equals whether `QubitOperator("X0", Symbol("a"))` constructs | the build's actual behaviour | `test_symbolic_coefficients.py` |
 | `op += Symbol("a")` rebinds `op`, and `hash(op)` raises `TypeError` | today's runtime behaviour | `test_qubit_operator.py` |
-| mypy rejects `VQE(op, raw_block)` and accepts `VQE(op, CompositeBlock([raw_block]))`, `VQE(op, hb \| hb)` and `VQD(op, [hb], [])` for a built Python block `hb`; each call is run, and only the first fails | the runtime | `tests/test_stubs.py` |
+| mypy rejects `VQE(op, raw_block)` and accepts `VQE(op, CompositeBlock([raw_block]))`, `VQE(op, hb \| hb)` and `VQD(op, kets, [])` for a built Python block `hb` and `kets = [hb]`; each call is run, and only the first fails | the runtime | `tests/test_stubs.py` |
 
 ## Phases
 
@@ -628,3 +637,39 @@ section and folded back here before merge; silent drift is the violation.
 - **Phase 3, CHANGELOG.**  Bugs that are also runtime changes (gate methods on a composite,
   `Command`'s dispatch, the renamed attributes) are listed once, under Changed with their
   migration.  The two Phase 2 runtime changes are under Fixed.
+- **Gate 2 review, notebooks.**  Three nightly notebooks
+  (`mwe_qaoa_max_cut.ipynb`, `finance_portfolio_diversification.ipynb`,
+  `mwe_grouping_strategy.ipynb`) added a measurement to a composite, which now raises; the
+  measurement never ran, and the `Sampler` that follows measures every qubit, so the four
+  lines go and the outputs are unchanged.
+- **Gate 2 review, `QarpBlock` sites.**  About 21 parameters take `QarpBlock`, not about 45:
+  mypy found the sites, and a grep for `.symbols`, `parameter_map`, `set_symbols` and
+  `replace_symbols` read from an input finds one more, `PauliShadow`'s ket
+  (`shadows/base.py`), behind `PrimitiveAlgorithm.ket: Any`.  It takes `QarpBlock` and raises
+  `TypeError` on a raw ket; the stale comment on `PrimitiveAlgorithm.ket` goes.
+- **Gate 2 review, blocks that hold blocks.**  `ControlledBlock` and `ConditionalBlock` take no
+  gates either, and `set_commands` is guarded like the builders, so the composite rule covers
+  every block whose own buffer never runs.  The error message no longer says "composite".
+  §13 and its summary row are edited to match; Design updated.
+- **Gate 2 review, files outside the Scope.**  `mirror_test.py` builds a raw bra that isn't
+  built before daggering it, which #13's lazy rewrite had dropped.  `cutting/_reconstructer.py`
+  remaps each kept command instead of rebuilding it from at most two qubits, which turned a
+  CCZ into a CZ, and checks gates of any width for straddling the cut.
+  `controlled_block.h` and `conditional_block.h` override `accepts_gates()`.  Tests in
+  `test_mirror_test.py`, `test_shadows/test_base.py`, `test_reconstructer.py`,
+  `test_ucc_block.py` and `test_device.py`.
+- **Gate 2 review, `Command`'s shape check.**  MCZ and Barrier are checked for taking no
+  parameter, and GPhase, of fixed arity, is checked in full, so no constructor form builds it.
+- **Gate 2 review, `mcz`.**  The override takes `qubits` first, as the stub does, so
+  `mcz(qubits=…)` works on a Python block.  The keyword table also runs on Python blocks, and
+  checks each single-gate builder's command against the stub's argument order.
+- **Gate 2 review, tests that could not fail.**  The raw SWAP test compares |+⟩ with |−⟩
+  and the raw VFF test reads the Hilbert–Schmidt circuit at the analytic point.  Tests are
+  added for the ladder planner site, the Trotter and UCC renames and the raw controlled box,
+  whose fixes had none, and for the generator's refusals.  Test plan updated.
+- **Gate 2 review, smaller items.**  `cu`'s `gamma` stays required on a raw block, since the
+  argument helper has no defaults; the CHANGELOG says so.  `compile_for_device` raises
+  `TypeError` on a wrong argument count again.  The absorber docstrings name the tuple they
+  return.  The Python gate methods' angles are effectively `Any` to mypy; Design says so.  The
+  `mypy.ini` note gives its baseline: at `ca09f06` on macOS, 65 errors, 221 with
+  `check_untyped_defs`, and 55 unused ignores.

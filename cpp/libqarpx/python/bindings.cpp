@@ -159,11 +159,14 @@ static void def_typed(nb::module_& m, const char* name, Fn&& fn, const Arg (&arg
                    std::make_index_sequence<N>{}, extra...);
 }
 
-// The Python constructor forms of Command build gates of fixed arity; the
-// variable-arity gates keep their unchecked construction.
+// The Python constructor forms of Command build gates of fixed arity.  MCZ and
+// Barrier vary only in their qubit count, so only their parameter count is checked.
 static void check_command_shape(GateType g, std::size_t n_qubits, std::size_t n_params) {
     switch (g) {
-        case GateType::MCZ: case GateType::Barrier: case GateType::GPhase:
+        case GateType::MCZ: case GateType::Barrier:
+            if (n_params != 0)
+                throw std::invalid_argument(std::string(gate_name(g)) + " takes no parameter");
+            return;
         case GateType::BranchBegin: case GateType::BranchElse: case GateType::BranchEnd:
         case GateType::Custom:
             return;

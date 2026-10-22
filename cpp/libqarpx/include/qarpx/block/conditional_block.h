@@ -56,6 +56,9 @@ public:
     [[nodiscard]] const std::vector<uint32_t>&  condition_cbits()  const { return cbits_; }
     [[nodiscard]] const std::vector<bool>&      condition_values() const { return values_; }
 
+protected:
+    [[nodiscard]] bool accepts_gates() const override { return false; }
+
 private:
     std::vector<uint32_t>  cbits_;
     std::vector<bool>      values_;

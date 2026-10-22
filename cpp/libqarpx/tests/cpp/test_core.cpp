@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "qarpx/qarpx.h"
 #include "qarpx/core/errors.h"
+#include "qarpx/block/conditional_block.h"
 
 using namespace qarpx;
 
@@ -438,6 +439,34 @@ TEST(CompositeBlock, RejectsGatesOfItsOwn) {
     EXPECT_THROW(comp.state_preparation({0.6, 0.0, 0.0, 0.8}), composite_gate_error);
     EXPECT_TRUE(comp.commands().empty());
     EXPECT_NO_THROW(child->h(0));
+}
+
+TEST(CompositeBlock, SetCommandsIsGuardedToo) {
+    auto child = make_block<SimpleBlock>(1, "child");
+    CompositeBlock comp({child}, 1, "comp");
+    EXPECT_THROW(comp.set_commands({Command(GateType::Z, 0)}), composite_gate_error);
+    EXPECT_NO_THROW(comp.set_commands({}));
+    EXPECT_TRUE(comp.commands().empty());
+}
+
+TEST(ControlledBlock, RejectsGatesOfItsOwn) {
+    // flatten() emits only the controlled inner block.
+    auto inner = make_block<SimpleBlock>(1, "x");
+    inner->x(0);
+    ControlledBlock ctrl(inner, /*num_controls=*/1, /*ctrl_state=*/{true}, "cx");
+    EXPECT_THROW(ctrl.z(0), composite_gate_error);
+    EXPECT_THROW(ctrl.set_commands({Command(GateType::Z, 0)}), composite_gate_error);
+    EXPECT_TRUE(ctrl.commands().empty());
+}
+
+TEST(ConditionalBlock, RejectsGatesOfItsOwn) {
+    // flatten() emits only the branches inside their markers.
+    auto body = make_block<SimpleBlock>(1, "body");
+    body->x(0);
+    ConditionalBlock cond({0u}, {true}, body);
+    EXPECT_THROW(cond.z(0), composite_gate_error);
+    EXPECT_THROW(cond.set_commands({Command(GateType::Z, 0)}), composite_gate_error);
+    EXPECT_TRUE(cond.commands().empty());
 }
 
 TEST(CompositeBlock, SetSymbolsRecursesIntoChildren) {

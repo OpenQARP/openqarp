@@ -187,14 +187,14 @@ def test_wrong_length_parameter_vector_raises():
 
 
 def test_vff_over_a_raw_unitary():
-    """Raw qarpx blocks build to themselves.  Oracle: the unitary VFF
-    diagonalises, a raw H, is the Hadamard matrix."""
+    """VFF's Hilbert–Schmidt test reads |00⟩ with probability |Tr(V†U)|²/4 for the trial
+    V = Ry(a) Rz(θ) Ry(−a).  At a = π/4, θ = π, V = −iH, so a raw H as U gives 1;
+    without U in the circuit it gives |Tr(iH)|²/4 = 0."""
     h = qx.SimpleBlock(1, "h")
     h.h(0)
     ansatz = SimpleBlock(1)
     ansatz.ry(0, Symbol("a"))
     vff = VFF(h, ansatz.build(), verbose=False).build()
-    held = vff.primitives[0].ket.children()[1]
-    assert held is h
-    matrix = np.array(qx.QarpSimulator().unitary_matrix(held.flatten(), 1))
-    np.testing.assert_allclose(matrix, np.array([[1, 1], [1, -1]]) / np.sqrt(2), atol=1e-12)
+    cmds = list(vff.primitives[0].ket.flatten())
+    bound = qx.substitute_all(cmds, {"a": np.pi / 4, "theta_0": np.pi})
+    assert abs(qx.QarpSimulator().statevector(bound, 2)[0]) ** 2 == pytest.approx(1, abs=1e-12)

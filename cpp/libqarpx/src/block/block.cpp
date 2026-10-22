@@ -172,9 +172,15 @@ ref<Block> Block::replace_symbols(
 std::vector<Command>& Block::gate_buffer() {
     if (!accepts_gates())
         throw composite_gate_error(
-            name + " is a composite and runs only its children's gates: add the "
-            "gate to a child block instead");
+            name + " runs only the gates of the blocks it holds: add the gate to "
+            "one of them instead");
     return commands_;
+}
+
+void Block::set_commands(std::vector<Command> cmds) {
+    if (!cmds.empty())
+        gate_buffer();
+    commands_ = std::move(cmds);
 }
 
 void Block::add_command(Command cmd) {

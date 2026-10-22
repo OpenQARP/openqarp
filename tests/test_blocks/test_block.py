@@ -717,7 +717,7 @@ def test_controlled_block_positional_order_matches_other_blocks():
 def test_controlled_block_matches_analytic_block_diagonal():
     """ControlledBlock(HnBlock(2), 1) with the control at qubit 0 (LSB) is
     |0><0| ⊗ I + |1><1| ⊗ (H⊗H) with the control as the innermost factor."""
-    from qarp.blocks import ControlledBlock, HnBlock
+    from qarp.blocks import ControlledBlock
 
     H = np.array([[1, 1], [1, -1]]) / np.sqrt(2)
     P0 = np.diag([1.0, 0.0])
@@ -816,24 +816,39 @@ def test_raw_block_build_lifecycle():
     assert b.is_built is True
 
 
-@pytest.mark.parametrize(
-    "make",
-    [
-        lambda: CompositeBlock([HnBlock(1)], n_qubits=1),
-        lambda: qx.CompositeBlock([qx.SimpleBlock(1, "child")], 1),
-    ],
-    ids=["python", "raw"],
-)
-def test_gate_methods_on_a_composite_raise(make):
-    """A composite runs only its children's gates (§13), so it takes none of its own."""
-    comp = make()
-    with pytest.raises(TypeError, match="composite"):
-        comp.z(0)
-    with pytest.raises(TypeError, match="composite"):
-        comp.rz(0, 0.5)
-    with pytest.raises(TypeError, match="composite"):
-        comp.h([0])
-    assert list(comp.commands()) == []
+def _x_body(kind):
+    body = qx.SimpleBlock(1, "x") if kind == "raw" else SimpleBlock(1)
+    body.x(0)
+    return body.build()
+
+
+_HOLDERS = {
+    "composite": lambda kind: (CompositeBlock if kind == "python" else qx.CompositeBlock)(
+        [_x_body(kind)], 1
+    ),
+    "controlled": lambda kind: (qb.ControlledBlock if kind == "python" else qx.ControlledBlock)(
+        _x_body(kind), 1, [True]
+    ),
+    "conditional": lambda kind: (ConditionalBlock if kind == "python" else qx.ConditionalBlock)(
+        [0], [True], _x_body(kind)
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", ["python", "raw"])
+@pytest.mark.parametrize("holder", list(_HOLDERS))
+def test_gate_methods_on_a_block_holding_blocks_raise(holder, kind):
+    """A block that holds other blocks runs only theirs (§13), so it takes no gates of its own."""
+    block = _HOLDERS[holder](kind)
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.z(0)
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.rz(0, 0.5)
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.h([0])
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.set_commands([qx.Command(qx.GateType.Z, 0)])
+    assert list(block.commands()) == []
 
 
 def test_else_only_conditional_deepcopies():
@@ -878,11 +893,24 @@ def test_command_reads_a_numpy_integer_as_a_qubit():
         lambda: (qx.GateType.Rz, 0, True),
         lambda: (qx.GateType.H, 0, 0.5),
         lambda: (qx.GateType.CX, 0, qx.Param(1.0)),
+        lambda: (qx.GateType.MCZ, 0, 1, 0.5),
+        lambda: (qx.GateType.Barrier, 0, 0.5),
+        lambda: (qx.GateType.GPhase, 3),
     ],
-    ids=["rz-int", "rz-numpy-int", "rz-bool", "h-angle", "cx-one-qubit"],
+    ids=[
+        "rz-int",
+        "rz-numpy-int",
+        "rz-bool",
+        "h-angle",
+        "cx-one-qubit",
+        "mcz-angle",
+        "barrier-angle",
+        "gphase-qubit",
+    ],
 )
 def test_command_rejects_a_wrong_qubit_or_parameter_count(make_args):
-    """Rz takes one qubit and one parameter, H one qubit and none, CX two qubits and none."""
+    """Rz takes one qubit and one parameter, H one qubit and none, CX two qubits and none,
+    MCZ and Barrier any qubits and no parameter, GPhase no qubit and one parameter."""
     with pytest.raises(ValueError, match="takes"):
         qx.Command(*make_args())
 

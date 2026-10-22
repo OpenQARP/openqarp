@@ -1278,8 +1278,8 @@ class _BlockMixin:
             return list(qubits[0])
         return cast(List[int], list(qubits))
 
-    def mcz(self, *qubits: int | Sequence[int]) -> Self:
-        self._cpp_call("mcz", self._qubit_list(qubits))
+    def mcz(self, qubits: int | Sequence[int], *more: int) -> Self:
+        self._cpp_call("mcz", self._qubit_list((qubits, *more)))
         return self
 
     def ccz(self, c0: int, c1: int, t: int) -> Self:

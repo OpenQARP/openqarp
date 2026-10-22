@@ -210,5 +210,5 @@ def test_state_preparation_block_holds_the_input():
     assert [str(c) for c in block.state_preparation_block.flatten()] == ["Ry(0.3) [q0]"]
     amplitudes = np.zeros(2**block.n_qubits)
     amplitudes[[0, -1]] = 0.6, 0.8
-    with pytest.raises(TypeError, match="composite"):
+    with pytest.raises(TypeError, match="runs only the gates"):
         block.state_preparation(amplitudes)

@@ -189,11 +189,12 @@ def test_bra_ket_attributes_preserved():
 
 
 def test_raw_blocks_as_bra_and_ket():
-    """Raw qarpx blocks build to themselves.  Oracle: P(0) = (1 + |⟨0|+⟩|²)/2 = 3/4,
-    which a circuit missing the controlled SWAPs (P(0) = 1) does not give."""
-    bra = qx.SimpleBlock(1, "zero")
-    ket = qx.SimpleBlock(1, "plus")
-    ket.h(0)
+    """Raw qarpx blocks build to themselves.  Oracle: P(0) = (1 + |⟨+|−⟩|²)/2 = 1/2.
+    Losing the bra's or the ket's gates gives 3/4, losing the controlled SWAPs 1."""
+    bra = qx.SimpleBlock(1, "plus")
+    bra.h(0)
+    ket = qx.SimpleBlock(1, "minus")
+    ket.x(0).h(0)
     block = SWAPTestBlock(bra=bra, ket=ket).build()
     expectation = _ancilla_expectation(_unitary(block), block.n_qubits)
-    assert (1 + expectation) / 2 == pytest.approx(0.75, abs=1e-12)
+    assert (1 + expectation) / 2 == pytest.approx(0.5, abs=1e-12)

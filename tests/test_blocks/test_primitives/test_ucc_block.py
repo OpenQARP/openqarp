@@ -462,3 +462,14 @@ def test_ucc_alternative_mapping_is_unitary(onv4, mapping_name):
     U = _unitary(sub)
     I = np.eye(2**ucc.n_qubits)
     assert np.linalg.norm(U @ U.conj().T - I) < 1e-10
+
+
+def test_a_string_rename_reaches_the_ucc_pairing():
+    """Oracle: the pairing of UCCSD on |1100⟩, written by hand, in generation order."""
+    block = UCCBlock([1, 1, 0, 0]).build()
+    renamed = block.replace_symbols({"s_0to2": "z"})
+    assert [s for s, _ in renamed.symbol_qop_pairs] == [
+        Symbol("z"),
+        Symbol("s_1to3"),
+        Symbol("d_0to2_1to3"),
+    ]

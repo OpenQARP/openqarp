@@ -408,6 +408,31 @@ def test_a_raw_controlled_block_plans_from_its_own_control_metadata():
         np.testing.assert_allclose(out[:4], _CX[:, x], atol=1e-12)
 
 
+def test_a_ladder_of_raw_controlled_blocks_plans_as_controlled_powers():
+    """Nine raw C-P(θ) blocks, controls 0–8, onto qubit 11; nine controls take the span past
+    the dense-kernel width.  Oracle: |x⟩ gains e^{iθ(x0+…+x8)} when x11 = 1."""
+    theta = 0.7
+
+    def c_phase(control):
+        inner = qx.SimpleBlock(1, "p")
+        for _ in range(4):
+            inner.p(0, theta / 4)
+        block = qx.ControlledBlock(inner, 1, [True])
+        block.target_qubits = [control, 11]
+        return block
+
+    block = CompositeBlock([c_phase(c) for c in range(9)], n_qubits=12).build()
+    plan = _program.plan(block, 12)
+    assert plan is not None and plan.program().kinds() == ["controlled_powers"]
+    psi = np.random.default_rng(1).normal(size=1 << 12) + 0j
+    psi /= np.linalg.norm(psi)
+    x = np.arange(1 << 12)
+    controls = sum((x >> c) & 1 for c in range(9))
+    expected = psi * np.exp(1j * theta * controls * ((x >> 11) & 1))
+    out = qx.QarpSimulator().program_statevector(plan.program(), 12, initial_state=psi)
+    np.testing.assert_allclose(np.asarray(out), expected, atol=1e-12)
+
+
 def test_plan_structure_descends_an_unbuilt_composite():
     """A declaring child of an unbuilt composite is lowered from its
     declaration without being built; the plain tail is built on its own.
