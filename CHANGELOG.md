@@ -110,6 +110,11 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `sparse_matrix` on both operator classes is a compiled method, also on a
   bare `import qarpx`.  It cannot be pickled or read by
   `inspect.signature`, and a non-integer `n_qubits` raises `TypeError`.
+- `qx.bravyi_kitaev`, `qx.qubit_operator_coo` and `qx.fermion_operator_coo`
+  raise `TypeError` on a non-integer `n_qubits`, as `sparse_matrix` does;
+  they raised `RuntimeError: std::bad_cast`.
+- `TermwiseHadamardTest` takes its operator blocks as any sequence; a tuple
+  raised `TypeError`.
 - `Engine.build` takes a `Sequence` of primitives.  A subclass that
   annotates the parameter `list` widens it to `Sequence`.
 - The variational algorithms annotate their block parameters with
@@ -171,6 +176,8 @@ All notable changes to OpenQARP are recorded here. The format follows
   became a CZ carrying an angle.  A gate on three or more qubits across the
   boundary raises, as a two-qubit one does; it was dropped.  The cutters
   still reject gates on more than two qubits.
+- `CapabilityError.command` is `None` when no command is attached; reading
+  it raised `AttributeError`.
 
 ## [0.1.1] - 2026-09-25
 

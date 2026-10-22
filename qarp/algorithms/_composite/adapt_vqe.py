@@ -279,7 +279,7 @@ class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
         (alias of ``ansatz_parameters_dict``)."""
         return self.ansatz_parameters_dict
 
-    def get_final_state_block(self):
+    def get_final_state_block(self) -> QarpBlock:
         """Use the current object reference, ansatz excitations and symbols to construct a wavefunction object.
 
         Returns:

@@ -668,7 +668,7 @@ NB_MODULE(qarpx, m) {
     using Bulk2P = Block& (Block::*)(const std::vector<std::tuple<uint32_t, uint32_t, Param>>&);
     using Bulk3 = Block& (Block::*)(const std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>&);
     const auto ref_policy = nb::rv_policy::reference;
-    constexpr const char* kBlock = "qarpx.Block";
+    constexpr const char* kSelf = "typing.Self";  // every builder returns *this
 
     struct OneQubit { const char* name; Gate1 scalar; Bulk1 bulk; };
     const OneQubit one_qubit[] = {
@@ -680,9 +680,9 @@ NB_MODULE(qarpx, m) {
         {"id", &Block::id, &Block::id},
     };
     for (const auto& g : one_qubit) {
-        def_typed(block_cls, g.name, g.scalar, {Arg{"q", "int"}}, kBlock, ref_policy);
+        def_typed(block_cls, g.name, g.scalar, {Arg{"q", "int"}}, kSelf, ref_policy);
         def_typed(block_cls, g.name, g.bulk,
-                  {Arg{"q", "collections.abc.Sequence[int]"}}, kBlock, ref_policy);
+                  {Arg{"q", "collections.abc.Sequence[int]"}}, kSelf, ref_policy);
     }
 
     struct OneQubitParam { const char* name; Gate1P scalar; Bulk1P bulk; };
@@ -692,10 +692,10 @@ NB_MODULE(qarpx, m) {
     };
     for (const auto& g : one_qubit_param) {
         def_typed(block_cls, g.name, g.scalar,
-                  {Arg{"q", "int"}, Arg{"angle", kParamLike}}, kBlock, ref_policy);
+                  {Arg{"q", "int"}, Arg{"angle", kParamLike}}, kSelf, ref_policy);
         def_typed(block_cls, g.name, g.bulk,
                   {Arg{"q", "collections.abc.Sequence[tuple[int, qarpx.Param | float]]"}},
-                  kBlock, ref_policy);
+                  kSelf, ref_policy);
     }
 
     // Two-qubit gates: (c, t) when one qubit controls the other, (q0, q1)
@@ -715,10 +715,10 @@ NB_MODULE(qarpx, m) {
     for (const auto& g : two_qubit) {
         const char* a = g.controlled ? "c" : "q0";
         const char* b = g.controlled ? "t" : "q1";
-        def_typed(block_cls, g.name, g.scalar, {Arg{a, "int"}, Arg{b, "int"}}, kBlock,
+        def_typed(block_cls, g.name, g.scalar, {Arg{a, "int"}, Arg{b, "int"}}, kSelf,
                   ref_policy);
         def_typed(block_cls, g.name, g.bulk,
-                  {Arg{a, "collections.abc.Sequence[tuple[int, int]]"}}, kBlock, ref_policy);
+                  {Arg{a, "collections.abc.Sequence[tuple[int, int]]"}}, kSelf, ref_policy);
     }
 
     struct TwoQubitParam { const char* name; Gate2P scalar; Bulk2P bulk; bool controlled; };
@@ -732,58 +732,60 @@ NB_MODULE(qarpx, m) {
         const char* a = g.controlled ? "c" : "q0";
         const char* b = g.controlled ? "t" : "q1";
         def_typed(block_cls, g.name, g.scalar,
-                  {Arg{a, "int"}, Arg{b, "int"}, Arg{"angle", kParamLike}}, kBlock,
+                  {Arg{a, "int"}, Arg{b, "int"}, Arg{"angle", kParamLike}}, kSelf,
                   ref_policy);
         def_typed(block_cls, g.name, g.bulk,
                   {Arg{a, "collections.abc.Sequence[tuple[int, int, qarpx.Param | float]]"}},
-                  kBlock, ref_policy);
+                  kSelf, ref_policy);
     }
 
     def_typed(block_cls, "ccx", Gate3(&Block::ccx),
-              {Arg{"c0", "int"}, Arg{"c1", "int"}, Arg{"t", "int"}}, kBlock, ref_policy);
+              {Arg{"c0", "int"}, Arg{"c1", "int"}, Arg{"t", "int"}}, kSelf, ref_policy);
     def_typed(block_cls, "ccx", Bulk3(&Block::ccx),
-              {Arg{"c0", "collections.abc.Sequence[tuple[int, int, int]]"}}, kBlock,
+              {Arg{"c0", "collections.abc.Sequence[tuple[int, int, int]]"}}, kSelf,
               ref_policy);
     def_typed(block_cls, "cswap", Gate3(&Block::cswap),
-              {Arg{"c", "int"}, Arg{"q0", "int"}, Arg{"q1", "int"}}, kBlock, ref_policy);
+              {Arg{"c", "int"}, Arg{"q0", "int"}, Arg{"q1", "int"}}, kSelf, ref_policy);
     def_typed(block_cls, "cswap", Bulk3(&Block::cswap),
-              {Arg{"c", "collections.abc.Sequence[tuple[int, int, int]]"}}, kBlock,
+              {Arg{"c", "collections.abc.Sequence[tuple[int, int, int]]"}}, kSelf,
               ref_policy);
     def_typed(block_cls, "mcz", &Block::mcz,
-              {Arg{"qubits", "collections.abc.Sequence[int]"}}, kBlock, ref_policy);
-    def_typed(block_cls, "gphase", &Block::gphase, {Arg{"angle", kParamLike}}, kBlock,
+              {Arg{"qubits", "collections.abc.Sequence[int]"}}, kSelf, ref_policy);
+    def_typed(block_cls, "gphase", &Block::gphase, {Arg{"angle", kParamLike}}, kSelf,
               ref_policy);
     def_typed(block_cls, "u", &Block::u,
               {Arg{"q", "int"}, Arg{"theta", kParamLike}, Arg{"phi", kParamLike},
                Arg{"lam", kParamLike}},
-              kBlock, ref_policy);
+              kSelf, ref_policy);
     def_typed(block_cls, "cu", &Block::cu,
               {Arg{"c", "int"}, Arg{"t", "int"}, Arg{"theta", kParamLike},
                Arg{"phi", kParamLike}, Arg{"lam", kParamLike}, Arg{"gamma", kParamLike}},
-              kBlock, ref_policy);
+              kSelf, ref_policy);
     def_typed(block_cls, "measure", Gate2(&Block::measure),
-              {Arg{"qubit", "int"}, Arg{"cbit", "int"}}, kBlock, ref_policy);
+              {Arg{"qubit", "int"}, Arg{"cbit", "int"}}, kSelf, ref_policy);
     def_typed(block_cls, "measure", Bulk2(&Block::measure),
-              {Arg{"qubit", "collections.abc.Sequence[tuple[int, int]]"}}, kBlock,
+              {Arg{"qubit", "collections.abc.Sequence[tuple[int, int]]"}}, kSelf,
               ref_policy);
-    def_typed(block_cls, "reset", Gate1(&Block::reset), {Arg{"qubit", "int"}}, kBlock,
+    def_typed(block_cls, "reset", Gate1(&Block::reset), {Arg{"qubit", "int"}}, kSelf,
               ref_policy);
     def_typed(block_cls, "reset", Bulk1(&Block::reset),
-              {Arg{"qubit", "collections.abc.Sequence[int]"}}, kBlock, ref_policy);
+              {Arg{"qubit", "collections.abc.Sequence[int]"}}, kSelf, ref_policy);
 
-    block_cls
-        // Synthesis builders
-        .def("state_preparation", &Block::state_preparation,
-             "amplitudes"_a, nb::rv_policy::reference,
-             "Prepare an arbitrary 2^n-amplitude state from |0…0⟩ (Möttönen).")
-        .def("diagonal_unitary", &Block::diagonal_unitary,
-             "diagonal_elements"_a, nb::rv_policy::reference,
-             "Implement an arbitrary 2^n × 2^n diagonal unitary "
-             "(Shende-Bullock-Markov).")
-        .def("unitary_synthesis", &Block::unitary_synthesis,
-             "U"_a, nb::rv_policy::reference,
-             "Implement an arbitrary 2^n × 2^n unitary via Quantum Shannon "
-             "Decomposition.");
+    // Synthesis builders
+    def_typed(block_cls, "state_preparation", &Block::state_preparation,
+              {Arg{"amplitudes", "collections.abc.Sequence[complex]"}}, kSelf, ref_policy,
+              "Prepare an arbitrary 2^n-amplitude state from |0…0⟩ (Möttönen).");
+    def_typed(block_cls, "diagonal_unitary", &Block::diagonal_unitary,
+              {Arg{"diagonal_elements", "collections.abc.Sequence[complex]"}}, kSelf,
+              ref_policy,
+              "Implement an arbitrary 2^n × 2^n diagonal unitary "
+              "(Shende-Bullock-Markov).");
+    def_typed(block_cls, "unitary_synthesis", &Block::unitary_synthesis,
+              {Arg{"U", "typing.Annotated[numpy.typing.NDArray[numpy.complex128], "
+                        "dict(shape=(None, None), order='F')]"}},
+              kSelf, ref_policy,
+              "Implement an arbitrary 2^n × 2^n unitary via Quantum Shannon "
+              "Decomposition.");
 
     // Pauli-exponential builders.  Python accepts either a string ("XYZI")
     // or a list[Pauli]; the lambdas parse strings on the way in.
@@ -792,7 +794,7 @@ NB_MODULE(qarpx, m) {
                   b.pauli_exp(parse_pauli_string(pauli), angle);
                   return b;
               },
-              {Arg{"pauli", "str"}, Arg{"angle", kParamLike}}, kBlock, ref_policy,
+              {Arg{"pauli", "str"}, Arg{"angle", kParamLike}}, kSelf, ref_policy,
               "Append exp(-i · angle / 2 · pauli) for a single multi-qubit Pauli.");
     def_typed(block_cls, "pauli_exp",
               [](Block& b, const PauliString& pauli, Param angle) -> Block& {
@@ -801,7 +803,7 @@ NB_MODULE(qarpx, m) {
               },
               {Arg{"pauli", "collections.abc.Sequence[qarpx.Pauli]"},
                Arg{"angle", kParamLike}},
-              kBlock, ref_policy);
+              kSelf, ref_policy);
     def_typed(block_cls, "commuting_pauli_set_exp",
               [](Block& b, const std::vector<std::string>& paulis,
                  const std::vector<Param>& angles) -> Block& {
@@ -813,7 +815,7 @@ NB_MODULE(qarpx, m) {
               },
               {Arg{"paulis", "collections.abc.Sequence[str]"},
                Arg{"angles", "collections.abc.Sequence[qarpx.Param | float]"}},
-              kBlock, ref_policy,
+              kSelf, ref_policy,
               "Append Π_i exp(-i · angles[i] / 2 · paulis[i]) for a set of "
               "mutually commuting Pauli strings.  Validates lengths and "
               "pairwise commutation.");
@@ -825,7 +827,7 @@ NB_MODULE(qarpx, m) {
               },
               {Arg{"paulis", "collections.abc.Sequence[collections.abc.Sequence[qarpx.Pauli]]"},
                Arg{"angles", "collections.abc.Sequence[qarpx.Param | float]"}},
-              kBlock, ref_policy);
+              kSelf, ref_policy);
 
     // ── SimpleBlock ──
     nb::class_<SimpleBlock, Block>(m, "SimpleBlock", nb::dynamic_attr())

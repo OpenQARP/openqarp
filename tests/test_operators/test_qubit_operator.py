@@ -422,6 +422,21 @@ def test_sparse_matrix_rejects_a_non_integer_width():
         QubitOperator("Z0").sparse_matrix(2.0)
 
 
+@pytest.mark.parametrize(
+    "kernel, op",
+    [
+        ("bravyi_kitaev", lambda: qx.FermionOperator("0^ 1")),
+        ("bravyi_kitaev", lambda: [qx.FermionOperator("0^ 1")]),
+        ("qubit_operator_coo", lambda: qx.QubitOperator("Z0")),
+        ("fermion_operator_coo", lambda: qx.FermionOperator("0^ 0")),
+    ],
+    ids=["bravyi_kitaev", "bravyi_kitaev_list", "qubit_operator_coo", "fermion_operator_coo"],
+)
+def test_the_operator_kernels_reject_a_non_integer_width(kernel, op):
+    with pytest.raises(TypeError):
+        getattr(qx, kernel)(op(), 1.5)
+
+
 @pytest.mark.skipif(not qx.__with_symengine__, reason="needs symbolic coefficients")
 def test_inplace_add_of_a_symbol_rebinds():
     """No in-place symbolic overload: ``+=`` falls back to ``__add__`` and rebinds."""

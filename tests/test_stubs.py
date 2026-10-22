@@ -150,7 +150,7 @@ def _value(annotation: str, name: str, param):
         if name == "amplitudes":
             return [0.6, 0, 0, 0, 0, 0, 0, 0.8]
         return [np.exp(0.1j * k) for k in range(8)]
-    if annotation.startswith("Annotated[NDArray[numpy.complex128]"):
+    if annotation.startswith("Annotated[numpy.typing.NDArray[numpy.complex128]"):
         return np.asfortranarray(_H3, dtype=complex)
     raise AssertionError(f"no test value for {annotation!r} ({name}): extend _value")
 
@@ -162,13 +162,18 @@ def _builder_overloads():
         if (
             isinstance(fn, ast.FunctionDef)
             and fn.returns is not None
-            and ast.unparse(fn.returns) == "Block"
-            and fn.name not in {"dagger", "set_symbols", "replace_symbols"}
+            and ast.unparse(fn.returns) == "Self"
+            and fn.name not in {"build", "__deepcopy__"}
         ):
             yield fn.name, [(a.arg, ast.unparse(a.annotation)) for a in fn.args.args[1:]]
 
 
 _GATES = {g.lower(): getattr(qx.GateType, g) for g in qx.GateType.__members__}
+
+
+def test_the_builder_table_holds_every_gate_builder():
+    builders = {name for name, _ in _builder_overloads()}
+    assert {g for g in _GATES if hasattr(qx.Block, g)} <= builders
 
 
 # Built inside the test: a qarpx object held by the parametrize list outlives
@@ -212,8 +217,9 @@ _SETUP = """\
 import numpy as np
 import qarpx as qx
 from sympy import Symbol
-from qarp.algorithms import VQD, VQE
+from qarp.algorithms import VQD, VQE, TermwiseSWAPTest
 from qarp.blocks import CompositeBlock, QarpBlock, SimpleBlock
+from qarp.errors import CapabilityError
 from qarp.operators import QubitOperator
 b = qx.SimpleBlock(2, "b")
 inner = qx.SimpleBlock(1, "inner")
@@ -246,8 +252,12 @@ _SNIPPETS = [
     ("VQE(op, raw)", "arg-type", False),
     ("VQE(op, CompositeBlock([raw]))", None, True),
     ("VQE(op, hb | hb)", None, True),
+    # A builder returns the block it was called on.
+    ("SimpleBlock(1).h(0).symbols", None, True),
     # A named list: an inline one is inferred from the parameter and passes a List too.
     ("VQD(op, kets, [])", None, True),
+    ("TermwiseSWAPTest(kets, hb)", None, True),
+    ('CapabilityError("x").command', None, True),
 ]
 _KNOWN_FALSE_REJECTIONS = [
     # A numpy integer is not an int to mypy; nanobind converts it.

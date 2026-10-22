@@ -158,6 +158,10 @@ that stubgen emits the right type:
   framework.  Nullable returns say `| None` (`ConditionalBlock.then_body`, `else_body`).
 - `build()` returns the block, as the Python blocks do, and its signature says
   `typing.Self`.  This fixes the seven crashes above and the mixin's `build` conflict.
+  Every gate and synthesis builder returns the block it was called on, so its signature
+  says `typing.Self` too, and a chain on a Python block keeps the Python type.
+- `n_qubits` is `int | None` on `bravyi_kitaev`, `qubit_operator_coo` and
+  `fermion_operator_coo`, and a non-integer raises `TypeError`, as on `sparse_matrix`.
 - `is_built` becomes a read-only property, as on the Python blocks.  The same commit changes
   `_block.py`'s read of the C++ flag to `self._cpp_base.is_built.fget(self)`, and the five
   `.is_built()` calls in tests (`test_block.py` ×3, `test_pauli_exp_builder.py`, and a
@@ -331,7 +335,10 @@ The runtime changes, each listed in the CHANGELOG with a one-line migration:
 - `Command == other` returns `False` for a foreign type.
 - `substitute` and `free_symbols` exist on every build.
 - `sparse_matrix` is a nanobind method: not picklable, and a non-integer `n_qubits` raises
-  `TypeError`.
+  `TypeError`, as it does on `bravyi_kitaev`, `qubit_operator_coo` and
+  `fermion_operator_coo`.
+- `TermwiseHadamardTest` takes any sequence of operator blocks, and
+  `CapabilityError.command` is `None` when no command is attached.
 - The ABI is 15.
 
 The README roadmap moves this work from the window with no public surface change into the
@@ -416,7 +423,7 @@ class Block:
     @property
     def is_built(self) -> bool: ...
     def build(self) -> Self: ...
-    def rz(self, q: int, angle: Param | float) -> Block: ...
+    def rz(self, q: int, angle: Param | float) -> Self: ...
     def __eq__(self, other: object, /) -> bool: ...
 
 class ConditionalBlock(Block):
@@ -687,3 +694,22 @@ section and folded back here before merge; silent drift is the violation.
   Design updated.
 - **Gate 2 follow-up, bulk builders.**  Each bulk overload in `block.cpp` fetches
   `gate_buffer()` once instead of per command, and the section comment says so.
+- **Stub review, builders return `Self`.**  The gate, Pauli-exponential and synthesis
+  builders' signatures say `typing.Self`, not `qarpx.Block`, since each returns the block it
+  was called on; the three synthesis builders go through the argument helper for it.  The
+  builder table in `test_stubs.py` selects overloads by `Self` and checks that it holds every
+  gate builder; a mypy snippet pins the chain.  Design and the API sketch updated.
+- **Stub review, operator kernels.**  `bravyi_kitaev`, `qubit_operator_coo` and
+  `fermion_operator_coo` take `std::optional<int>`, so the stub says `int | None` and a float
+  raises `TypeError`, not `std::bad_cast`.  Tests in `test_qubit_operator.py`.
+- **Stub review, `QarpBlock` sites and sequences.**  `QITE.get_final_state_block` returns
+  `QarpBlock`, and `AdaptVQE`'s and `AdaptVQD`'s are annotated the same; `Grover`,
+  `AmplitudeAmplification` and `AmplitudeEstimation` type `block` with the class they build;
+  the multi-controlled helpers take `QarpBlock`.  `AdaptVQD.orthogonal_states`,
+  `TermwiseSWAPTest`'s bra and `TermwiseHadamardTest`'s operator take a `Sequence`, and
+  `TermwiseHadamardTest` turns a sequence into a list, so a tuple is accepted.
+- **Stub review, `CapabilityError.command`.**  Declared on the class, `None` by default, so
+  the emitter's attached command type-checks and an engine-side rejection reads `None`.
+- **Stub review, `qarp_philosophy.rst`.**  The `QarpBlock` example reads
+  `len(block.symbols or ())`, since `symbols` is `None` before build.  Making it always a
+  tuple, and four more gaps mypy finds in the notebooks, go to `to_do.md`.

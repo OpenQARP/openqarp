@@ -659,14 +659,13 @@ void register_operator_bindings(nb::module_& m) {
           },
           "ops"_a);
     m.def("bravyi_kitaev",
-          [](const FermionOperator& op, nb::handle n_qubits) {
-              return qarpx::ops::bravyi_kitaev(
-                  op, n_qubits.is_none() ? -1 : nb::cast<int>(n_qubits));
+          [](const FermionOperator& op, std::optional<int> n_qubits) {
+              return qarpx::ops::bravyi_kitaev(op, n_qubits.value_or(-1));
           },
           "op"_a, "n_qubits"_a = nb::none());
     m.def("bravyi_kitaev",
-          [](const std::vector<FermionOperator>& ops, nb::handle n_qubits) {
-              const int n = n_qubits.is_none() ? -1 : nb::cast<int>(n_qubits);
+          [](const std::vector<FermionOperator>& ops, std::optional<int> n_qubits) {
+              const int n = n_qubits.value_or(-1);
               std::vector<QubitOperator> out;
               out.reserve(ops.size());
               for (const auto& op : ops) out.push_back(qarpx::ops::bravyi_kitaev(op, n));
@@ -705,9 +704,9 @@ void register_operator_bindings(nb::module_& m) {
     //    sparse_matrix and, for the MSB openfermion layout, in
     //    qarp/operators/compat.py) ──
     m.def("qubit_operator_coo",
-          [](const QubitOperator& op, nb::handle n_qubits, bool msb) {
+          [](const QubitOperator& op, std::optional<int> n_qubits, bool msb) {
               return coo_to_python(qarpx::ops::qubit_operator_coo(
-                  op, n_qubits.is_none() ? -1 : nb::cast<int>(n_qubits),
+                  op, n_qubits.value_or(-1),
                   msb ? qarpx::ops::BitOrder::kMsb : qarpx::ops::BitOrder::kLsb));
           },
           "op"_a, "n_qubits"_a = nb::none(), "msb"_a = false,
@@ -716,9 +715,9 @@ void register_operator_bindings(nb::module_& m) {
           "(qubit q ↔ bit q); msb=True realizes openfermion's MSB qubit-0 "
           "layout for interop.");
     m.def("fermion_operator_coo",
-          [](const FermionOperator& op, nb::handle n_qubits, bool msb) {
+          [](const FermionOperator& op, std::optional<int> n_qubits, bool msb) {
               return coo_to_python(qarpx::ops::fermion_operator_coo(
-                  op, n_qubits.is_none() ? -1 : nb::cast<int>(n_qubits),
+                  op, n_qubits.value_or(-1),
                   msb ? qarpx::ops::BitOrder::kMsb : qarpx::ops::BitOrder::kLsb));
           },
           "op"_a, "n_qubits"_a = nb::none(), "msb"_a = false);

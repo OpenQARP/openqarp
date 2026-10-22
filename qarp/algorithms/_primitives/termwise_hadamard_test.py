@@ -6,6 +6,7 @@ optionally weighted by per-term coefficients.  When ``operator`` is a
 :class:`PauliBlockFactory` and the per-term coefficients are used as weights.
 """
 
+from collections.abc import Sequence
 from typing import List, Optional, Union
 
 import qarpx as qx
@@ -28,7 +29,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
     def __init__(
         self,
         bra: Optional[AnyBlock] = None,
-        operator: Optional[Union[AnyBlock, List[AnyBlock], QubitOperator]] = None,
+        operator: Optional[Union[AnyBlock, Sequence[AnyBlock], QubitOperator]] = None,
         ket: Optional[AnyBlock] = None,
         coefficients: Optional[List[float]] = None,
         real: bool = True,
@@ -59,6 +60,8 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
         # Normalize operator to a list (or QubitOperator deferred to build).
         if isinstance(operator, qx.Block):
             self.operator: Union[List[AnyBlock], QubitOperator] = [operator]
+        elif isinstance(operator, Sequence) and not isinstance(operator, str):
+            self.operator = list(operator)
         else:
             self.operator = operator  # type: ignore[assignment]
 

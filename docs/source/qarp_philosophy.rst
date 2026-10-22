@@ -37,7 +37,7 @@ and a raw block passes once wrapped, ``CompositeBlock([raw_block])``:
     from qarp.blocks import QarpBlock
 
     def n_parameters(block: QarpBlock) -> int:
-        return len(block.symbols)
+        return len(block.symbols or ())
 
 Every block (``SimpleBlock`` or :class:`~qarp.blocks.CompositeBlock` alike):
 

@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, List, Optional, Tuple, Union, cast
 
@@ -24,7 +25,7 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
         reference_block: QarpBlock,
         hamiltonian: QubitOperator,
         excitation_pool: List[QubitOperator],
-        orthogonal_states: List[AnyBlock],
+        orthogonal_states: Sequence[AnyBlock],
         betas: List[float],
         gradient: Union[bool, str] = False,
         optimizer: Optional[Optimizer] = None,
@@ -354,7 +355,7 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
         (alias of ``ansatz_parameters_dict``, populated by ``run()``)."""
         return dict(zip(self.ansatz_symbols, self.ansatz_parameters, strict=True))
 
-    def get_final_state_block(self):
+    def get_final_state_block(self) -> QarpBlock:
         """Use the current object reference, ansatz excitations and symbols to construct a wavefunction object.
 
         Returns:
