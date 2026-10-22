@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 from .._block import SimpleBlock
 
@@ -56,7 +56,7 @@ class QROMBlock(SimpleBlock):
     def __init__(
         self,
         index_qubits: int,
-        data: Dict[int, Tuple[int, ...]],
+        data: Mapping[int, Tuple[int, ...]],
         target_qubits: Optional[List[int]] = None,
         name: str = "QROM",
     ):

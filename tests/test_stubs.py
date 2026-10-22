@@ -218,7 +218,14 @@ import numpy as np
 import qarpx as qx
 from sympy import Symbol
 from qarp.algorithms import VQD, VQE, TermwiseSWAPTest
-from qarp.blocks import CompositeBlock, QarpBlock, SimpleBlock
+from qarp.blocks import (
+    CompositeBlock,
+    MultiONVStateBlock,
+    QarpBlock,
+    QROMBlock,
+    SimpleBlock,
+    SparseStateBlock,
+)
 from qarp.errors import CapabilityError
 from qarp.operators import QubitOperator
 b = qx.SimpleBlock(2, "b")
@@ -229,6 +236,9 @@ raw.rz(0, qx.Param.symbol("t"))
 hb = SimpleBlock(1)
 hb.rz(0, Symbol("u")).build()
 kets = [hb]
+amplitudes = {(0, 1): 1.0}
+onvs = {(1, 0): 1.0}
+table = {0: (1, 0, 1), 1: (0, 1, 1)}
 """
 _SNIPPETS = [
     # (statement, mypy error code or None, runs)
@@ -258,6 +268,10 @@ _SNIPPETS = [
     ("VQD(op, kets, [])", None, True),
     ("TermwiseSWAPTest(kets, hb)", None, True),
     ('CapabilityError("x").command', None, True),
+    ("VQE(op, hb, initial_parameters=[0.1])", None, True),
+    ("SparseStateBlock(2, amplitudes)", None, True),
+    ("MultiONVStateBlock(onvs)", None, True),
+    ("QROMBlock(index_qubits=1, data=table)", None, True),
 ]
 _KNOWN_FALSE_REJECTIONS = [
     # A numpy integer is not an int to mypy; nanobind converts it.

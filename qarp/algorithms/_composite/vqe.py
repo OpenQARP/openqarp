@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import numpy as np
 
@@ -16,7 +16,7 @@ class VQE(VQA):
         self,
         operator: Union[QubitOperator, AnyBlock],
         ket: QarpBlock,
-        initial_parameters: Optional[np.typing.NDArray[np.float64]] = None,
+        initial_parameters: Optional[Union[Sequence[float], np.typing.NDArray[np.float64]]] = None,
         gradient: Union[bool, str] = False,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = False,

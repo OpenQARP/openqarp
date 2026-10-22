@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 import numpy as np
 
@@ -29,7 +29,7 @@ class VFF(CompositeAlgorithm):
         t_time: float = 1.0,
         t_steps: int = 1,
         t_order: int = 1,
-        initial_parameters: Optional[np.typing.NDArray[np.float64]] = None,
+        initial_parameters: Optional[Union[Sequence[float], np.typing.NDArray[np.float64]]] = None,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = True,
         primitive: Optional[PrimitiveAlgorithm] = None,

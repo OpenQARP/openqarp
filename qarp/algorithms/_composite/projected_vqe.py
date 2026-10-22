@@ -275,7 +275,7 @@ class ProjectedVQE(VQE):
         ket: QarpBlock,
         projector: Optional[Union[AnyBlock, Sequence[AnyBlock]]] = None,
         projector_matrix: Optional[np.ndarray] = None,
-        initial_parameters: Optional[np.typing.NDArray[np.float64]] = None,
+        initial_parameters: Optional[Union[Sequence[float], np.typing.NDArray[np.float64]]] = None,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = False,
         engine: Optional[Engine] = None,

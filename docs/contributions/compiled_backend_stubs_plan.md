@@ -712,4 +712,10 @@ section and folded back here before merge; silent drift is the violation.
   the emitter's attached command type-checks and an engine-side rejection reads `None`.
 - **Stub review, `qarp_philosophy.rst`.**  The `QarpBlock` example reads
   `len(block.symbols or ())`, since `symbols` is `None` before build.  Making it always a
-  tuple, and four more gaps mypy finds in the notebooks, go to `to_do.md`.
+  tuple, and two more gaps mypy finds in the notebooks, go to `to_do.md`.
+- **Stub review, parameters the tutorials fill with literals.**  `initial_parameters` on
+  `VQA`, `VQE`, `QAOA`, `SSVQE`, `VFF` and `ProjectedVQE` also takes a `Sequence[float]`.
+  `QROMBlock`'s `data` takes a `Mapping`, and `SparseStateBlock`'s and
+  `MultiONVStateBlock`'s coefficients a `Mapping` keyed by a type variable bound to
+  `tuple[int, ...]`, since a mapping is invariant in its key and a literal's keys type as
+  fixed-length tuples.  mypy snippets in `test_stubs.py` pin each.

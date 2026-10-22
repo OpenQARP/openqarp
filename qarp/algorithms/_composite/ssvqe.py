@@ -22,7 +22,9 @@ class SSVQE(CompositeAlgorithm):
         basis_state_blocks: Sequence[AnyBlock],
         ansatz_block: QarpBlock,
         weights: List[float],
-        initial_parameters: Optional[Union[Mapping, np.typing.NDArray[np.float64]]] = None,
+        initial_parameters: Optional[
+            Union[Mapping, Sequence[float], np.typing.NDArray[np.float64]]
+        ] = None,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = True,
         gradient: Union[bool, str] = False,

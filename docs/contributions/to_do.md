@@ -87,16 +87,13 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   otherwise conflict with it across them.
 - **`qarp` typed for its users.**  `qarp` ships no `py.typed`, so user code
   sees it untyped.  Running mypy over the example notebooks and the docs
-  snippets finds five gaps to close before it does: a list of Python blocks
+  snippets finds three gaps to close before it does: a list of Python blocks
   of different kinds infers as `list[_BlockMixin]`, which a
   `Sequence[QarpBlock]` parameter rejects, so the six classes need one
   shared typing base; `symbols` is `Optional`, so `len(block.symbols)` fails
   in 22 notebook cells and 3 docs snippets, and making it always a tuple
-  changes `symbols is None` checks; `PreparesKnownState`'s members are
-  attached by `setattr`, so mypy sees none of them on the state blocks;
-  `VQE` and `QAOA` type `initial_parameters` as an array and reject the lists
-  the tutorials pass; and `SparseStateBlock`, `MultiONVStateBlock` and
-  `QROMBlock` take a `dict` where a `Mapping` would accept narrower keys.
+  changes `symbols is None` checks; and `PreparesKnownState`'s members are
+  attached by `setattr`, so mypy sees none of them on the state blocks.
 - **`Sampler(postselect=PostSelection(...))`.**  Applying post-selection
   inside `Sampler.run()` waited on a result type that could carry
   `success_rate` without breaking the dict return; `SamplingDistribution`

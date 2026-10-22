@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import numpy as np
 from networkx import Graph
@@ -21,7 +21,7 @@ class QAOA(VQA):
         problem: Union[Graph, QubitOperator],
         n_layers: int = 1,
         use_rzz: bool = True,
-        initial_parameters: Optional[np.typing.NDArray[np.float64]] = None,
+        initial_parameters: Optional[Union[Sequence[float], np.typing.NDArray[np.float64]]] = None,
         gradient: Union[bool, str] = False,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = False,

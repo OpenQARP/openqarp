@@ -1,4 +1,4 @@
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 import numpy as np
 from sympy import Symbol
@@ -22,7 +22,9 @@ class VQA(CompositeAlgorithm):
         operator: Union[QubitOperator, AnyBlock],
         ket: QarpBlock,
         name: str,
-        initial_parameters: Optional[Union[Mapping, np.typing.NDArray[np.float64]]] = None,
+        initial_parameters: Optional[
+            Union[Mapping, Sequence[float], np.typing.NDArray[np.float64]]
+        ] = None,
         gradient: Union[bool, str] = False,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = False,
