@@ -31,7 +31,7 @@ class TermwiseSWAPTest(PrimitiveAlgorithm):
     ):
         """
         Args:
-            bra: Single Block or list of bra-state preparation blocks.
+            bra: Single Block or sequence of bra-state preparation blocks.
             ket: Single ket-state preparation block.
             coefficients: Optional per-bra weight (default: all 1.0).
             n_shots: Number of shots; ``None`` defers to the engine default.

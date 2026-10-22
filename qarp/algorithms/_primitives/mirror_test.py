@@ -73,10 +73,8 @@ class MirrorTest(PrimitiveAlgorithm):
             self.operator.target_qubits = full_qubits[: self.operator.n_qubits]
             children.append(self.operator)
 
-        # Lazy Python-wrapper dagger (deepcopy + flag): wiring folds the
-        # pending flag into concrete daggered commands via
-        # `_materialise_pending_ops`, keeping the child deepcopy-safe.  A raw
-        # qx block daggers only once built.
+        # A Python block daggers lazily, folded in by `_materialise_pending_ops`
+        # so the child stays deepcopy-safe; a raw qx block daggers only once built.
         bra = self.bra
         if not isinstance(bra, QarpBlock) and not bra.is_built:
             bra = bra.build()

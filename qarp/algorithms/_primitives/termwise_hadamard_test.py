@@ -39,7 +39,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
         """
         Args:
             bra: Optional state preparation block for ⟨ψ|.
-            operator: Block, list of Blocks, or QubitOperator (expanded into per-term Blocks).
+            operator: Block, sequence of Blocks, or QubitOperator (expanded into per-term Blocks).
                 ``None`` with an explicit ``bra`` (not ``ket``) measures the bare
                 overlap ``<bra|ket>`` (``Target.OVERLAP``).
             ket: State preparation block for ``|ψ⟩``.
@@ -88,7 +88,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
                 raise ValueError("operator must be provided")
             return
         if not isinstance(self.operator, (list, QubitOperator)):
-            raise TypeError("operator must be Block, list of Blocks, or QubitOperator")
+            raise TypeError("operator must be Block, sequence of Blocks, or QubitOperator")
         if isinstance(self.operator, list):
             if not self.operator:
                 raise ValueError("operator list cannot be empty")

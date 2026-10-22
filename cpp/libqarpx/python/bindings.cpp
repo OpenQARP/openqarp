@@ -105,12 +105,9 @@ table_to_numpy(std::vector<uint64_t>&& v) {
 
 // ── Signatures shown to type checkers ──
 //
-// stubgen writes each binding's signature from nanobind's view of the C++
-// types, which misses nb::implicitly_convertible (a qx.Param parameter also
-// takes a number) and names unnamed arguments arg0, arg1, ….  def_typed takes
-// each parameter's name and displayed type once and emits from them both the
-// runtime keyword (nb::arg) and the displayed signature (nb::sig), so the two
-// cannot disagree.  Types are written fully qualified, as nanobind does.
+// stubgen misses nb::implicitly_convertible and names unnamed arguments arg0.
+// def_typed emits nb::arg and nb::sig from one list of names and fully
+// qualified types, so the runtime keywords and the displayed signature agree.
 struct Arg {
     const char* name;
     const char* type;
@@ -653,10 +650,9 @@ NB_MODULE(qarpx, m) {
         .def_rw("target_qubits", &Block::target_qubits)
         .def_rw("target_cbits",  &Block::target_cbits);
 
-    // Builder API.  Each gate binds a scalar form and a bulk form, which takes
-    // a list of the scalar form's arguments and emits all gates in one
-    // nanobind dispatch.  Both forms name their first argument alike, and the
-    // names match the Python blocks' overrides (qarp/blocks/_block.py).
+    // Builder API: a scalar form, and a bulk form emitting a list of them in one
+    // dispatch.  Both name their first argument alike, matching the Python
+    // blocks' overrides (qarp/blocks/_block.py).
     using Gate1 = Block& (Block::*)(uint32_t);
     using Gate1P = Block& (Block::*)(uint32_t, Param);
     using Gate2 = Block& (Block::*)(uint32_t, uint32_t);

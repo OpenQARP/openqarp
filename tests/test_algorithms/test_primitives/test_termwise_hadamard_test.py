@@ -67,7 +67,9 @@ def test_validate_operator_required():
 
 
 def test_validate_operator_wrong_type():
-    with pytest.raises(TypeError, match="operator must be Block, list of Blocks, or QubitOperator"):
+    with pytest.raises(
+        TypeError, match="operator must be Block, sequence of Blocks, or QubitOperator"
+    ):
         TermwiseHadamardTest(operator=5, ket=_ket()).build()
 
 

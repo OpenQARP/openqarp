@@ -87,13 +87,17 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   otherwise conflict with it across them.
 - **`qarp` typed for its users.**  `qarp` ships no `py.typed`, so user code
   sees it untyped.  Running mypy over the example notebooks and the docs
-  snippets finds three gaps to close before it does: a list of Python blocks
+  snippets finds five gaps to close before it does: a list of Python blocks
   of different kinds infers as `list[_BlockMixin]`, which a
   `Sequence[QarpBlock]` parameter rejects, so the six classes need one
   shared typing base; `symbols` is `Optional`, so `len(block.symbols)` fails
   in 22 notebook cells and 3 docs snippets, and making it always a tuple
-  changes `symbols is None` checks; and `PreparesKnownState`'s members are
-  attached by `setattr`, so mypy sees none of them on the state blocks.
+  changes `symbols is None` checks; `PreparesKnownState`'s members are
+  attached by `setattr`, so mypy sees none of them on the state blocks;
+  `run()` returns `PrimitiveResult`, `float | complex | SamplingDistribution`,
+  so 45 notebook and docs sites must narrow a result before reading it, which
+  a return typed by primitive kind would remove; and a `MonteCarlo` walker's
+  `state_data` is `np.ndarray | AnyBlock`, so 3 notebook cells must narrow it.
 - **`Sampler(postselect=PostSelection(...))`.**  Applying post-selection
   inside `Sampler.run()` waited on a result type that could carry
   `success_rate` without breaking the dict return; `SamplingDistribution`

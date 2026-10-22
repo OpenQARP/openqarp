@@ -346,10 +346,12 @@ The README roadmap moves this work from the window with no public surface change
 
 **Conventions.**  §15 gets a bullet of its own: a commit that changes a binding also
 regenerates `qarpx.pyi`, a wrong or vague type is fixed in the binding, and the pattern file
-holds only what nanobind cannot express and values that vary by build.  §13 records that every block has `is_built` as a property, that
-`build()` returns the block, and that a composite takes no gates of its own.  It also defines
-`QarpBlock` beside `AnyBlock`: which of the two a parameter takes depends on whether it reads
-members only the Python blocks have.  Both edits come first, before the code they govern.
+holds only what nanobind cannot express and values that vary by build.  §13 records that
+every block has `is_built` as a property, that `build()` returns the block, and that a block
+that holds other blocks (composite, controlled, conditional) takes no gates of its own.  It
+also defines `QarpBlock` beside `AnyBlock`: which of the two a parameter takes depends on
+whether it reads members only the Python blocks have.  Both edits come first, before the
+code they govern.
 
 ### Decisions
 
@@ -461,9 +463,9 @@ deviation.
 |---|---|---|
 | `generate_stubs.py --check` passes in a subprocess under Python 3.12; under `CI`, a Python mismatch or missing generator fails | the built module, read by the pinned generator | `tests/test_stubs.py` |
 | Every extra that lists `nanobind` pins the CMake `GIT_TAG` | `cpp/libqarpx/CMakeLists.txt` | `tests/test_stubs.py` |
-| Generated from the stub: every `Block` method is called on a raw and on a Python block by keyword, with a float and a `Param` for each `Param \| float` argument, and runs; each of the 40 single-gate builders appends one command with the stub's gate, qubits in argument order and parameter count | the runtime, and the stub's argument order | `tests/test_stubs.py` |
+| Generated from the stub: every `Block` method is called on a raw and on a Python block by keyword, with a float and a `Param` for each `Param \| float` argument, and runs; each of the 40 single-gate builders appends one command with the stub's gate, qubits in argument order and parameter count; the table holds every gate builder | the runtime, and the stub's argument order | `tests/test_stubs.py` |
 | The generator refuses another Python, nanobind version, ABI or checkout, and a pattern that matches nothing; `--check` fails on a stale stub and leaves it | each guard's message | `tests/test_stubs.py` |
-| mypy snippets through `mypy.api.run` give the expected error codes: a wrong argument type rejected, `isinstance(x, QarpBlock)` narrowing, `ConditionalBlock` with neither body rejected; the known false rejections (an `np.int64` qubit, `nb::dynamic_attr` attributes) are listed | each snippet is also run, and mypy's verdict matches the runtime's | `tests/test_stubs.py` |
+| mypy snippets through `mypy.api.run` give the expected error codes: a wrong argument type rejected, `isinstance(x, QarpBlock)` narrowing, `ConditionalBlock` with neither body rejected, a builder chain on a Python block keeping its type, a list of Python blocks where a sequence of blocks is taken, a list `initial_parameters`, literal dicts for the sparse-state, multi-ONV and QROM blocks, and `CapabilityError.command`; the known false rejections (an `np.int64` qubit, `nb::dynamic_attr` attributes) are listed | each snippet is also run, and mypy's verdict matches the runtime's | `tests/test_stubs.py` |
 | `qarp/` type-checks with the stub, `check_untyped_defs` and `warn_unused_ignores`, `tests/` with the stub, and the stub itself has no errors | mypy over the code, with the stub on `mypy_path` | CI `mypy` job |
 | mypy run from a temporary directory against the installed wheel reveals `qx.SimpleBlock(1).n_qubits` as `int` | the binding's C++ type | `ci.yml` `mypy` job |
 | `is_built` is `False` on a fresh raw block and `True` after `build()`; `build()` returns the same object | the build lifecycle | `tests/test_blocks/test_block.py` |
@@ -495,6 +497,9 @@ deviation.
 | `qx.__with_symengine__` equals whether `QubitOperator("X0", Symbol("a"))` constructs | the build's actual behaviour | `test_symbolic_coefficients.py` |
 | `op += Symbol("a")` rebinds `op`, and `hash(op)` raises `TypeError` | today's runtime behaviour | `test_qubit_operator.py` |
 | mypy rejects `VQE(op, raw_block)` and accepts `VQE(op, CompositeBlock([raw_block]))`, `VQE(op, hb \| hb)` and `VQD(op, kets, [])` for a built Python block `hb` and `kets = [hb]`; each call is run, and only the first fails | the runtime | `tests/test_stubs.py` |
+| `VQA` with a `Sampler` primitive raises `TypeError` naming an expectation-valued primitive | the exception type `float()` raised on a distribution | `test_vqa.py` |
+| `bravyi_kitaev` on one operator and on a list, `qubit_operator_coo` and `fermion_operator_coo` raise `TypeError` at `n_qubits=1.5` | as `sparse_matrix`; `int \| None` in the stub | `test_qubit_operator.py` |
+| `TermwiseHadamardTest` given a tuple of two operator blocks holds them as a list and builds | the list it was given | `test_termwise_hadamard_test.py` |
 
 ## Phases
 
@@ -684,7 +689,7 @@ section and folded back here before merge; silent drift is the violation.
 - **Gate 2 follow-up, `_real_part`.**  A `Sampler` passed as a variational algorithm's
   primitive reaches `_real_part`, so its `SamplingDistribution` check raises `TypeError`, as
   `float()` did, with a message naming the cause, in place of an `assert`.  Test in
-  `test_vqa.py`.
+  `test_vqa.py`; Test plan updated.
 - **Gate 2 follow-up, `Param.approx_equal`.**  Its `nb::sig` is written by hand beside its
   `nb::arg` list, since the argument helper renders no defaults: the one `Param | float` site
   outside the helper, with `cu`'s `gamma` the other place that limit shows.
@@ -698,24 +703,28 @@ section and folded back here before merge; silent drift is the violation.
   builders' signatures say `typing.Self`, not `qarpx.Block`, since each returns the block it
   was called on; the three synthesis builders go through the argument helper for it.  The
   builder table in `test_stubs.py` selects overloads by `Self` and checks that it holds every
-  gate builder; a mypy snippet pins the chain.  Design and the API sketch updated.
+  gate builder; a mypy snippet pins the chain.  Design, the API sketch and the Test plan
+  updated.
 - **Stub review, operator kernels.**  `bravyi_kitaev`, `qubit_operator_coo` and
   `fermion_operator_coo` take `std::optional<int>`, so the stub says `int | None` and a float
-  raises `TypeError`, not `std::bad_cast`.  Tests in `test_qubit_operator.py`.
+  raises `TypeError`, not `std::bad_cast`.  Tests in `test_qubit_operator.py`; Test plan
+  updated.
 - **Stub review, `QarpBlock` sites and sequences.**  `QITE.get_final_state_block` returns
   `QarpBlock`, and `AdaptVQE`'s and `AdaptVQD`'s are annotated the same; `Grover`,
   `AmplitudeAmplification` and `AmplitudeEstimation` type `block` with the class they build;
   the multi-controlled helpers take `QarpBlock`.  `AdaptVQD.orthogonal_states`,
   `TermwiseSWAPTest`'s bra and `TermwiseHadamardTest`'s operator take a `Sequence`, and
-  `TermwiseHadamardTest` turns a sequence into a list, so a tuple is accepted.
+  `TermwiseHadamardTest` turns a sequence into a list, so a tuple is accepted; its error
+  message and docstring say "sequence".  Tests in `test_termwise_hadamard_test.py` and
+  `test_stubs.py`; Test plan updated.
 - **Stub review, `CapabilityError.command`.**  Declared on the class, `None` by default, so
   the emitter's attached command type-checks and an engine-side rejection reads `None`.
 - **Stub review, `qarp_philosophy.rst`.**  The `QarpBlock` example reads
   `len(block.symbols or ())`, since `symbols` is `None` before build.  Making it always a
-  tuple, and two more gaps mypy finds in the notebooks, go to `to_do.md`.
+  tuple, and four more gaps mypy finds in the notebooks, go to `to_do.md`.
 - **Stub review, parameters the tutorials fill with literals.**  `initial_parameters` on
   `VQA`, `VQE`, `QAOA`, `SSVQE`, `VFF` and `ProjectedVQE` also takes a `Sequence[float]`.
   `QROMBlock`'s `data` takes a `Mapping`, and `SparseStateBlock`'s and
   `MultiONVStateBlock`'s coefficients a `Mapping` keyed by a type variable bound to
   `tuple[int, ...]`, since a mapping is invariant in its key and a literal's keys type as
-  fixed-length tuples.  mypy snippets in `test_stubs.py` pin each.
+  fixed-length tuples.  mypy snippets in `test_stubs.py` pin each; Test plan updated.
