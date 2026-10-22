@@ -408,220 +408,258 @@ Block& Block::barrier(std::vector<uint32_t> qs) {
 
 // ── Variadic / bulk builder overloads ──
 //
-// Each pre-reserves `gate_buffer().reserve(commands_.size() + N)` and emplaces
-// commands directly in a tight loop.  The Python tax (per-call nanobind
-// crossing) collapses to a single dispatch regardless of N.
+// Each checks `gate_buffer()` once, pre-reserves for N commands and emplaces
+// them in a tight loop.  The Python tax (per-call nanobind crossing)
+// collapses to a single dispatch regardless of N.
 
 Block& Block::h(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::H, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::H, q);
     return *this;
 }
 Block& Block::x(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::X, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::X, q);
     return *this;
 }
 Block& Block::y(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::Y, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::Y, q);
     return *this;
 }
 Block& Block::z(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::Z, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::Z, q);
     return *this;
 }
 Block& Block::s(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::S, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::S, q);
     return *this;
 }
 Block& Block::sdg(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::Sdg, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::Sdg, q);
     return *this;
 }
 Block& Block::t(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::T, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::T, q);
     return *this;
 }
 Block& Block::tdg(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::Tdg, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::Tdg, q);
     return *this;
 }
 Block& Block::sx(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::SX, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::SX, q);
     return *this;
 }
 Block& Block::sxdg(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::SXdg, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::SXdg, q);
     return *this;
 }
 Block& Block::id(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
-    for (uint32_t q : qubits) gate_buffer().emplace_back(GateType::Id, q);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
+    for (uint32_t q : qubits) buf.emplace_back(GateType::Id, q);
     return *this;
 }
 
 Block& Block::rx(const std::vector<std::pair<uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [q, angle] : gates) gate_buffer().emplace_back(GateType::Rx, q, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [q, angle] : gates) buf.emplace_back(GateType::Rx, q, angle);
     return *this;
 }
 Block& Block::ry(const std::vector<std::pair<uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [q, angle] : gates) gate_buffer().emplace_back(GateType::Ry, q, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [q, angle] : gates) buf.emplace_back(GateType::Ry, q, angle);
     return *this;
 }
 Block& Block::rz(const std::vector<std::pair<uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [q, angle] : gates) gate_buffer().emplace_back(GateType::Rz, q, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [q, angle] : gates) buf.emplace_back(GateType::Rz, q, angle);
     return *this;
 }
 Block& Block::p(const std::vector<std::pair<uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [q, angle] : gates) gate_buffer().emplace_back(GateType::P, q, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [q, angle] : gates) buf.emplace_back(GateType::P, q, angle);
     return *this;
 }
 
 Block& Block::cx(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CX, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CX, c, t);
     return *this;
 }
 Block& Block::cy(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CY, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CY, c, t);
     return *this;
 }
 Block& Block::cz(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CZ, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CZ, c, t);
     return *this;
 }
 Block& Block::swap(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [a, b] : pairs) gate_buffer().emplace_back(GateType::SWAP, a, b);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [a, b] : pairs) buf.emplace_back(GateType::SWAP, a, b);
     return *this;
 }
 Block& Block::ecr(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [a, b] : pairs) gate_buffer().emplace_back(GateType::ECR, a, b);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [a, b] : pairs) buf.emplace_back(GateType::ECR, a, b);
     return *this;
 }
 Block& Block::iswap(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [a, b] : pairs) gate_buffer().emplace_back(GateType::iSWAP, a, b);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [a, b] : pairs) buf.emplace_back(GateType::iSWAP, a, b);
     return *this;
 }
 Block& Block::iswapdg(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [a, b] : pairs) gate_buffer().emplace_back(GateType::iSWAPdg, a, b);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [a, b] : pairs) buf.emplace_back(GateType::iSWAPdg, a, b);
     return *this;
 }
 Block& Block::ch(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CH, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CH, c, t);
     return *this;
 }
 Block& Block::cs(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CS, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CS, c, t);
     return *this;
 }
 Block& Block::csdg(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CSdg, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CSdg, c, t);
     return *this;
 }
 Block& Block::csx(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CSX, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CSX, c, t);
     return *this;
 }
 Block& Block::csxdg(const std::vector<std::pair<uint32_t, uint32_t>>& pairs) {
-    gate_buffer().reserve(commands_.size() + pairs.size());
-    for (const auto& [c, t] : pairs) gate_buffer().emplace_back(GateType::CSXdg, c, t);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + pairs.size());
+    for (const auto& [c, t] : pairs) buf.emplace_back(GateType::CSXdg, c, t);
     return *this;
 }
 
 Block& Block::crx(const std::vector<std::tuple<uint32_t, uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [c, t, angle] : gates) gate_buffer().emplace_back(GateType::CRx, c, t, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [c, t, angle] : gates) buf.emplace_back(GateType::CRx, c, t, angle);
     return *this;
 }
 Block& Block::cry(const std::vector<std::tuple<uint32_t, uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [c, t, angle] : gates) gate_buffer().emplace_back(GateType::CRy, c, t, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [c, t, angle] : gates) buf.emplace_back(GateType::CRy, c, t, angle);
     return *this;
 }
 Block& Block::crz(const std::vector<std::tuple<uint32_t, uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [c, t, angle] : gates) gate_buffer().emplace_back(GateType::CRz, c, t, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [c, t, angle] : gates) buf.emplace_back(GateType::CRz, c, t, angle);
     return *this;
 }
 Block& Block::cp(const std::vector<std::tuple<uint32_t, uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [c, t, angle] : gates) gate_buffer().emplace_back(GateType::CP, c, t, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [c, t, angle] : gates) buf.emplace_back(GateType::CP, c, t, angle);
     return *this;
 }
 Block& Block::rzz(const std::vector<std::tuple<uint32_t, uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [a, b, angle] : gates) gate_buffer().emplace_back(GateType::RZZ, a, b, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [a, b, angle] : gates) buf.emplace_back(GateType::RZZ, a, b, angle);
     return *this;
 }
 Block& Block::rxx(const std::vector<std::tuple<uint32_t, uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [a, b, angle] : gates) gate_buffer().emplace_back(GateType::RXX, a, b, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [a, b, angle] : gates) buf.emplace_back(GateType::RXX, a, b, angle);
     return *this;
 }
 Block& Block::ryy(const std::vector<std::tuple<uint32_t, uint32_t, Param>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
-    for (const auto& [a, b, angle] : gates) gate_buffer().emplace_back(GateType::RYY, a, b, angle);
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
+    for (const auto& [a, b, angle] : gates) buf.emplace_back(GateType::RYY, a, b, angle);
     return *this;
 }
 
 Block& Block::ccx(const std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>& triples) {
-    gate_buffer().reserve(commands_.size() + triples.size());
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + triples.size());
     for (const auto& [c0, c1, t] : triples) {
-        gate_buffer().emplace_back(GateType::CCX,
+        buf.emplace_back(GateType::CCX,
             SmallVector<uint32_t, 2>{c0, c1, t});
     }
     return *this;
 }
 Block& Block::cswap(const std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>& triples) {
-    gate_buffer().reserve(commands_.size() + triples.size());
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + triples.size());
     for (const auto& [c, q0, q1] : triples) {
-        gate_buffer().emplace_back(GateType::CSWAP,
+        buf.emplace_back(GateType::CSWAP,
             SmallVector<uint32_t, 2>{c, q0, q1});
     }
     return *this;
 }
 
 Block& Block::measure(const std::vector<std::pair<uint32_t, uint32_t>>& gates) {
-    gate_buffer().reserve(commands_.size() + gates.size());
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + gates.size());
     for (const auto& [q, c] : gates) {
         Command cmd;
         cmd.gate = GateType::Measure;
         cmd.qubits = {q};
         cmd.cbits = {c};
-        gate_buffer().push_back(std::move(cmd));
+        buf.push_back(std::move(cmd));
     }
     return *this;
 }
 
 Block& Block::reset(const std::vector<uint32_t>& qubits) {
-    gate_buffer().reserve(commands_.size() + qubits.size());
+    auto& buf = gate_buffer();
+    buf.reserve(buf.size() + qubits.size());
     for (uint32_t q : qubits) {
         Command cmd;
         cmd.gate = GateType::Reset;
         cmd.qubits = {q};
-        gate_buffer().push_back(std::move(cmd));
+        buf.push_back(std::move(cmd));
     }
     return *this;
 }

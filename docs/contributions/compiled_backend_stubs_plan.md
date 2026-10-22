@@ -196,12 +196,12 @@ that stubgen emits the right type:
 These are binding changes, so `QARPX_ABI_VERSION` and `EXPECTED_QARPX_ABI` move from 14 to 15
 together (§15).
 
-**Blocks that hold blocks take no gates of their own.**  A gate method or `set_commands`
-called on a `CompositeBlock`, `ControlledBlock` or `ConditionalBlock` raises `TypeError`, in
-C++ so raw blocks raise too: `Block`'s append path and `set_commands` throw a new error from
-`core/errors.h` when the block's own buffer never executes (`accepts_gates()`), and the
-binding translates it.  Any library site that adds a gate to such a block is a bug of the same
-kind and is fixed in the same commit.
+**Blocks that hold blocks take no gates of their own.**  A gate method, or `set_commands`
+with any command, called on a `CompositeBlock`, `ControlledBlock` or `ConditionalBlock` raises
+`TypeError`, in C++ so raw blocks raise too: `Block`'s append path and a non-empty
+`set_commands` throw a new error from `core/errors.h` when the block's own buffer never
+executes (`accepts_gates()`), and the binding translates it.  Any library site that adds a
+gate to such a block is a bug of the same kind and is fixed in the same commit.
 
 **Renamed attributes.**  The three attributes that hide gate methods get public names that do
 not collide: `state_preparation` becomes `state_preparation_block` on both amplitude blocks,
@@ -337,8 +337,9 @@ The runtime changes, each listed in the CHANGELOG with a one-line migration:
 The README roadmap moves this work from the window with no public surface change into the
 0.2 cycle.
 
-**Conventions.**  §15's ABI bullet gains one rule: a commit that changes a binding also
-regenerates `qarpx.pyi`.  §13 records that every block has `is_built` as a property, that
+**Conventions.**  §15 gets a bullet of its own: a commit that changes a binding also
+regenerates `qarpx.pyi`, a wrong or vague type is fixed in the binding, and the pattern file
+holds only what nanobind cannot express and values that vary by build.  §13 records that every block has `is_built` as a property, that
 `build()` returns the block, and that a composite takes no gates of its own.  It also defines
 `QarpBlock` beside `AnyBlock`: which of the two a parameter takes depends on whether it reads
 members only the Python blocks have.  Both edits come first, before the code they govern.
@@ -671,5 +672,18 @@ section and folded back here before merge; silent drift is the violation.
   argument helper has no defaults; the CHANGELOG says so.  `compile_for_device` raises
   `TypeError` on a wrong argument count again.  The absorber docstrings name the tuple they
   return.  The Python gate methods' angles are effectively `Any` to mypy; Design says so.  The
-  `mypy.ini` note gives its baseline: at `ca09f06` on macOS, 65 errors, 221 with
-  `check_untyped_defs`, and 55 unused ignores.
+  `mypy.ini` note gives its baseline: at `ca09f06` on macOS, each flag on its own, 65 errors,
+  221 with `check_untyped_defs`, and 55 unused ignores.
+- **Gate 2 follow-up, `_real_part`.**  A `Sampler` passed as a variational algorithm's
+  primitive reaches `_real_part`, so its `SamplingDistribution` check raises `TypeError`, as
+  `float()` did, with a message naming the cause, in place of an `assert`.  Test in
+  `test_vqa.py`.
+- **Gate 2 follow-up, `Param.approx_equal`.**  Its `nb::sig` is written by hand beside its
+  `nb::arg` list, since the argument helper renders no defaults: the one `Param | float` site
+  outside the helper, with `cu`'s `gamma` the other place that limit shows.
+- **Gate 2 follow-up, §15.**  The stub rule is a bullet of its own, and it also carries two
+  rules from Design: a wrong or vague type is fixed in the binding, not the stub, and the
+  pattern file holds only what nanobind cannot express and values that vary by build.
+  Design updated.
+- **Gate 2 follow-up, bulk builders.**  Each bulk overload in `block.cpp` fetches
+  `gate_buffer()` once instead of per command, and the section comment says so.

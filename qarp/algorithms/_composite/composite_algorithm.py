@@ -144,7 +144,11 @@ class CompositeAlgorithm(ABC):
     @staticmethod
     def _real_part(value: PrimitiveResult) -> float:
         """The real part of an expectation-valued primitive's result."""
-        assert not isinstance(value, SamplingDistribution)
+        if isinstance(value, SamplingDistribution):
+            raise TypeError(
+                "a variational objective needs an expectation-valued primitive; "
+                "Sampler returns a distribution"
+            )
         return float(value.real)
 
     def _minimize(

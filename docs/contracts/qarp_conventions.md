@@ -511,8 +511,8 @@ above.
   a `QarpBlock` parameter by wrapping, `CompositeBlock([raw_block])`.
 - **One build lifecycle on every block.** `is_built` is a read-only property, raw or Python, and
   `build()` returns the block. A block that holds other blocks (composite, controlled,
-  conditional) takes no gates of its own: a gate method or `set_commands` called on one raises
-  `TypeError`, since only the blocks it holds run.
+  conditional) takes no gates of its own: a gate method, or `set_commands` with any command,
+  called on one raises `TypeError`, since only the blocks it holds run.
 - **Pending ops apply at the `flatten()` boundary.** `substitute` / `replace` / `dagger` are
   deferred and applied when the block is flattened, so the C++ command buffer stays canonical and
   `build()` is idempotent. `dagger()` preserves the subclass identity. Corollary: a C++ container

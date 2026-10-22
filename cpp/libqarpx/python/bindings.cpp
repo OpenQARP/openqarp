@@ -447,6 +447,7 @@ NB_MODULE(qarpx, m) {
         .def("substitute", &Param::substitute, "values"_a)
         .def("rename_symbols", &Param::rename_symbols, "mapping"_a)
         .def("evaluate", &Param::evaluate, "values"_a)
+        // A hand-written nb::sig: the argument helper renders no defaults.
         .def("approx_equal", &Param::approx_equal, "other"_a, "atol"_a = 1e-9,
              nb::sig("def approx_equal(self, other: qarpx.Param | float, "
                      "atol: float = 1e-09) -> bool"))

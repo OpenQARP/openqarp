@@ -85,9 +85,10 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `is_built` is a read-only property on raw `qx` blocks, as on the Python
   blocks.  `b.is_built()` and `qx.Block.is_built(b)` become `b.is_built`.
 - `build()` on a raw `qx` block returns the block instead of `None`.
-- A gate method or `set_commands` called on a block that holds other
-  blocks (composite, controlled, conditional) raises `TypeError`; the gate
-  was recorded and never run.  Add it to a block it holds instead.
+- A gate method, or `set_commands` with any command, called on a block
+  that holds other blocks (composite, controlled, conditional) raises
+  `TypeError`; the gate was recorded and never run.  Add it to a block it
+  holds instead.
 - Three attributes no longer hide gate methods of the same name:
   `AmplitudeAmplificationBlock.state_preparation` and
   `AmplitudeEstimationBlock.state_preparation` are `state_preparation_block`,
@@ -165,10 +166,11 @@ All notable changes to OpenQARP are recorded here. The format follows
 - A raw `qx.ControlledBlock` plots as a controlled box; it plotted as a
   plain box.
 - `MirrorTest` daggers a raw bra that isn't built; it raised.
-- Circuit cutting keeps a gate on three or more qubits whole: it rebuilt
-  each kept gate from at most two qubits, so a CCZ became a CZ carrying an
-  angle.  A gate across the cut on three or more qubits raises, as a
-  two-qubit one does.
+- `Reconstructer.reconstruct_filter_qubits` keeps a gate on three or more
+  qubits whole: it rebuilt each kept gate from at most two qubits, so a CCZ
+  became a CZ carrying an angle.  A gate on three or more qubits across the
+  boundary raises, as a two-qubit one does; it was dropped.  The cutters
+  still reject gates on more than two qubits.
 
 ## [0.1.1] - 2026-09-25
 
