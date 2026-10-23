@@ -54,7 +54,7 @@ intersphinx_mapping = {
 
 html_theme = "furo"
 html_static_path = ["_static"]
-html_baseurl = "https://openqarp.github.io/openqarp/"
+html_baseurl = "https://docs.openqarp.com/"
 # custom.css carries the landing page's tokens onto Furo's role variables and
 # loads Geist itself; theme-sync.js keeps the two sites' theme choice as one.
 html_css_files = ["custom.css"]
