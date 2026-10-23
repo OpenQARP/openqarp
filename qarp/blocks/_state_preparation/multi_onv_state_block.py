@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional, Tuple
+from collections.abc import Mapping as MappingABC
+from typing import Dict, List, Optional, Tuple, TypeVar
 
 import numpy as np
 
@@ -7,12 +8,15 @@ from .. import SimpleBlock
 from .._prepares_known_state import prepares_known_state
 from .sparse_state_block import _prepare_sparse_circuit
 
+# A bound key type lets a dict whose keys type as fixed-length tuples through.
+_ONV = TypeVar("_ONV", bound=Tuple[int, ...])
+
 
 @prepares_known_state
 class MultiONVStateBlock(SimpleBlock):
     def __init__(
         self,
-        onv_coefficients: Dict[Tuple[int, ...], complex],
+        onv_coefficients: MappingABC[_ONV, complex],
         mapping: Optional[Mapping] = None,
         target_qubits: Optional[List[int]] = None,
         name: str = "MultiONV",
@@ -57,14 +61,18 @@ class MultiONVStateBlock(SimpleBlock):
         if len(lengths) != 1:
             raise ValueError("All occupation-number vectors must have the same length.")
         n_qubits = lengths.pop()
-        for onv in onv_coefficients:
-            if not all(bit in (0, 1) for bit in onv):
-                raise ValueError(f"onv {onv} contains invalid values; only 0 and 1 are allowed.")
+        for occupation in onv_coefficients:
+            if not all(bit in (0, 1) for bit in occupation):
+                raise ValueError(
+                    f"onv {occupation} contains invalid values; only 0 and 1 are allowed."
+                )
 
         if mapping is None:
             mapping = JordanWigner()
         self.mapping = mapping
-        self.onv_coefficients: Dict[Tuple[int, ...], complex] = dict(onv_coefficients)
+        self.onv_coefficients: Dict[Tuple[int, ...], complex] = {
+            occupation: coeff for occupation, coeff in onv_coefficients.items()
+        }
 
         mapped: Dict[Tuple[int, ...], complex] = {}
         for onv, coeff in self.onv_coefficients.items():

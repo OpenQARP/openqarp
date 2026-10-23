@@ -672,3 +672,8 @@ def test_unrouted_device_reports_identity_for_both_maps():
     compiled = compile_for_device(block, Device(2))
     assert list(compiled.initial_logical_to_physical) == [0, 1]
     assert list(compiled.final_logical_to_physical) == [0, 1]
+
+
+def test_compile_for_device_rejects_a_wrong_argument_count():
+    with pytest.raises(TypeError, match="got 1 positional"):
+        compile_for_device([])

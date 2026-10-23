@@ -94,7 +94,7 @@ class AmplitudeAmplification(CompositeAlgorithm):
         self.n_qubits = n_qubits
         self.good_states = validated_good_states
 
-        self.block: Optional[AnyBlock] = None
+        self.block: Optional[CompositeBlock] = None
         self.distribution: Optional[SamplingDictionary] = None
         self.success_probability: Optional[float] = None
 

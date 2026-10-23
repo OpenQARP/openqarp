@@ -27,6 +27,7 @@
 #include "qarpx/emit/emitter.h"
 #include "qarpx/synthesis/pauli_exponential.h"
 
+#include <string>
 #include <tuple>
 #include <utility>
 
@@ -102,6 +103,80 @@ table_to_numpy(std::vector<uint64_t>&& v) {
     return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(heap->data(), 1, shape, owner);
 }
 
+// ── Signatures shown to type checkers ──
+//
+// stubgen misses nb::implicitly_convertible and names unnamed arguments arg0.
+// def_typed emits nb::arg and nb::sig from one list of names and fully
+// qualified types, so the runtime keywords and the displayed signature agree.
+struct Arg {
+    const char* name;
+    const char* type;
+};
+
+constexpr const char* kParamLike = "qarpx.Param | float";
+
+template <std::size_t N>
+static std::string signature_text(const char* name, bool method, const Arg (&args)[N],
+                                  const char* ret) {
+    std::string s = std::string("def ") + name + "(";
+    bool first = !method;
+    if (method) s += "self";
+    for (const Arg& a : args) {
+        if (!first) s += ", ";
+        first = false;
+        s += a.name;
+        s += ": ";
+        s += a.type;
+    }
+    return s + ") -> " + ret;
+}
+
+template <typename Target, typename Fn, std::size_t N, std::size_t... I, typename... Extra>
+static void def_typed_impl(Target& target, bool method, const char* name, Fn&& fn,
+                           const Arg (&args)[N], const char* ret, std::index_sequence<I...>,
+                           const Extra&... extra) {
+    const std::string sig = signature_text(name, method, args, ret);  // nanobind copies it
+    target.def(name, std::forward<Fn>(fn), nb::sig(sig.c_str()), nb::arg(args[I].name)...,
+               extra...);
+}
+
+/// A method of `cls` whose parameters are named and typed by `args`.
+template <typename T, typename... Opts, typename Fn, std::size_t N, typename... Extra>
+static void def_typed(nb::class_<T, Opts...>& cls, const char* name, Fn&& fn,
+                      const Arg (&args)[N], const char* ret, const Extra&... extra) {
+    def_typed_impl(cls, true, name, std::forward<Fn>(fn), args, ret,
+                   std::make_index_sequence<N>{}, extra...);
+}
+
+/// A module-level function whose parameters are named and typed by `args`.
+template <typename Fn, std::size_t N, typename... Extra>
+static void def_typed(nb::module_& m, const char* name, Fn&& fn, const Arg (&args)[N],
+                      const char* ret, const Extra&... extra) {
+    def_typed_impl(m, false, name, std::forward<Fn>(fn), args, ret,
+                   std::make_index_sequence<N>{}, extra...);
+}
+
+// The Python constructor forms of Command build gates of fixed arity.  MCZ and
+// Barrier vary only in their qubit count, so only their parameter count is checked.
+static void check_command_shape(GateType g, std::size_t n_qubits, std::size_t n_params) {
+    switch (g) {
+        case GateType::MCZ: case GateType::Barrier:
+            if (n_params != 0)
+                throw std::invalid_argument(std::string(gate_name(g)) + " takes no parameter");
+            return;
+        case GateType::BranchBegin: case GateType::BranchElse: case GateType::BranchEnd:
+        case GateType::Custom:
+            return;
+        default:
+            break;
+    }
+    if (n_qubits != gate_num_qubits(g) || n_params != gate_num_params(g))
+        throw std::invalid_argument(
+            std::string(gate_name(g)) + " takes " + std::to_string(gate_num_qubits(g)) +
+            " qubit(s) and " + std::to_string(gate_num_params(g)) + " parameter(s), not " +
+            std::to_string(n_qubits) + " and " + std::to_string(n_params));
+}
+
 // __deepcopy__ for raw qarpx blocks, defined here (not monkeypatched from
 // qarp.blocks) so `copy.deepcopy` works on C++-created blocks regardless of
 // Python import order.  Children/inner/bodies recurse through Python's
@@ -145,9 +220,9 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
         if (!then_body.is_none()) then_body = py_deepcopy(then_body, memo);
         if (!else_body.is_none()) else_body = py_deepcopy(else_body, memo);
         qx.attr("ConditionalBlock").attr("__init__")(
-            result, src.attr("condition_cbits"),
-            src.attr("condition_values"), then_body, else_body,
-            src.attr("name"));
+            result, src.attr("condition_cbits"), src.attr("condition_values"),
+            "then_body"_a = then_body, "else_body"_a = else_body,
+            "name"_a = src.attr("name"));
     } else {
         qx.attr("SimpleBlock").attr("__init__")(
             result, src.attr("n_qubits"), src.attr("name"));
@@ -162,7 +237,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 14
+#define QARPX_ABI_VERSION 15
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -194,7 +269,8 @@ NB_MODULE(qarpx, m) {
     // ── Exception taxonomy at the Python boundary ──
     // capability_error → qarp.errors.CapabilityError (ValueError fallback if
     // qarp is not importable), with the offending Command attached as the
-    // exception's `command` attribute.  sdk_missing_error → ImportError.
+    // exception's `command` attribute.  sdk_missing_error → ImportError,
+    // composite_gate_error → TypeError.
     // Anything else falls through to nanobind's default translation
     // (std::runtime_error → RuntimeError), so parse/internal errors keep
     // their type.
@@ -204,6 +280,8 @@ NB_MODULE(qarpx, m) {
                 std::rethrow_exception(p);
             } catch (const qarpx::sdk_missing_error& e) {
                 PyErr_SetString(PyExc_ImportError, e.what());
+            } catch (const qarpx::composite_gate_error& e) {
+                PyErr_SetString(PyExc_TypeError, e.what());
             } catch (const qarpx::capability_error& e) {
                 nb::object cls;
                 try {
@@ -228,6 +306,13 @@ NB_MODULE(qarpx, m) {
     // build; QARPX_SOURCE_DIR is baked in by python/CMakeLists.txt).
     m.attr("__abi_version__") = QARPX_ABI_VERSION;
     m.attr("__source_dir__") = QARPX_SOURCE_DIR;
+    // Whether the operator classes take symbolic coefficients.  Their
+    // SymEngine methods are bound on every build and raise without it.
+#ifdef QARP_WITH_SYMENGINE
+    m.attr("__with_symengine__") = true;
+#else
+    m.attr("__with_symengine__") = false;
+#endif
 
     // Install the Python reference-counting handlers for Block's intrusive
     // counter (Block : nb::intrusive_base).  Once a block is handed to Python,
@@ -344,29 +429,39 @@ NB_MODULE(qarpx, m) {
           "if the input is not pairwise commuting.");
 
     // ── Param ──
-    nb::class_<Param>(m, "Param")
-        .def(nb::init<double>())
-        .def_static("symbol", &Param::symbol)
+    auto param_cls = nb::class_<Param>(m, "Param");
+    def_typed(param_cls, "__init__",
+              [](Param* self, double value) { new (self) Param(value); },
+              {Arg{"value", "float"}}, "None");
+    param_cls
+        .def_static("symbol", &Param::symbol, "name"_a)
         .def_static("linear", &Param::linear,
             "coeff"_a, "symbol_name"_a, "offset"_a = 0.0)
         .def("is_symbolic", &Param::is_symbolic)
         .def("is_concrete", &Param::is_concrete)
         .def("value", &Param::value)
         .def("free_symbols", &Param::free_symbols)
-        .def("substitute", &Param::substitute)
+        .def("substitute", &Param::substitute, "values"_a)
         .def("rename_symbols", &Param::rename_symbols, "mapping"_a)
-        .def("evaluate", &Param::evaluate)
-        .def("approx_equal", &Param::approx_equal, "other"_a, "atol"_a = 1e-9)
+        .def("evaluate", &Param::evaluate, "values"_a)
+        // A hand-written nb::sig: the argument helper renders no defaults.
+        .def("approx_equal", &Param::approx_equal, "other"_a, "atol"_a = 1e-9,
+             nb::sig("def approx_equal(self, other: qarpx.Param | float, "
+                     "atol: float = 1e-09) -> bool"))
         .def("__deepcopy__", [](const Param& p, nb::handle) { return Param(p); },
              "memo"_a)
-        .def(nb::self == nb::self)
-        .def(nb::self != nb::self)
+        .def(nb::self == nb::self, nb::sig("def __eq__(self, other: object, /) -> bool"))
+        .def(nb::self != nb::self, nb::sig("def __ne__(self, other: object, /) -> bool"))
         .def("__neg__", [](const Param& p) { return -p; })
-        .def("__add__", [](const Param& a, const Param& b) { return a + b; })
-        .def("__sub__", [](const Param& a, const Param& b) { return a - b; })
-        .def("__mul__", [](const Param& a, const Param& b) { return a * b; })
-        .def("__truediv__", [](const Param& a, const Param& b) { return a / b; })
         .def("__repr__", &Param::to_string);
+    def_typed(param_cls, "__add__", [](const Param& a, const Param& b) { return a + b; },
+              {Arg{"other", kParamLike}}, "qarpx.Param");
+    def_typed(param_cls, "__sub__", [](const Param& a, const Param& b) { return a - b; },
+              {Arg{"other", kParamLike}}, "qarpx.Param");
+    def_typed(param_cls, "__mul__", [](const Param& a, const Param& b) { return a * b; },
+              {Arg{"other", kParamLike}}, "qarpx.Param");
+    def_typed(param_cls, "__truediv__", [](const Param& a, const Param& b) { return a / b; },
+              {Arg{"other", kParamLike}}, "qarpx.Param");
 
     // Allow Python float / int to be passed wherever a Param is expected.
     // Without this nanobind's overload resolution gets confused once we have
@@ -375,24 +470,54 @@ NB_MODULE(qarpx, m) {
     nb::implicitly_convertible<int, Param>();
 
     // Convenience factory
-    m.def("symbol", &Param::symbol, "Create a symbolic parameter");
-    m.def("affine_coefficients", &affine_coefficients, "param"_a,
-        "{symbol: d(param)/d(symbol)} for every free symbol, verified affine; "
-        "raises CapabilityError otherwise.");
-    m.def("concrete", [](double v) { return Param(v); }, "Create a concrete parameter");
+    m.def("symbol", &Param::symbol, "name"_a, "Create a symbolic parameter");
+    def_typed(m, "affine_coefficients", &affine_coefficients,
+              {Arg{"param", kParamLike}}, "dict[str, float]",
+              "{symbol: d(param)/d(symbol)} for every free symbol, verified affine; "
+              "raises CapabilityError otherwise.");
+    m.def("concrete", [](double v) { return Param(v); }, "value"_a,
+          "Create a concrete parameter");
 
     // ── Command ──
-    nb::class_<Command>(m, "Command")
-        .def(nb::init<>())
-        .def(nb::init<GateType, uint32_t>())
-        .def(nb::init<GateType, uint32_t, Param>())
-        .def(nb::init<GateType, uint32_t, uint32_t>())
-        .def(nb::init<GateType, uint32_t, uint32_t, Param>())
+    //
+    // The integer forms are registered before the Param forms: nanobind tries
+    // every overload without conversion first, so a numpy integer, which
+    // matches only with conversion, would otherwise reach a Param form.
+    auto command_cls = nb::class_<Command>(m, "Command");
+    command_cls.def(nb::init<>());
+    def_typed(command_cls, "__init__",
+              [](Command* self, GateType g, uint32_t q) {
+                  check_command_shape(g, 1, 0);
+                  new (self) Command(g, q);
+              },
+              {Arg{"gate", "qarpx.GateType"}, Arg{"q", "int"}}, "None");
+    def_typed(command_cls, "__init__",
+              [](Command* self, GateType g, uint32_t q0, uint32_t q1) {
+                  check_command_shape(g, 2, 0);
+                  new (self) Command(g, q0, q1);
+              },
+              {Arg{"gate", "qarpx.GateType"}, Arg{"q0", "int"}, Arg{"q1", "int"}}, "None");
+    def_typed(command_cls, "__init__",
+              [](Command* self, GateType g, uint32_t q, Param p) {
+                  check_command_shape(g, 1, 1);
+                  new (self) Command(g, q, std::move(p));
+              },
+              {Arg{"gate", "qarpx.GateType"}, Arg{"q", "int"}, Arg{"param", kParamLike}},
+              "None");
+    def_typed(command_cls, "__init__",
+              [](Command* self, GateType g, uint32_t q0, uint32_t q1, Param p) {
+                  check_command_shape(g, 2, 1);
+                  new (self) Command(g, q0, q1, std::move(p));
+              },
+              {Arg{"gate", "qarpx.GateType"}, Arg{"q0", "int"}, Arg{"q1", "int"},
+               Arg{"param", kParamLike}},
+              "None");
+    command_cls
         .def_rw("gate", &Command::gate)
         // Structural equality (gate, qubits, params, cbits, conditions) —
         // without this Python `==` falls back to object identity.
-        .def("__eq__", [](const Command& a, const Command& b) { return a == b; })
-        .def("__ne__", [](const Command& a, const Command& b) { return a != b; })
+        .def(nb::self == nb::self, nb::sig("def __eq__(self, other: object, /) -> bool"))
+        .def(nb::self != nb::self, nb::sig("def __ne__(self, other: object, /) -> bool"))
         .def_prop_ro("qubits", [](const Command& c) {
             return std::vector<uint32_t>(c.qubits.begin(), c.qubits.end());
         })
@@ -410,12 +535,10 @@ NB_MODULE(qarpx, m) {
         })
         .def("is_parametric", &Command::is_parametric)
         .def("dagger", &Command::dagger)
-        .def("remap_qubits", &Command::remap_qubits)
-        .def("substitute", &Command::substitute)
+        .def("remap_qubits", &Command::remap_qubits, "mapping"_a)
+        .def("substitute", &Command::substitute, "values"_a)
         .def("rename_symbols", &Command::rename_symbols, "mapping"_a)
         .def("approx_equal", &Command::approx_equal, "other"_a, "atol"_a = 1e-9)
-        .def(nb::self == nb::self)
-        .def(nb::self != nb::self)
         .def("__repr__", &Command::to_string);
 
     // Batch substitution — keeps the per-command loop in C++.
@@ -487,173 +610,220 @@ NB_MODULE(qarpx, m) {
     // the same.  A block is then released as soon as both sides drop it, with
     // no reference cycle keeping it alive.  Subclasses inherit this annotation
     // automatically.
-    nb::class_<Block>(m, "Block", nb::dynamic_attr(),
+    auto block_cls = nb::class_<Block>(m, "Block", nb::dynamic_attr(),
         nb::intrusive_ptr<Block>(
-            [](Block *o, PyObject *po) noexcept { o->set_self_py(po); }))
-        .def("build", &Block::build)
-        .def("is_built", &Block::is_built)
+            [](Block *o, PyObject *po) noexcept { o->set_self_py(po); }));
+    block_cls
+        // rv_policy::reference returns the caller's own wrapper, as the Python
+        // blocks' build() does.
+        .def("build", [](Block& b) -> Block& { b.build(); return b; },
+             nb::rv_policy::reference, nb::sig("def build(self) -> typing.Self"))
+        .def_prop_ro("is_built", &Block::is_built)
         .def("flatten", &Block::flatten)
         .def("equals", &Block::equals, "other"_a, "atol"_a = 1e-9,
              "Tolerant 'same circuit' check — see Block::equals in block.h.")
-        .def(nb::self == nb::self)
-        .def(nb::self != nb::self)
+        .def(nb::self == nb::self, nb::sig("def __eq__(self, other: object, /) -> bool"))
+        .def(nb::self != nb::self, nb::sig("def __ne__(self, other: object, /) -> bool"))
         .def("commands", &Block::commands, nb::rv_policy::reference_internal)
-        .def("set_commands", &Block::set_commands,
+        .def("set_commands", &Block::set_commands, "commands"_a,
              "Replace the local command buffer.  Used by Python __deepcopy__ "
              "to clone ad-hoc-populated blocks.")
-        .def("set_built", &Block::set_built,
+        .def("set_built", &Block::set_built, "built"_a,
              "Force the C++ built_ flag.  Used by Python __deepcopy__ to mirror "
              "the source block's built state.")
-        .def("_copy_base_state_from", &Block::copy_base_state_from,
+        .def("_copy_base_state_from", &Block::copy_base_state_from, "src"_a,
              "Clone-internal: compiler-complete copy of all base Block fields "
              "(commands, built flag, name, sizes, targets, controls).  Tree "
              "edges live in subclasses and are untouched.")
         .def("__deepcopy__", &block_py_deepcopy, "memo"_a,
+             nb::sig("def __deepcopy__(self, memo: dict) -> typing.Self"),
              "Deep clone for raw C++-created blocks (subclasses inherit; "
              "qarp's Python mixin __deepcopy__ shadows this).")
         .def("free_symbols", &Block::free_symbols)
         .def("dagger", &Block::dagger)
-        .def("set_symbols", &Block::set_symbols)
-        .def("replace_symbols", &Block::replace_symbols)
+        // Keyword names match the Python blocks' overrides.
+        .def("set_symbols", &Block::set_symbols, "symbol_parameter_map"_a)
+        .def("replace_symbols", &Block::replace_symbols, "new_parameters"_a)
         .def_rw("name", &Block::name)
         .def_rw("n_qubits", &Block::n_qubits)
         .def_rw("n_cbits", &Block::n_cbits)
         .def_rw("target_qubits", &Block::target_qubits)
-        .def_rw("target_cbits",  &Block::target_cbits)
-        // Builder API — scalar overloads
-        .def("h",   nb::overload_cast<uint32_t>(&Block::h),   nb::rv_policy::reference)
-        .def("x",   nb::overload_cast<uint32_t>(&Block::x),   nb::rv_policy::reference)
-        .def("y",   nb::overload_cast<uint32_t>(&Block::y),   nb::rv_policy::reference)
-        .def("z",   nb::overload_cast<uint32_t>(&Block::z),   nb::rv_policy::reference)
-        .def("s",   nb::overload_cast<uint32_t>(&Block::s),   nb::rv_policy::reference)
-        .def("sdg", nb::overload_cast<uint32_t>(&Block::sdg), nb::rv_policy::reference)
-        .def("t",   nb::overload_cast<uint32_t>(&Block::t),   nb::rv_policy::reference)
-        .def("tdg", nb::overload_cast<uint32_t>(&Block::tdg), nb::rv_policy::reference)
-        .def("sx",   nb::overload_cast<uint32_t>(&Block::sx),   nb::rv_policy::reference)
-        .def("sxdg", nb::overload_cast<uint32_t>(&Block::sxdg), nb::rv_policy::reference)
-        .def("id",   nb::overload_cast<uint32_t>(&Block::id),   nb::rv_policy::reference)
-        .def("rx",  nb::overload_cast<uint32_t, Param>(&Block::rx), nb::rv_policy::reference)
-        .def("ry",  nb::overload_cast<uint32_t, Param>(&Block::ry), nb::rv_policy::reference)
-        .def("rz",  nb::overload_cast<uint32_t, Param>(&Block::rz), nb::rv_policy::reference)
-        .def("p",   nb::overload_cast<uint32_t, Param>(&Block::p),  nb::rv_policy::reference)
-        .def("cx",      nb::overload_cast<uint32_t, uint32_t>(&Block::cx),      nb::rv_policy::reference)
-        .def("cy",      nb::overload_cast<uint32_t, uint32_t>(&Block::cy),      nb::rv_policy::reference)
-        .def("cz",      nb::overload_cast<uint32_t, uint32_t>(&Block::cz),      nb::rv_policy::reference)
-        .def("swap",    nb::overload_cast<uint32_t, uint32_t>(&Block::swap),    nb::rv_policy::reference)
-        .def("ccx",     nb::overload_cast<uint32_t, uint32_t, uint32_t>(&Block::ccx),     nb::rv_policy::reference)
-        .def("cswap",   nb::overload_cast<uint32_t, uint32_t, uint32_t>(&Block::cswap),   nb::rv_policy::reference)
-        .def("mcz", &Block::mcz, nb::rv_policy::reference)
-        .def("rzz", nb::overload_cast<uint32_t, uint32_t, Param>(&Block::rzz), nb::rv_policy::reference)
-        .def("rxx", nb::overload_cast<uint32_t, uint32_t, Param>(&Block::rxx), nb::rv_policy::reference)
-        .def("ryy", nb::overload_cast<uint32_t, uint32_t, Param>(&Block::ryy), nb::rv_policy::reference)
-        .def("crx", nb::overload_cast<uint32_t, uint32_t, Param>(&Block::crx), nb::rv_policy::reference)
-        .def("cry", nb::overload_cast<uint32_t, uint32_t, Param>(&Block::cry), nb::rv_policy::reference)
-        .def("crz", nb::overload_cast<uint32_t, uint32_t, Param>(&Block::crz), nb::rv_policy::reference)
-        .def("cp",  nb::overload_cast<uint32_t, uint32_t, Param>(&Block::cp),  nb::rv_policy::reference)
-        .def("ecr",     nb::overload_cast<uint32_t, uint32_t>(&Block::ecr),     nb::rv_policy::reference)
-        .def("iswap",   nb::overload_cast<uint32_t, uint32_t>(&Block::iswap),   nb::rv_policy::reference)
-        .def("iswapdg", nb::overload_cast<uint32_t, uint32_t>(&Block::iswapdg), nb::rv_policy::reference)
-        .def("ch",      nb::overload_cast<uint32_t, uint32_t>(&Block::ch),      nb::rv_policy::reference)
-        .def("cs",      nb::overload_cast<uint32_t, uint32_t>(&Block::cs),      nb::rv_policy::reference)
-        .def("csdg",    nb::overload_cast<uint32_t, uint32_t>(&Block::csdg),    nb::rv_policy::reference)
-        .def("csx",     nb::overload_cast<uint32_t, uint32_t>(&Block::csx),     nb::rv_policy::reference)
-        .def("csxdg",   nb::overload_cast<uint32_t, uint32_t>(&Block::csxdg),   nb::rv_policy::reference)
-        .def("gphase", &Block::gphase, nb::rv_policy::reference)
-        .def("u",  &Block::u,  nb::rv_policy::reference)
-        .def("cu", &Block::cu, nb::rv_policy::reference)
-        .def("measure", nb::overload_cast<uint32_t, uint32_t>(&Block::measure), nb::rv_policy::reference)
-        .def("reset",   nb::overload_cast<uint32_t>(&Block::reset),             nb::rv_policy::reference)
-        // ── Variadic / bulk builder overloads ──
-        // Each accepts a list of qubit specs (or (qubit, param) / (q0, q1, …) tuples)
-        // and emits all gates in one nanobind dispatch — collapses the per-gate
-        // Python tax to ~one crossing per call regardless of N.
-        .def("h",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::h),   nb::rv_policy::reference)
-        .def("x",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::x),   nb::rv_policy::reference)
-        .def("y",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::y),   nb::rv_policy::reference)
-        .def("z",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::z),   nb::rv_policy::reference)
-        .def("s",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::s),   nb::rv_policy::reference)
-        .def("sdg", nb::overload_cast<const std::vector<uint32_t>&>(&Block::sdg), nb::rv_policy::reference)
-        .def("t",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::t),   nb::rv_policy::reference)
-        .def("tdg", nb::overload_cast<const std::vector<uint32_t>&>(&Block::tdg), nb::rv_policy::reference)
-        .def("sx",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::sx),   nb::rv_policy::reference)
-        .def("sxdg", nb::overload_cast<const std::vector<uint32_t>&>(&Block::sxdg), nb::rv_policy::reference)
-        .def("id",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::id),   nb::rv_policy::reference)
-        .def("rx",  nb::overload_cast<const std::vector<std::pair<uint32_t, Param>>&>(&Block::rx), nb::rv_policy::reference)
-        .def("ry",  nb::overload_cast<const std::vector<std::pair<uint32_t, Param>>&>(&Block::ry), nb::rv_policy::reference)
-        .def("rz",  nb::overload_cast<const std::vector<std::pair<uint32_t, Param>>&>(&Block::rz), nb::rv_policy::reference)
-        .def("p",   nb::overload_cast<const std::vector<std::pair<uint32_t, Param>>&>(&Block::p),  nb::rv_policy::reference)
-        .def("cx",      nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::cx),      nb::rv_policy::reference)
-        .def("cy",      nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::cy),      nb::rv_policy::reference)
-        .def("cz",      nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::cz),      nb::rv_policy::reference)
-        .def("swap",    nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::swap),    nb::rv_policy::reference)
-        .def("ecr",     nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::ecr),     nb::rv_policy::reference)
-        .def("iswap",   nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::iswap),   nb::rv_policy::reference)
-        .def("iswapdg", nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::iswapdg), nb::rv_policy::reference)
-        .def("ch",      nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::ch),      nb::rv_policy::reference)
-        .def("cs",      nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::cs),      nb::rv_policy::reference)
-        .def("csdg",    nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::csdg),    nb::rv_policy::reference)
-        .def("csx",     nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::csx),     nb::rv_policy::reference)
-        .def("csxdg",   nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::csxdg),   nb::rv_policy::reference)
-        .def("crx", nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, Param>>&>(&Block::crx), nb::rv_policy::reference)
-        .def("cry", nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, Param>>&>(&Block::cry), nb::rv_policy::reference)
-        .def("crz", nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, Param>>&>(&Block::crz), nb::rv_policy::reference)
-        .def("cp",  nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, Param>>&>(&Block::cp),  nb::rv_policy::reference)
-        .def("rzz", nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, Param>>&>(&Block::rzz), nb::rv_policy::reference)
-        .def("rxx", nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, Param>>&>(&Block::rxx), nb::rv_policy::reference)
-        .def("ryy", nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, Param>>&>(&Block::ryy), nb::rv_policy::reference)
-        .def("ccx",   nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>&>(&Block::ccx),   nb::rv_policy::reference)
-        .def("cswap", nb::overload_cast<const std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>&>(&Block::cswap), nb::rv_policy::reference)
-        .def("measure", nb::overload_cast<const std::vector<std::pair<uint32_t, uint32_t>>&>(&Block::measure), nb::rv_policy::reference)
-        .def("reset",   nb::overload_cast<const std::vector<uint32_t>&>(&Block::reset),                       nb::rv_policy::reference)
-        // Synthesis builders
-        .def("state_preparation", &Block::state_preparation,
-             "amplitudes"_a, nb::rv_policy::reference,
-             "Prepare an arbitrary 2^n-amplitude state from |0…0⟩ (Möttönen).")
-        .def("diagonal_unitary", &Block::diagonal_unitary,
-             "diagonal_elements"_a, nb::rv_policy::reference,
-             "Implement an arbitrary 2^n × 2^n diagonal unitary "
-             "(Shende-Bullock-Markov).")
-        .def("unitary_synthesis", &Block::unitary_synthesis,
-             "U"_a, nb::rv_policy::reference,
-             "Implement an arbitrary 2^n × 2^n unitary via Quantum Shannon "
-             "Decomposition.")
-        // Pauli-exponential builders.  Python accepts either a string ("XYZI")
-        // or a list[Pauli]; the lambdas parse strings on the way in.
-        .def("pauli_exp",
-             [](Block& b, const std::string& pauli, Param angle) -> Block& {
-                 b.pauli_exp(parse_pauli_string(pauli), angle);
-                 return b;
-             },
-             "pauli"_a, "angle"_a, nb::rv_policy::reference,
-             "Append exp(-i · angle / 2 · pauli) for a single multi-qubit Pauli.")
-        .def("pauli_exp",
-             [](Block& b, const PauliString& pauli, Param angle) -> Block& {
-                 b.pauli_exp(pauli, angle);
-                 return b;
-             },
-             "pauli"_a, "angle"_a, nb::rv_policy::reference)
-        .def("commuting_pauli_set_exp",
-             [](Block& b,
-                const std::vector<std::string>& paulis,
-                const std::vector<Param>& angles) -> Block& {
-                 std::vector<PauliString> parsed;
-                 parsed.reserve(paulis.size());
-                 for (const auto& s : paulis) parsed.push_back(parse_pauli_string(s));
-                 b.commuting_pauli_set_exp(parsed, angles);
-                 return b;
-             },
-             "paulis"_a, "angles"_a, nb::rv_policy::reference,
-             "Append Π_i exp(-i · angles[i] / 2 · paulis[i]) for a set of "
-             "mutually commuting Pauli strings.  Validates lengths and "
-             "pairwise commutation.")
-        .def("commuting_pauli_set_exp",
-             [](Block& b,
-                const std::vector<PauliString>& paulis,
-                const std::vector<Param>& angles) -> Block& {
-                 b.commuting_pauli_set_exp(paulis, angles);
-                 return b;
-             },
-             "paulis"_a, "angles"_a, nb::rv_policy::reference);
+        .def_rw("target_cbits",  &Block::target_cbits);
+
+    // Builder API: a scalar form, and a bulk form emitting a list of them in one
+    // dispatch.  Both name their first argument alike, matching the Python
+    // blocks' overrides (qarp/blocks/_block.py).
+    using Gate1 = Block& (Block::*)(uint32_t);
+    using Gate1P = Block& (Block::*)(uint32_t, Param);
+    using Gate2 = Block& (Block::*)(uint32_t, uint32_t);
+    using Gate2P = Block& (Block::*)(uint32_t, uint32_t, Param);
+    using Gate3 = Block& (Block::*)(uint32_t, uint32_t, uint32_t);
+    using Bulk1 = Block& (Block::*)(const std::vector<uint32_t>&);
+    using Bulk1P = Block& (Block::*)(const std::vector<std::pair<uint32_t, Param>>&);
+    using Bulk2 = Block& (Block::*)(const std::vector<std::pair<uint32_t, uint32_t>>&);
+    using Bulk2P = Block& (Block::*)(const std::vector<std::tuple<uint32_t, uint32_t, Param>>&);
+    using Bulk3 = Block& (Block::*)(const std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>&);
+    const auto ref_policy = nb::rv_policy::reference;
+    constexpr const char* kSelf = "typing.Self";  // every builder returns *this
+
+    struct OneQubit { const char* name; Gate1 scalar; Bulk1 bulk; };
+    const OneQubit one_qubit[] = {
+        {"h", &Block::h, &Block::h}, {"x", &Block::x, &Block::x},
+        {"y", &Block::y, &Block::y}, {"z", &Block::z, &Block::z},
+        {"s", &Block::s, &Block::s}, {"sdg", &Block::sdg, &Block::sdg},
+        {"t", &Block::t, &Block::t}, {"tdg", &Block::tdg, &Block::tdg},
+        {"sx", &Block::sx, &Block::sx}, {"sxdg", &Block::sxdg, &Block::sxdg},
+        {"id", &Block::id, &Block::id},
+    };
+    for (const auto& g : one_qubit) {
+        def_typed(block_cls, g.name, g.scalar, {Arg{"q", "int"}}, kSelf, ref_policy);
+        def_typed(block_cls, g.name, g.bulk,
+                  {Arg{"q", "collections.abc.Sequence[int]"}}, kSelf, ref_policy);
+    }
+
+    struct OneQubitParam { const char* name; Gate1P scalar; Bulk1P bulk; };
+    const OneQubitParam one_qubit_param[] = {
+        {"rx", &Block::rx, &Block::rx}, {"ry", &Block::ry, &Block::ry},
+        {"rz", &Block::rz, &Block::rz}, {"p", &Block::p, &Block::p},
+    };
+    for (const auto& g : one_qubit_param) {
+        def_typed(block_cls, g.name, g.scalar,
+                  {Arg{"q", "int"}, Arg{"angle", kParamLike}}, kSelf, ref_policy);
+        def_typed(block_cls, g.name, g.bulk,
+                  {Arg{"q", "collections.abc.Sequence[tuple[int, qarpx.Param | float]]"}},
+                  kSelf, ref_policy);
+    }
+
+    // Two-qubit gates: (c, t) when one qubit controls the other, (q0, q1)
+    // when the gate is symmetric or has no control.
+    struct TwoQubit { const char* name; Gate2 scalar; Bulk2 bulk; bool controlled; };
+    const TwoQubit two_qubit[] = {
+        {"cx", &Block::cx, &Block::cx, true}, {"cy", &Block::cy, &Block::cy, true},
+        {"cz", &Block::cz, &Block::cz, true}, {"ch", &Block::ch, &Block::ch, true},
+        {"cs", &Block::cs, &Block::cs, true}, {"csdg", &Block::csdg, &Block::csdg, true},
+        {"csx", &Block::csx, &Block::csx, true},
+        {"csxdg", &Block::csxdg, &Block::csxdg, true},
+        {"swap", &Block::swap, &Block::swap, false},
+        {"ecr", &Block::ecr, &Block::ecr, false},
+        {"iswap", &Block::iswap, &Block::iswap, false},
+        {"iswapdg", &Block::iswapdg, &Block::iswapdg, false},
+    };
+    for (const auto& g : two_qubit) {
+        const char* a = g.controlled ? "c" : "q0";
+        const char* b = g.controlled ? "t" : "q1";
+        def_typed(block_cls, g.name, g.scalar, {Arg{a, "int"}, Arg{b, "int"}}, kSelf,
+                  ref_policy);
+        def_typed(block_cls, g.name, g.bulk,
+                  {Arg{a, "collections.abc.Sequence[tuple[int, int]]"}}, kSelf, ref_policy);
+    }
+
+    struct TwoQubitParam { const char* name; Gate2P scalar; Bulk2P bulk; bool controlled; };
+    const TwoQubitParam two_qubit_param[] = {
+        {"crx", &Block::crx, &Block::crx, true}, {"cry", &Block::cry, &Block::cry, true},
+        {"crz", &Block::crz, &Block::crz, true}, {"cp", &Block::cp, &Block::cp, true},
+        {"rzz", &Block::rzz, &Block::rzz, false}, {"rxx", &Block::rxx, &Block::rxx, false},
+        {"ryy", &Block::ryy, &Block::ryy, false},
+    };
+    for (const auto& g : two_qubit_param) {
+        const char* a = g.controlled ? "c" : "q0";
+        const char* b = g.controlled ? "t" : "q1";
+        def_typed(block_cls, g.name, g.scalar,
+                  {Arg{a, "int"}, Arg{b, "int"}, Arg{"angle", kParamLike}}, kSelf,
+                  ref_policy);
+        def_typed(block_cls, g.name, g.bulk,
+                  {Arg{a, "collections.abc.Sequence[tuple[int, int, qarpx.Param | float]]"}},
+                  kSelf, ref_policy);
+    }
+
+    def_typed(block_cls, "ccx", Gate3(&Block::ccx),
+              {Arg{"c0", "int"}, Arg{"c1", "int"}, Arg{"t", "int"}}, kSelf, ref_policy);
+    def_typed(block_cls, "ccx", Bulk3(&Block::ccx),
+              {Arg{"c0", "collections.abc.Sequence[tuple[int, int, int]]"}}, kSelf,
+              ref_policy);
+    def_typed(block_cls, "cswap", Gate3(&Block::cswap),
+              {Arg{"c", "int"}, Arg{"q0", "int"}, Arg{"q1", "int"}}, kSelf, ref_policy);
+    def_typed(block_cls, "cswap", Bulk3(&Block::cswap),
+              {Arg{"c", "collections.abc.Sequence[tuple[int, int, int]]"}}, kSelf,
+              ref_policy);
+    def_typed(block_cls, "mcz", &Block::mcz,
+              {Arg{"qubits", "collections.abc.Sequence[int]"}}, kSelf, ref_policy);
+    def_typed(block_cls, "gphase", &Block::gphase, {Arg{"angle", kParamLike}}, kSelf,
+              ref_policy);
+    def_typed(block_cls, "u", &Block::u,
+              {Arg{"q", "int"}, Arg{"theta", kParamLike}, Arg{"phi", kParamLike},
+               Arg{"lam", kParamLike}},
+              kSelf, ref_policy);
+    def_typed(block_cls, "cu", &Block::cu,
+              {Arg{"c", "int"}, Arg{"t", "int"}, Arg{"theta", kParamLike},
+               Arg{"phi", kParamLike}, Arg{"lam", kParamLike}, Arg{"gamma", kParamLike}},
+              kSelf, ref_policy);
+    def_typed(block_cls, "measure", Gate2(&Block::measure),
+              {Arg{"qubit", "int"}, Arg{"cbit", "int"}}, kSelf, ref_policy);
+    def_typed(block_cls, "measure", Bulk2(&Block::measure),
+              {Arg{"qubit", "collections.abc.Sequence[tuple[int, int]]"}}, kSelf,
+              ref_policy);
+    def_typed(block_cls, "reset", Gate1(&Block::reset), {Arg{"qubit", "int"}}, kSelf,
+              ref_policy);
+    def_typed(block_cls, "reset", Bulk1(&Block::reset),
+              {Arg{"qubit", "collections.abc.Sequence[int]"}}, kSelf, ref_policy);
+
+    // Synthesis builders
+    def_typed(block_cls, "state_preparation", &Block::state_preparation,
+              {Arg{"amplitudes", "collections.abc.Sequence[complex]"}}, kSelf, ref_policy,
+              "Prepare an arbitrary 2^n-amplitude state from |0…0⟩ (Möttönen).");
+    def_typed(block_cls, "diagonal_unitary", &Block::diagonal_unitary,
+              {Arg{"diagonal_elements", "collections.abc.Sequence[complex]"}}, kSelf,
+              ref_policy,
+              "Implement an arbitrary 2^n × 2^n diagonal unitary "
+              "(Shende-Bullock-Markov).");
+    def_typed(block_cls, "unitary_synthesis", &Block::unitary_synthesis,
+              {Arg{"U", "typing.Annotated[numpy.typing.NDArray[numpy.complex128], "
+                        "dict(shape=(None, None), order='F')]"}},
+              kSelf, ref_policy,
+              "Implement an arbitrary 2^n × 2^n unitary via Quantum Shannon "
+              "Decomposition.");
+
+    // Pauli-exponential builders.  Python accepts either a string ("XYZI")
+    // or a list[Pauli]; the lambdas parse strings on the way in.
+    def_typed(block_cls, "pauli_exp",
+              [](Block& b, const std::string& pauli, Param angle) -> Block& {
+                  b.pauli_exp(parse_pauli_string(pauli), angle);
+                  return b;
+              },
+              {Arg{"pauli", "str"}, Arg{"angle", kParamLike}}, kSelf, ref_policy,
+              "Append exp(-i · angle / 2 · pauli) for a single multi-qubit Pauli.");
+    def_typed(block_cls, "pauli_exp",
+              [](Block& b, const PauliString& pauli, Param angle) -> Block& {
+                  b.pauli_exp(pauli, angle);
+                  return b;
+              },
+              {Arg{"pauli", "collections.abc.Sequence[qarpx.Pauli]"},
+               Arg{"angle", kParamLike}},
+              kSelf, ref_policy);
+    def_typed(block_cls, "commuting_pauli_set_exp",
+              [](Block& b, const std::vector<std::string>& paulis,
+                 const std::vector<Param>& angles) -> Block& {
+                  std::vector<PauliString> parsed;
+                  parsed.reserve(paulis.size());
+                  for (const auto& s : paulis) parsed.push_back(parse_pauli_string(s));
+                  b.commuting_pauli_set_exp(parsed, angles);
+                  return b;
+              },
+              {Arg{"paulis", "collections.abc.Sequence[str]"},
+               Arg{"angles", "collections.abc.Sequence[qarpx.Param | float]"}},
+              kSelf, ref_policy,
+              "Append Π_i exp(-i · angles[i] / 2 · paulis[i]) for a set of "
+              "mutually commuting Pauli strings.  Validates lengths and "
+              "pairwise commutation.");
+    def_typed(block_cls, "commuting_pauli_set_exp",
+              [](Block& b, const std::vector<PauliString>& paulis,
+                 const std::vector<Param>& angles) -> Block& {
+                  b.commuting_pauli_set_exp(paulis, angles);
+                  return b;
+              },
+              {Arg{"paulis", "collections.abc.Sequence[collections.abc.Sequence[qarpx.Pauli]]"},
+               Arg{"angles", "collections.abc.Sequence[qarpx.Param | float]"}},
+              kSelf, ref_policy);
 
     // ── SimpleBlock ──
     nb::class_<SimpleBlock, Block>(m, "SimpleBlock", nb::dynamic_attr())
@@ -675,7 +845,7 @@ NB_MODULE(qarpx, m) {
     nb::class_<CompositeBlock, Block>(m, "CompositeBlock", nb::dynamic_attr())
         .def(nb::init<std::vector<ref<Block>>, uint32_t, const std::string&>(),
             "children"_a, "n_qubits"_a = 0, "name"_a = "CompositeBlock")
-        .def("add_child", &CompositeBlock::add_child)
+        .def("add_child", &CompositeBlock::add_child, "child"_a)
         .def("children", &CompositeBlock::children, nb::rv_policy::reference_internal)
         .def("uninitialised_condition_cbits",
              &CompositeBlock::uninitialised_condition_cbits,
@@ -706,6 +876,9 @@ NB_MODULE(qarpx, m) {
         .def_prop_ro("qubit_index", &ResetBlock::qubit_index);
 
     // ── ConditionalBlock ──
+    //
+    // Two constructors: a then-body with an optional else-body, or an
+    // else-body alone.  A conditional with neither body is rejected.
     nb::class_<ConditionalBlock, Block>(m, "ConditionalBlock", nb::dynamic_attr())
         .def(nb::init<std::vector<uint32_t>,
                        std::vector<bool>,
@@ -716,8 +889,21 @@ NB_MODULE(qarpx, m) {
             "then_body"_a,
             "else_body"_a = nb::none(),
             "name"_a = "Conditional")
-        .def_prop_ro("then_body",        &ConditionalBlock::then_body)
-        .def_prop_ro("else_body",        &ConditionalBlock::else_body)
+        .def("__init__",
+             [](ConditionalBlock* self, std::vector<uint32_t> cbits, std::vector<bool> values,
+                nb::none, ref<Block> else_body, const std::string& name) {
+                 new (self) ConditionalBlock(std::move(cbits), std::move(values), ref<Block>(),
+                                             std::move(else_body), name);
+             },
+             "cbits"_a, "values"_a, "then_body"_a.none(), nb::kw_only(), "else_body"_a,
+             "name"_a = "Conditional",
+             nb::sig("def __init__(self, cbits: collections.abc.Sequence[int], "
+                     "values: collections.abc.Sequence[bool], then_body: None, *, "
+                     "else_body: qarpx.Block, name: str = 'Conditional') -> None"))
+        .def_prop_ro("then_body", &ConditionalBlock::then_body,
+                     nb::for_getter(nb::sig("def then_body(self, /) -> qarpx.Block | None")))
+        .def_prop_ro("else_body", &ConditionalBlock::else_body,
+                     nb::for_getter(nb::sig("def else_body(self, /) -> qarpx.Block | None")))
         .def_prop_ro("condition_cbits",  &ConditionalBlock::condition_cbits)
         .def_prop_ro("condition_values", &ConditionalBlock::condition_values);
 
@@ -767,7 +953,7 @@ NB_MODULE(qarpx, m) {
         .def_rw("name", &GateSet::name)
         .def_rw("allowed", &GateSet::allowed)
         .def_rw("rules", &GateSet::rules)
-        .def("contains", &GateSet::contains);
+        .def("contains", &GateSet::contains, "gate"_a);
 
     m.def("native_gateset", &native_gateset);
     m.def("qulacs_gateset", &qulacs_gateset);
@@ -950,8 +1136,8 @@ NB_MODULE(qarpx, m) {
         .value("O2", OptLevel::O2);
 
     nb::class_<Transpiler>(m, "Transpiler")
-        .def(nb::init<GateSet>())
-        .def("transpile", &Transpiler::transpile)
+        .def(nb::init<GateSet>(), "gate_set"_a)
+        .def("transpile", &Transpiler::transpile, "input"_a)
         .def("transpile_and_optimize", &Transpiler::transpile_and_optimize,
             "input"_a, "level"_a = OptLevel::O1)
         .def("optimize_in_target", &Transpiler::optimize_in_target,
@@ -981,12 +1167,12 @@ NB_MODULE(qarpx, m) {
     m.def("eliminate_identities", [](std::vector<Command> cmds) {
         auto n = eliminate_identities(cmds);
         return std::make_pair(cmds, n);
-    }, "Eliminate identity patterns. Returns (optimized_commands, num_eliminated).");
+    }, "commands"_a, "Eliminate identity patterns. Returns (optimized_commands, num_eliminated).");
 
     // ── Gate metadata ──
-    m.def("gate_name", [](GateType g) { return std::string(gate_name(g)); });
-    m.def("gate_num_params", &gate_num_params);
-    m.def("gate_num_qubits", &gate_num_qubits);
+    m.def("gate_name", [](GateType g) { return std::string(gate_name(g)); }, "gate"_a);
+    m.def("gate_num_params", &gate_num_params, "gate"_a);
+    m.def("gate_num_qubits", &gate_num_qubits, "gate"_a);
 
     // ── QIR Emitter ──
     nb::class_<QIREmitter>(m, "QIREmitter")

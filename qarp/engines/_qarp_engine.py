@@ -295,8 +295,8 @@ class QarpEngine(Engine):
             layout = None if initial is None and final is None else _Layout(initial, final)
             return compiled.commands, sim_n, layout
 
-        compiled = self._transpiler.transpile_and_optimize(flat_cmds, self._opt_level)
-        return compiled, block_n_qubits, None
+        cmds = self._transpiler.transpile_and_optimize(flat_cmds, self._opt_level)
+        return cmds, block_n_qubits, None
 
     def _compile_stamp(self) -> tuple:
         # Held, not its id: the record keeps the device alive, so the stamp

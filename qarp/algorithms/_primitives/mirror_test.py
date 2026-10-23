@@ -15,7 +15,7 @@ from typing import Optional, Union
 import qarpx as qx
 
 from ..._types import Shots
-from ...blocks import AnyBlock, CompositeBlock, SimpleBlock
+from ...blocks import AnyBlock, CompositeBlock, QarpBlock, SimpleBlock
 from .primitive_algorithm import PrimitiveAlgorithm
 from .target import Target
 
@@ -73,10 +73,12 @@ class MirrorTest(PrimitiveAlgorithm):
             self.operator.target_qubits = full_qubits[: self.operator.n_qubits]
             children.append(self.operator)
 
-        # Lazy Python-wrapper dagger (deepcopy + flag): wiring folds the
-        # pending flag into concrete daggered commands via
-        # `_materialise_pending_ops`, keeping the child deepcopy-safe.
-        bra_dag = self.bra.dagger()
+        # A Python block daggers lazily, folded in by `_materialise_pending_ops`
+        # so the child stays deepcopy-safe; a raw qx block daggers only once built.
+        bra = self.bra
+        if not isinstance(bra, QarpBlock) and not bra.is_built:
+            bra = bra.build()
+        bra_dag = bra.dagger()
         bra_dag.target_qubits = full_qubits[: bra_dag.n_qubits]
         children.append(bra_dag)
 

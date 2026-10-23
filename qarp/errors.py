@@ -1,5 +1,10 @@
 """OpenQARP exception types."""
 
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    import qarpx as qx
+
 
 class CapabilityError(ValueError):
     """A declared capability is incompatible with the engine, circuit, or call.
@@ -21,3 +26,5 @@ class CapabilityError(ValueError):
     circuit.  Subclasses ``ValueError`` so broad ``except ValueError``
     handlers keep working.
     """
+
+    command: Optional["qx.Command"] = None

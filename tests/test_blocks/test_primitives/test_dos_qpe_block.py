@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+import qarpx as qx
 from qarp.algorithms import Sampler
 from qarp.blocks import (
     DOSQPEBlock,
@@ -156,3 +157,20 @@ def test_dos_qpe_various_sizes_build(n_ancilla, n_state):
     ).build()
     assert block.is_built
     assert block.n_qubits == n_ancilla + 2 * n_state
+
+
+def test_dos_qpe_on_raw_blocks_recovers_the_spectrum_of_z():
+    """Raw qarpx blocks build to themselves.  Oracle: Z has eigenphases 0 and 1/2,
+    each weighted 1/2 by the purified probe."""
+    probe = qx.SimpleBlock(1, "plus")
+    probe.h(0)
+    unitary = qx.SimpleBlock(1, "z")
+    unitary.z(0)
+    block = DOSQPEBlock(eigenstate=probe, unitary=unitary, n_ancilla=1, n_state=1).build()
+
+    engine = QarpEngine(seed=0, n_shots=4000)
+    sampler = Sampler(ket=block, measured_qubits=[0])
+    sampler.build()
+    engine.build([sampler])
+    by_phi = {tup[0] / 2: p for tup, p in engine.run()[0].items()}
+    assert by_phi == pytest.approx({0.0: 0.5, 0.5: 0.5}, abs=0.05)

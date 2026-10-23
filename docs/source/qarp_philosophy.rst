@@ -27,6 +27,18 @@ block — a type, not a base class:
     def depth_of(block: AnyBlock) -> int:
         return len(list(block.flatten()))
 
+``AnyBlock`` admits a raw qarpx block too, which has no ``.symbols`` or
+``parameter_map``.  Code that reads those annotates with ``QarpBlock``, the
+union of the Python block classes; it narrows with ``isinstance`` at runtime,
+and a raw block passes once wrapped, ``CompositeBlock([raw_block])``:
+
+.. code-block:: python
+
+    from qarp.blocks import QarpBlock
+
+    def n_parameters(block: QarpBlock) -> int:
+        return len(block.symbols or ())
+
 Every block (``SimpleBlock`` or :class:`~qarp.blocks.CompositeBlock` alike):
 
 - Encapsulates a quantum operation that can be built into a command stream

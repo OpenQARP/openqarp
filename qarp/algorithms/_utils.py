@@ -189,7 +189,7 @@ def find_eigenspectrum_degeneracy(eigs, tolerance=1e-15, verbose=False):
     Returns:
         dict: A dictionary with eigenvalues as keys and their degeneracy as values.
     """
-    degeneracy = defaultdict(int)
+    degeneracy: defaultdict[float, int] = defaultdict(int)
     for eig in eigs:
         if any(abs(eig - key) < tolerance for key in degeneracy.keys()):
             for key in degeneracy.keys():
@@ -226,7 +226,7 @@ def find_unique_eigs_and_occupation_numbers(
         raise ValueError("Eigenvalues and occupation numbers must have the same length.")
     unique_eigs_dict = find_eigenspectrum_degeneracy(eigs, tolerance=tolerance, verbose=verbose)
     unique_eigs = list(unique_eigs_dict.keys())
-    unique_occ_numbers = np.zeros(len(unique_eigs))
+    unique_occ_numbers: np.ndarray | list = np.zeros(len(unique_eigs))
     for idx, eig in enumerate(unique_eigs):
         index = np.where(np.isclose(eigs, eig, atol=tolerance))[0][
             0

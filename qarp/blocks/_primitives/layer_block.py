@@ -1,10 +1,8 @@
-from typing import List, Optional, Union
-
-from sympy import Symbol
+from typing import List, Optional, Sequence
 
 import qarpx as qx
 
-from .._block import SimpleBlock, as_param
+from .._block import Angle, SimpleBlock, as_param
 
 # GateType → (Block method name, takes_params)
 # Only gates covered by the Block builder API are listed.
@@ -42,7 +40,7 @@ class LayerBlock(SimpleBlock):
         qubit_indices: Optional[List[int]] = None,
         overlapping: int = 0,
         periodic_boundary: bool = False,
-        parameters: Optional[List[Union[float, Symbol]]] = None,
+        parameters: Optional[Sequence[Angle]] = None,
         target_qubits: Optional[List[int]] = None,
         name: str = "LayerBlock",
     ):
@@ -68,7 +66,7 @@ class LayerBlock(SimpleBlock):
         self.qubit_indices = qubit_indices
         self.overlapping = overlapping
         self.periodic_boundary = periodic_boundary
-        self.parameters = parameters if parameters is not None else []
+        self.parameters: Sequence[Angle] = parameters if parameters is not None else []
         self.gate_arity = qx.gate_num_qubits(gate_type)
         self.params_per_gate = qx.gate_num_params(gate_type)
 

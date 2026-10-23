@@ -195,3 +195,9 @@ def test_copy_deepcopy_pickle_round_trip():
         assert norm_terms(clone) == norm_terms(op)
         clone += FermionOperator("5^")
         assert clone != op
+
+
+def test_sparse_matrix_of_the_number_operator():
+    """Oracle: n̂₀ on two modes, LSB (mode q ↔ bit q), is diag(0, 1, 0, 1)."""
+    m = FermionOperator("0^ 0").sparse_matrix(2).toarray()
+    np.testing.assert_allclose(m, np.diag([0, 1, 0, 1]), atol=1e-15)

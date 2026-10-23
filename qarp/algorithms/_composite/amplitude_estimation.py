@@ -59,7 +59,7 @@ class AmplitudeEstimation(CompositeAlgorithm):
 
         self.state_preparation = deepcopy(state_preparation)
         self.oracle = deepcopy(oracle)
-        self.block: Optional[AnyBlock] = None
+        self.block: Optional[AmplitudeEstimationBlock] = None
         self.distribution: Optional[SamplingDictionary] = None
         self.folded_distribution: Optional[dict[int, float]] = None
         self.phase_bin: Optional[int] = None

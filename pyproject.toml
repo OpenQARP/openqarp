@@ -107,7 +107,9 @@ test = [
 # mypy is pinned for the same reason and bumped in the same two places (it has
 # no pre-commit hook): a new release adds checks, so an unpinned bump turns a
 # green pipeline red on a day nobody touched the code.
-dev = ["ruff==0.15.22", "mypy==1.19.1", "pre-commit>=3.5"]
+# nanobind is scripts/generate_stubs.py's stubgen, pinned to the GIT_TAG
+# cpp/libqarpx/CMakeLists.txt fetches (tests/test_stubs.py checks both extras).
+dev = ["ruff==0.15.22", "mypy==1.19.1", "pre-commit>=3.5", "nanobind==3.0.1"]
 # Executes examples/**/*.ipynb (`pytest --nbmake examples/`; job-notebooks).
 # nbmake is pinned like the other CI tooling — it decides what counts as a
 # notebook failure. `pymoo` is imported by mwe_parameter_optimization.ipynb
@@ -181,6 +183,7 @@ full-dev = [
     "ruff==0.15.22",
     "mypy==1.19.1",
     "pre-commit>=3.5",
+    "nanobind==3.0.1",
 ]
 
 [project.urls]
@@ -198,7 +201,10 @@ Changelog = "https://github.com/OpenQARP/openqarp/blob/main/CHANGELOG.md"
 [tool.ruff]
 line-length = 100
 # nbstripout governs notebooks; their stripped schema trips ruff's notebook parser.
-extend-exclude = ["*.ipynb"]
+# qarpx.pyi is generated (scripts/generate_stubs.py); force-exclude keeps it
+# excluded when a hook or editor passes the file explicitly.
+extend-exclude = ["*.ipynb", "cpp/libqarpx/python/qarpx.pyi"]
+force-exclude = true
 
 [tool.ruff.lint]
 select = [
@@ -274,6 +280,10 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
     "if __name__ == .__main__.:",
 ]
+
+[tool.pyright]
+# The committed qarpx stub; pyright and Pylance do not read mypy.ini.
+stubPath = "cpp/libqarpx/python"
 
 [tool.scikit-build]
 # The CMake project root is cpp/libqarpx, NOT the repository root.

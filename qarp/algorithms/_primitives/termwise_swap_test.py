@@ -5,6 +5,7 @@ single ``ket``, sums the (optionally coefficient-weighted) overlap-squared
 estimates.  Each child SWAPTest contributes one entry to ``sub_blocks``.
 """
 
+from collections.abc import Sequence
 from typing import List, Optional, Union
 
 import qarpx as qx
@@ -23,14 +24,14 @@ class TermwiseSWAPTest(PrimitiveAlgorithm):
 
     def __init__(
         self,
-        bra: Union[AnyBlock, List[AnyBlock]],
+        bra: Union[AnyBlock, Sequence[AnyBlock]],
         ket: Optional[AnyBlock] = None,
         coefficients: Optional[List[float]] = None,
         n_shots: Optional[Union[int, Shots]] = None,
     ):
         """
         Args:
-            bra: Single Block or list of bra-state preparation blocks.
+            bra: Single Block or sequence of bra-state preparation blocks.
             ket: Single ket-state preparation block.
             coefficients: Optional per-bra weight (default: all 1.0).
             n_shots: Number of shots; ``None`` defers to the engine default.

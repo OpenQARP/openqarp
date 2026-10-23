@@ -36,6 +36,17 @@ All notable changes to OpenQARP are recorded here. The format follows
   their parallel jobs on a qarpx-owned pool whose workers sleep as soon as a
   call ends; `native` leaves OpenBLAS untouched (see *Changed*).
 - `examples/engines/mwe_structured_execution.ipynb`.
+- Type information for the compiled backend.  The wheel ships a stub for
+  `qarpx` as the `qarpx-stubs` package, so an editor shows the signatures
+  of `import qarpx as qx` and mypy and pyright check calls into it.
+- The raw `qarpx` block methods take keyword arguments, with the names the
+  Python blocks use (`q`, `angle`, ...).  `cu`'s `gamma` is required on a
+  raw block and defaults to 0 on a Python one.
+- `qarp.blocks.QarpBlock`, the union of the Python block classes, for
+  annotating code that reads members a raw `qx` block lacks (`.symbols`,
+  `parameter_map`).  It works with `isinstance`.
+- `qx.__with_symengine__`: whether the build has symbolic coefficients.
+- A `ConditionalBlock` with only an `else_body`: pass `then_body=None`.
 
 ### Changed
 
@@ -71,6 +82,52 @@ All notable changes to OpenQARP are recorded here. The format follows
   call (a 16-qubit `statevector` right after a norm: 108 ms to under 8 ms).
   A count set in `OPENBLAS_NUM_THREADS` or in code is kept, and
   `QARP_BLAS_THREADS=native` restores the previous behaviour.
+- `is_built` is a read-only property on raw `qx` blocks, as on the Python
+  blocks.  `b.is_built()` and `qx.Block.is_built(b)` become `b.is_built`.
+- `build()` on a raw `qx` block returns the block instead of `None`.
+- A gate method, or `set_commands` with any command, called on a block
+  that holds other blocks (composite, controlled, conditional) raises
+  `TypeError`; the gate was recorded and never run.  Add it to a block it
+  holds instead.
+- Three attributes no longer hide gate methods of the same name:
+  `AmplitudeAmplificationBlock.state_preparation` and
+  `AmplitudeEstimationBlock.state_preparation` are `state_preparation_block`,
+  and `OrbitalRotationBlock.u` is `rotation_matrix`.
+- `qx.Command` checks a gate's qubit and parameter counts and raises
+  `ValueError` on a mismatch; MCZ and Barrier, which take any number of
+  qubits, are checked for taking no parameter.  It reads anything integer
+  (`__index__`: an `int`, a numpy integer, a `bool`, a sympy `Integer`, a
+  0-d integer array) in the second position as a qubit.
+  `Command(CX, 0, np.int64(1))` builds the CX; it built a one-qubit CX
+  carrying angle 1.  `Command(Rz, 0, 1)` raises; pass the angle as a float
+  or a `qx.Param`.
+- `qx.Command == other` returns `False` for an object of another type; it
+  raised `TypeError`.
+- `QubitOperator.substitute` and `free_symbols`, and their
+  `FermionOperator` counterparts, exist on every build and raise without
+  SymEngine.  Code that tested for the methods reads
+  `qx.__with_symengine__`.
+- `sparse_matrix` on both operator classes is a compiled method, also on a
+  bare `import qarpx`.  It cannot be pickled or read by
+  `inspect.signature`, and a non-integer `n_qubits` raises `TypeError`.
+- `qx.bravyi_kitaev`, `qx.qubit_operator_coo` and `qx.fermion_operator_coo`
+  raise `TypeError` on a non-integer `n_qubits`, as `sparse_matrix` does;
+  they raised `RuntimeError: std::bad_cast`.
+- `TermwiseHadamardTest` takes its operator blocks as any sequence; a tuple
+  raised `TypeError`.
+- `Engine.build` takes a `Sequence` of primitives.  A subclass that
+  annotates the parameter `list` widens it to `Sequence`.
+- The variational algorithms annotate their block parameters with
+  `QarpBlock`.  A raw block there raised `AttributeError` and still does;
+  wrap it, `CompositeBlock([raw_block])`.  `PauliShadow` takes a
+  `QarpBlock` ket and raises `TypeError` on a raw one, with the same
+  migration.
+- mypy finds the `qarpx` stub, so an `ignore_missing_imports` for `qarpx`
+  no longer applies, and a call the stub does not describe (an `np.int64`
+  qubit index, an attribute set on a block) is reported.  To opt out, set
+  `follow_imports = skip` and `follow_imports_for_stubs = True` for `qarpx`.
+- The `qarpx` ABI is 15.  An editable checkout reinstalls after pulling,
+  or `import qarp` refuses the old build.
 
 ### Removed
 
@@ -98,6 +155,29 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `RotosolveOptimizer` reports `nit` as the number of iterations run; it
   was one short.
 - The `FH_ham_and_wf` docs say it builds UCCSD; they said doubles only.
+- Planning a raw `qx.ControlledBlock` reads its control count; it raised
+  `AttributeError` once the span reached three gates.
+- `ResourceEstimator.estimate`, `CircuitAdapter` and `CuttingPrimitive.build`
+  treat an unbuilt raw block as unbuilt; they took it for built and
+  `flatten()` raised.
+- `SWAPTestBlock`, `HadamardTestBlock`, `QPEBlock`, `DOSQPEBlock`, `VFF`,
+  `CuttingPrimitive` and `generate_states_new_basis` accept raw blocks; they
+  used `build()`'s return value, which was `None` on a raw block.
+- A `ConditionalBlock` with only an `else` branch can be deep-copied.
+- `set_symbols` and `replace_symbols` with string keys update `.symbols`, so
+  `parameter_map` no longer counts a bound symbol as free.
+- `AdaptVQD.run()` returns the energy as a float, as documented; it
+  returned a complex.
+- A raw `qx.ControlledBlock` plots as a controlled box; it plotted as a
+  plain box.
+- `MirrorTest` daggers a raw bra that isn't built; it raised.
+- `Reconstructer.reconstruct_filter_qubits` keeps a gate on three or more
+  qubits whole: it rebuilt each kept gate from at most two qubits, so a CCZ
+  became a CZ carrying an angle.  A gate on three or more qubits across the
+  boundary raises, as a two-qubit one does; it was dropped.  The cutters
+  still reject gates on more than two qubits.
+- `CapabilityError.command` is `None` when no command is attached; reading
+  it raised `AttributeError`.
 
 ## [0.1.1] - 2026-09-25
 

@@ -11,6 +11,7 @@ from .._structure import Repeat
 from ._block import (
     AnyBlock,  # = qx.Block: the type to annotate with / isinstance against;
     # not a base class — subclass SimpleBlock (leaf) or CompositeBlockBase (tree).
+    QarpBlock,  # the Python block classes: for code reading `symbols` and the like
     SimpleBlock,
     ControlledBlock,
     MeasureBlock,
@@ -155,6 +156,7 @@ __all__ = [
     "QROMBlock",
     "QSPBlock",
     "QSVTBlock",
+    "QarpBlock",
     "QubitizationBlock",
     "RSPBlock",
     "ReadoutBlock",

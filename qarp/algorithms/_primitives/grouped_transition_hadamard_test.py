@@ -116,7 +116,7 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
         n_qubits = self.n_qubits
         assert n_qubits is not None
 
-        for term, coefficient in self.operator.terms.items():  # type: ignore[union-attr]
+        for term, coefficient in self.operator.terms.items():
             c = complex(coefficient)
             if abs(c.imag) > 1e-12:
                 raise ValueError(

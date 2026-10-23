@@ -18,17 +18,39 @@ from __future__ import annotations
 
 import numbers
 from copy import deepcopy
-from typing import Any, ClassVar, Dict, Iterable, List, Optional, Self, Tuple, TypeAlias, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Self,
+    Sequence,
+    Tuple,
+    TypeAlias,
+    cast,
+    overload,
+)
 
 import numpy as np
-from sympy import Symbol
+from sympy import Expr, Symbol
 
 import qarpx as qx
 
 from .. import _blas_threads, _program
 
+if TYPE_CHECKING:
+    from ._composite_block import CompositeBlock
 
-def as_param(angle) -> qx.Param:
+
+#: What a gate method takes as an angle: anything ``as_param`` coerces.
+Angle: TypeAlias = "qx.Param | float | Expr"
+
+
+def as_param(angle: Angle) -> qx.Param:
     """The one angle → ``qx.Param`` coercion (§13: parameters coerce to Param).
 
     Accepts a ``qx.Param`` (passthrough), a real number, a ``sympy.Symbol``,
@@ -73,6 +95,10 @@ def as_param(angle) -> qx.Param:
             "qarp gates accept a float, a sympy Symbol, or an expression linear in "
             f"one symbol (c*x + d); got {angle!r} of type {type(angle).__name__}."
         ) from None
+
+
+def _as_symbol(name: Symbol | str) -> Symbol:
+    return Symbol(name) if isinstance(name, str) else name
 
 
 def _sorted_symbols(symbols) -> Tuple[Symbol, ...]:
@@ -176,14 +202,16 @@ def _clone_cpp_block(src, result, memo) -> None:
     elif isinstance(src, qx.ConditionalBlock):
         then_body = deepcopy(src.then_body, memo) if src.then_body else None
         else_body = deepcopy(src.else_body, memo) if src.else_body else None
-        qx.ConditionalBlock.__init__(
-            result,
-            list(src.condition_cbits),
-            list(src.condition_values),
-            then_body,
-            else_body,
-            src.name,
-        )
+        cbits, values = list(src.condition_cbits), list(src.condition_values)
+        if then_body is not None:
+            qx.ConditionalBlock.__init__(
+                result, cbits, values, then_body, else_body=else_body, name=src.name
+            )
+        else:
+            assert else_body is not None  # the source was constructed with a body
+            qx.ConditionalBlock.__init__(
+                result, cbits, values, None, else_body=else_body, name=src.name
+            )
     elif isinstance(result, qx.SimpleBlock):
         # SimpleBlock proper, or the built-SimpleBlock shell standing in for
         # a C++-internal kind (TransformedBlock, exposed as ctor-less base
@@ -226,6 +254,7 @@ class _BlockMixin:
     # runtime) to keep the attached mixin methods type-checkable.
     n_qubits: int
     name: str
+    target_qubits: Optional[List[int]]
     # Bound per concrete class by _attach_mixin (None for pure-Python stubs).
     _cpp_base: ClassVar[Optional[Any]]
 
@@ -297,12 +326,11 @@ class _BlockMixin:
     # ── Validation ──────────────────────────────────────────────────────
 
     def _validate_input(self) -> None:
-        if getattr(self, "target_qubits", None) is not None:
-            # Entry-level validation happened before the C++ setter in
-            # _init_python_state; only uniqueness is left to check here.
-            tq = self.target_qubits
-            if len(tq) != len(set(tq)):
-                raise ValueError("target_qubits must contain unique indices")
+        # Entry-level validation happened before the C++ setter in
+        # _init_python_state; only uniqueness is left to check here.
+        tq: Optional[List[int]] = getattr(self, "target_qubits", None)
+        if tq is not None and len(tq) != len(set(tq)):
+            raise ValueError("target_qubits must contain unique indices")
 
     # ── Lifecycle ───────────────────────────────────────────────────────
 
@@ -344,6 +372,7 @@ class _BlockMixin:
         # the planner derives the span instead once its local-frame digest
         # differs.  flatten() is placed, so map it back through target_qubits.
         if _program._declares_action(self):
+            assert self.target_qubits is not None  # _finalize sets it
             self._action_digest = qx._local_commands_digest(
                 list(self._cpp_flatten()), list(self.target_qubits)
             )
@@ -467,8 +496,9 @@ class _BlockMixin:
         op produces a transient C++ block whose commands feed the next op.
         """
         # Dispatch to the C++ base directly so we don't recurse into our own
-        # Python overrides.
-        block_cls = self._cpp_base
+        # Python overrides.  None only on a pure-Python stub, which has no
+        # pending ops and so never reaches it.
+        block_cls: Any = self._cpp_base
 
         target = self
         # 1. Symbol → Symbol replacements (block-level transform)
@@ -505,7 +535,7 @@ class _BlockMixin:
         # fallback exists only for pure-Python test stubs (no C++ base).
         if self._cpp_base is None:
             return self.__dict__.get("_built_py", False)
-        return self._cpp_base.is_built(self)
+        return self._cpp_base.is_built.fget(self)
 
     @_built.setter
     def _built(self, value: bool) -> None:
@@ -542,44 +572,50 @@ class _BlockMixin:
         new_object._original_block = self
         return new_object
 
-    def set_symbols(self, symbol_parameter_map: Dict[Symbol, float]) -> Self:
+    def set_symbols(self, symbol_parameter_map: Mapping[Symbol | str, float]) -> Self:
         """Schedule a symbol → float substitution; return a new block.
 
-        The substitution is applied lazily in ``flatten()``.
+        The substitution is applied lazily in ``flatten()``.  A string key
+        names the symbol of that name.
         """
+        bindings: Dict[Symbol, float] = {_as_symbol(k): v for k, v in symbol_parameter_map.items()}
         new_object = deepcopy(self)
         # One merged dict, later binding wins: re-binding in a loop stays O(1)
         # per call instead of growing a queue replayed on every flatten().
         merged: Dict[Any, float] = {}
         for prior in new_object._pending_substitutions:
             merged.update(prior)
-        rebound = {str(s) for s in symbol_parameter_map}
+        rebound = {str(s) for s in bindings}
         merged = {k: v for k, v in merged.items() if str(k) not in rebound}
-        merged.update(symbol_parameter_map)
+        merged.update(bindings)
         new_object._pending_substitutions = [merged]
         if new_object.symbols:
-            new_object.symbols = [s for s in new_object.symbols if s not in symbol_parameter_map]
-        new_object._update_parameters_attr(symbol_parameter_map)
-        new_object._propagate_to_python_children("set_symbols", symbol_parameter_map)
+            new_object.symbols = [s for s in new_object.symbols if s not in bindings]
+        new_object._update_parameters_attr(bindings)
+        new_object._propagate_to_python_children("set_symbols", bindings)
         return new_object
 
-    def replace_symbols(self, new_parameters: Dict[Symbol, Symbol]) -> Self:
-        """Schedule a symbol → symbol rename; return a new block."""
+    def replace_symbols(self, new_parameters: Mapping[Symbol | str, Symbol | str]) -> Self:
+        """Schedule a symbol → symbol rename; return a new block.  A string
+        names the symbol of that name."""
+        renames: Dict[Symbol, Symbol] = {
+            _as_symbol(k): _as_symbol(v) for k, v in new_parameters.items()
+        }
         new_object = deepcopy(self)
         # flatten() applies every rename before any substitution, so a bind
         # queued earlier is still keyed on the old name and would miss, leaving
         # the symbol free again.  Carry those keys through this rename.
         if new_object._pending_substitutions:
-            renamed = {str(k): v for k, v in new_parameters.items()}
+            renamed = {str(k): v for k, v in renames.items()}
             new_object._pending_substitutions = [
                 {renamed.get(str(k), k): v for k, v in sub.items()}
                 for sub in new_object._pending_substitutions
             ]
-        new_object._pending_replacements.append(new_parameters)
+        new_object._pending_replacements.append(renames)
         if new_object.symbols:
-            new_object.symbols = [new_parameters.get(s, s) for s in new_object.symbols]
-        new_object._update_parameters_attr(new_parameters)
-        new_object._propagate_to_python_children("replace_symbols", new_parameters)
+            new_object.symbols = [renames.get(s, s) for s in new_object.symbols]
+        new_object._update_parameters_attr(renames)
+        new_object._propagate_to_python_children("replace_symbols", renames)
         return new_object
 
     def _propagate_to_python_children(self, method: str, symbol_map: Dict[Symbol, Any]) -> None:
@@ -988,7 +1024,12 @@ class _BlockMixin:
             # hit never materialises the commands in Python.  Pending ops are
             # applied by the Python flatten() only, so they take the full path.
             width = _program.fusion_width_of(sim, self.n_qubits)
-            key = (qx._flatten_digest(self), self.n_qubits, width, optimization_level)
+            key = (
+                qx._flatten_digest(cast("QarpBlock", self)),
+                self.n_qubits,
+                width,
+                optimization_level,
+            )
             hit = _program.cached_lookup(self, key)
             if hit is not _program._MISS and hit is not None:
                 return np.asarray(sim.program_statevector(hit, self.n_qubits, initial_state=psi))
@@ -1123,15 +1164,31 @@ class _BlockMixin:
             self._cpp_call(name, q, self._as_param(angle))
         return self
 
+    @overload
+    def rx(self, q: int, angle: Angle) -> Self: ...
+    @overload
+    def rx(self, q: Sequence[tuple[int, Angle]]) -> Self: ...
     def rx(self, q, angle=None):
         return self._rx_one_qubit_param("rx", q, angle)
 
+    @overload
+    def ry(self, q: int, angle: Angle) -> Self: ...
+    @overload
+    def ry(self, q: Sequence[tuple[int, Angle]]) -> Self: ...
     def ry(self, q, angle=None):
         return self._rx_one_qubit_param("ry", q, angle)
 
+    @overload
+    def rz(self, q: int, angle: Angle) -> Self: ...
+    @overload
+    def rz(self, q: Sequence[tuple[int, Angle]]) -> Self: ...
     def rz(self, q, angle=None):
         return self._rx_one_qubit_param("rz", q, angle)
 
+    @overload
+    def p(self, q: int, angle: Angle) -> Self: ...
+    @overload
+    def p(self, q: Sequence[tuple[int, Angle]]) -> Self: ...
     def p(self, q, angle=None):
         return self._rx_one_qubit_param("p", q, angle)
 
@@ -1145,36 +1202,64 @@ class _BlockMixin:
             self._cpp_call(name, c_or_list, t, self._as_param(angle))
         return self
 
+    @overload
+    def crx(self, c: int, t: int, angle: Angle) -> Self: ...
+    @overload
+    def crx(self, c: Sequence[tuple[int, int, Angle]]) -> Self: ...
     def crx(self, c, t=None, angle=None):
         return self._two_qubit_param("crx", c, t, angle)
 
+    @overload
+    def cry(self, c: int, t: int, angle: Angle) -> Self: ...
+    @overload
+    def cry(self, c: Sequence[tuple[int, int, Angle]]) -> Self: ...
     def cry(self, c, t=None, angle=None):
         return self._two_qubit_param("cry", c, t, angle)
 
+    @overload
+    def crz(self, c: int, t: int, angle: Angle) -> Self: ...
+    @overload
+    def crz(self, c: Sequence[tuple[int, int, Angle]]) -> Self: ...
     def crz(self, c, t=None, angle=None):
         return self._two_qubit_param("crz", c, t, angle)
 
+    @overload
+    def cp(self, c: int, t: int, angle: Angle) -> Self: ...
+    @overload
+    def cp(self, c: Sequence[tuple[int, int, Angle]]) -> Self: ...
     def cp(self, c, t=None, angle=None):
         return self._two_qubit_param("cp", c, t, angle)
 
+    @overload
+    def rzz(self, q0: int, q1: int, angle: Angle) -> Self: ...
+    @overload
+    def rzz(self, q0: Sequence[tuple[int, int, Angle]]) -> Self: ...
     def rzz(self, q0, q1=None, angle=None):
         return self._two_qubit_param("rzz", q0, q1, angle)
 
+    @overload
+    def rxx(self, q0: int, q1: int, angle: Angle) -> Self: ...
+    @overload
+    def rxx(self, q0: Sequence[tuple[int, int, Angle]]) -> Self: ...
     def rxx(self, q0, q1=None, angle=None):
         return self._two_qubit_param("rxx", q0, q1, angle)
 
+    @overload
+    def ryy(self, q0: int, q1: int, angle: Angle) -> Self: ...
+    @overload
+    def ryy(self, q0: Sequence[tuple[int, int, Angle]]) -> Self: ...
     def ryy(self, q0, q1=None, angle=None):
         return self._two_qubit_param("ryy", q0, q1, angle)
 
-    def gphase(self, angle):
+    def gphase(self, angle: Angle) -> Self:
         self._cpp_call("gphase", self._as_param(angle))
         return self
 
-    def u(self, q, theta, phi, lam):
+    def u(self, q: int, theta: Angle, phi: Angle, lam: Angle) -> Self:
         self._cpp_call("u", q, self._as_param(theta), self._as_param(phi), self._as_param(lam))
         return self
 
-    def cu(self, c, t, theta, phi, lam, gamma=0.0):
+    def cu(self, c: int, t: int, theta: Angle, phi: Angle, lam: Angle, gamma: Angle = 0.0) -> Self:
         self._cpp_call(
             "cu",
             c,
@@ -1186,32 +1271,34 @@ class _BlockMixin:
         )
         return self
 
-    def mcz(self, *qubits):
-        # Variadic — accepts mcz(0,1,2) or mcz([0,1,2]); forward as a list.
+    @staticmethod
+    def _qubit_list(qubits: Tuple[int | Sequence[int], ...]) -> List[int]:
+        # Variadic gates accept g(0, 1, 2) or g([0, 1, 2]).
         if len(qubits) == 1 and not isinstance(qubits[0], int):
-            qubits = list(qubits[0])
-        self._cpp_call("mcz", list(qubits))
+            return list(qubits[0])
+        return cast(List[int], list(qubits))
+
+    def mcz(self, qubits: int | Sequence[int], *more: int) -> Self:
+        self._cpp_call("mcz", self._qubit_list((qubits, *more)))
         return self
 
-    def ccz(self, c0, c1, t):
+    def ccz(self, c0: int, c1: int, t: int) -> Self:
         """Doubly-controlled Z: sugar for ``mcz([c0, c1, t])`` (§5)."""
         return self.mcz([c0, c1, t])
 
-    def mcx(self, *qubits):
+    def mcx(self, *qubits: int | Sequence[int]) -> Self:
         """Multi-controlled X; the last qubit is the target (§5).
 
         Emitted as ``H(t) · MCZ(qubits) · H(t)`` — exact, no phase — so it
         needs no ``GateType`` of its own and lowers wherever ``MCZ`` does.
         Accepts ``mcx(c0, c1, t)`` or ``mcx([c0, c1, t])``.
         """
-        if len(qubits) == 1 and not isinstance(qubits[0], int):
-            qubits = list(qubits[0])
-        qubits = list(qubits)
-        if len(qubits) < 2:
+        flat = self._qubit_list(qubits)
+        if len(flat) < 2:
             raise ValueError("mcx needs at least one control and one target qubit")
-        t = qubits[-1]
+        t = flat[-1]
         self._cpp_call("h", t)
-        self._cpp_call("mcz", qubits)
+        self._cpp_call("mcz", flat)
         self._cpp_call("h", t)
         return self
 
@@ -1230,7 +1317,7 @@ class _BlockMixin:
     # `!x` isn't valid syntax at all for arbitrary objects) so the dagger
     # shorthand stays on `~block`, matching Qiskit's circuit-inverse convention.
 
-    def __mul__(self, other: "AnyBlock") -> "AnyBlock":
+    def __mul__(self, other: "AnyBlock") -> "CompositeBlock":
         """``self * other``: sequential composition, placed by ``target_qubits``.
 
         ``self`` and ``other`` don't need matching ``n_qubits`` — each is
@@ -1245,9 +1332,11 @@ class _BlockMixin:
             return NotImplemented
         from ._composite_block import CompositeBlock as _UserCompositeBlock
 
-        return _UserCompositeBlock([self, other], name=f"({self.name}*{other.name})")
+        return _UserCompositeBlock(
+            [cast("QarpBlock", self), other], name=f"({self.name}*{other.name})"
+        )
 
-    def __or__(self, other: "AnyBlock") -> "AnyBlock":
+    def __or__(self, other: "AnyBlock") -> "CompositeBlock":
         """``self | other``: parallel composition on disjoint qubit ranges.
 
         ``other`` is placed on qubits ``[self.n_qubits, self.n_qubits +
@@ -1267,12 +1356,12 @@ class _BlockMixin:
         from ._composite_block import CompositeBlock as _UserCompositeBlock
 
         return _UserCompositeBlock(
-            [self, shifted],
+            [cast("QarpBlock", self), shifted],
             n_qubits=self.n_qubits + other.n_qubits,
             name=f"({self.name}|{other.name})",
         )
 
-    def _repeat(self, n: int) -> "AnyBlock":
+    def _repeat(self, n: int) -> "QarpBlock":
         """``block ** n`` / ``block ^ n``: repeat ``self`` sequentially ``n`` times.
 
         Reuses the same instance ``n`` times as composite children (see
@@ -1288,10 +1377,12 @@ class _BlockMixin:
         if n == 1:
             # The mixin is attached to every block wrapper, so `self` IS a
             # Block at runtime; the cast bridges the mixin's static type.
-            return cast("AnyBlock", self)
+            return cast("QarpBlock", self)
         from ._composite_block import CompositeBlock as _UserCompositeBlock
 
-        return _UserCompositeBlock([self] * n, n_qubits=self.n_qubits, name=f"{self.name}**{n}")
+        return _UserCompositeBlock(
+            [cast("QarpBlock", self)] * n, n_qubits=self.n_qubits, name=f"{self.name}**{n}"
+        )
 
     __pow__ = _repeat
     __xor__ = _repeat
@@ -1343,9 +1434,33 @@ def _attach_mixin(cls):
 
 # ── Concrete classes — single C++ base + @_attach_mixin ────────────────────
 
+# nanobind refuses a second base, so the mixin is attached at runtime; under
+# TYPE_CHECKING these bases show it to mypy, and the runtime MRO is unchanged.
+if TYPE_CHECKING:
+
+    class _SimpleBase(_BlockMixin, qx.SimpleBlock): ...
+
+    class _CompositeBase(_BlockMixin, qx.CompositeBlock): ...
+
+    class _ControlledBase(_BlockMixin, qx.ControlledBlock): ...
+
+    class _MeasureBase(_BlockMixin, qx.MeasureBlock): ...
+
+    class _ResetBase(_BlockMixin, qx.ResetBlock): ...
+
+    class _ConditionalBase(_BlockMixin, qx.ConditionalBlock): ...
+
+else:
+    _SimpleBase = qx.SimpleBlock
+    _CompositeBase = qx.CompositeBlock
+    _ControlledBase = qx.ControlledBlock
+    _MeasureBase = qx.MeasureBlock
+    _ResetBase = qx.ResetBlock
+    _ConditionalBase = qx.ConditionalBlock
+
 
 @_attach_mixin
-class SimpleBlock(qx.SimpleBlock):
+class SimpleBlock(_SimpleBase):
     """Leaf block — populate by calling ``self.h(q)``, ``self.cx(c, t)``, etc.
 
     The positional constructor order ``(n_qubits, target_qubits)`` is stable
@@ -1355,6 +1470,10 @@ class SimpleBlock(qx.SimpleBlock):
     gone (controlisation is explicit — ``ControlledBlock``, §13), and a stale
     five-positional call must fail loudly rather than shift ``name``.
     """
+
+    # Set only on the shell _materialise_pending_ops returns: the block it
+    # stands in for, whose structure the planner reads.
+    _materialised_from: "AnyBlock"
 
     def __init__(
         self,
@@ -1476,7 +1595,7 @@ def _materialise_pending_ops(block: "AnyBlock") -> "AnyBlock":
 
 
 @_attach_mixin
-class CompositeBlockBase(qx.CompositeBlock):
+class CompositeBlockBase(_CompositeBase):
     """Composite of children — populate by calling ``self.add_child(...)``."""
 
     def __init__(
@@ -1549,7 +1668,7 @@ class CompositeBlockBase(qx.CompositeBlock):
 
 
 @_attach_mixin
-class ControlledBlock(qx.ControlledBlock):
+class ControlledBlock(_ControlledBase):
     """Quantum-controlled wrapper around any inner Block."""
 
     def __init__(
@@ -1591,7 +1710,7 @@ class ControlledBlock(qx.ControlledBlock):
 
 
 @_attach_mixin
-class MeasureBlock(qx.MeasureBlock):
+class MeasureBlock(_MeasureBase):
     """Single mid-circuit measurement: writes ``qubit`` outcome to ``cbit``."""
 
     def __init__(self, qubit: int, cbit: int, name: Optional[str] = None):
@@ -1600,7 +1719,7 @@ class MeasureBlock(qx.MeasureBlock):
 
 
 @_attach_mixin
-class ResetBlock(qx.ResetBlock):
+class ResetBlock(_ResetBase):
     """Single mid-circuit reset on ``qubit``."""
 
     def __init__(self, qubit: int, name: Optional[str] = None):
@@ -1609,9 +1728,25 @@ class ResetBlock(qx.ResetBlock):
 
 
 @_attach_mixin
-class ConditionalBlock(qx.ConditionalBlock):
-    """Classical-control wrapper: run ``then_body`` (or ``else_body``) based on cbits."""
+class ConditionalBlock(_ConditionalBase):
+    """Classical-control wrapper: run ``then_body`` (or ``else_body``) based on cbits.
 
+    Either body may be omitted, not both: ``then_body=None`` takes ``else_body``
+    by keyword.
+    """
+
+    @overload
+    def __init__(
+        self,
+        cbits: List[int],
+        values: List[bool],
+        then_body: None,
+        *,
+        else_body: "AnyBlock",
+        name: Optional[str] = None,
+    ) -> None: ...
+
+    @overload
     def __init__(
         self,
         cbits: List[int],
@@ -1619,18 +1754,35 @@ class ConditionalBlock(qx.ConditionalBlock):
         then_body: "AnyBlock",
         else_body: Optional["AnyBlock"] = None,
         name: Optional[str] = None,
-    ):
+    ) -> None: ...
+
+    def __init__(
+        self,
+        cbits: List[int],
+        values: List[bool],
+        then_body: Optional["AnyBlock"],
+        else_body: Optional["AnyBlock"] = None,
+        name: Optional[str] = None,
+    ) -> None:
         # then_body / else_body are lifted from their raw C++ buffers; bake
         # any pending set_symbols / replace_symbols / dagger first (same
         # boundary hazard as ControlledBlock).  ``None`` passes through.
-        qx.ConditionalBlock.__init__(
-            self,
-            cbits,
-            values,
-            _materialise_pending_ops(then_body),
-            _materialise_pending_ops(else_body) if else_body is not None else None,
-            name or "Conditional",
-        )
+        else_baked = _materialise_pending_ops(else_body) if else_body is not None else None
+        if then_body is not None:
+            qx.ConditionalBlock.__init__(
+                self,
+                cbits,
+                values,
+                _materialise_pending_ops(then_body),
+                else_body=else_baked,
+                name=name or "Conditional",
+            )
+        elif else_baked is not None:
+            qx.ConditionalBlock.__init__(
+                self, cbits, values, None, else_body=else_baked, name=name or "Conditional"
+            )
+        else:
+            raise TypeError("ConditionalBlock needs a then_body or an else_body")
         self._init_python_state()
 
 
@@ -1641,9 +1793,23 @@ class ConditionalBlock(qx.ConditionalBlock):
 # (leaf) or `CompositeBlockBase` (tree) instead.
 AnyBlock: TypeAlias = qx.Block
 
+#: A block built by ``qarp``: one of the six Python block classes, which carry
+#: members a raw ``qarpx`` block lacks (``symbols``, ``parameter_map``, the
+#: lazy ``set_symbols``).  Annotates parameters that read those members, and
+#: rejects a raw block under ``isinstance``.
+QarpBlock: TypeAlias = (
+    SimpleBlock
+    | CompositeBlockBase
+    | ControlledBlock
+    | MeasureBlock
+    | ResetBlock
+    | ConditionalBlock
+)
+
 
 __all__ = [
     "AnyBlock",  # hint/isinstance type, = qx.Block
+    "QarpBlock",  # hint/isinstance type, the Python block classes
     "SimpleBlock",
     "CompositeBlockBase",
     "ControlledBlock",

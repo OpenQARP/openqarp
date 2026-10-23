@@ -225,3 +225,13 @@ def test_rejects_complex_matrix_with_real_imaginary_part():
     u[0, 1] = 0.5j
     with pytest.raises(ValueError, match="real orthogonal"):
         OrbitalRotationBlock(u)
+
+
+def test_rotation_matrix_holds_the_input():
+    """The input's name does not hide the ``u`` gate method, which raises on this
+    composite (§13)."""
+    u = np.eye(2)
+    block = OrbitalRotationBlock(u)
+    np.testing.assert_array_equal(block.rotation_matrix, u)
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.u(0, 0.1, 0.2, 0.3)

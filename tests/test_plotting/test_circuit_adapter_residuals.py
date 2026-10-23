@@ -136,3 +136,19 @@ def test_control_state_int_follows_conventions_lsb_order():
         assert per_convention == [int(b) for b in state], (
             f"state={state} packed={packed:b} reads as {per_convention} under §6"
         )
+
+
+def test_an_unbuilt_raw_block_lists_its_recorded_gates():
+    raw = qx.SimpleBlock(1, "h")
+    raw.h(0)
+    assert [repr(c) for c in CircuitAdapter(raw).get_commands()] == ["H [q[0]]"]
+
+
+def test_a_raw_controlled_block_plots_as_a_controlled_box():
+    """Two controls, the first active on |1⟩ and the second on |0⟩: state 0b01 (§6, LSB)."""
+    inner = qx.SimpleBlock(1, "u")
+    inner.x(0)
+    raw = qx.ControlledBlock(inner, 2, [True, False]).build()
+    op = CircuitAdapter._wrap_controlled_child(raw, [0, 1, 2]).op
+    assert isinstance(op, _ControlledBlockOp)
+    assert (op.get_n_controls(), op.get_control_state()) == (2, 0b01)

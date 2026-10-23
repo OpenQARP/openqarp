@@ -633,7 +633,7 @@ class VUMPO:
         self,
         params: ParamLike,
         initial_state: Optional[Sequence[int]] = None,
-        prev_states: Optional[List[Tuple[Union[ParamLike, NDArray[Any]], Sequence[int]]]] = None,  # type: ignore[arg-type]
+        prev_states: Optional[List[Tuple[Union[ParamLike, NDArray[Any]], Sequence[int]]]] = None,
     ) -> float:
         """The VUMPO cost function.
 
@@ -897,7 +897,7 @@ class VUMPO:
         flat_params = np.concatenate([np.asarray(p) for p in initial_params])
 
         def global_cost(p: NDArray[np.float64]) -> Tuple[float, NDArray[np.float64]]:
-            return self._value_and_gradient(p, initial_state, prev_states)  # type: ignore[arg-type]
+            return self._value_and_gradient(p, initial_state, prev_states)
 
         results = minimize(
             global_cost,

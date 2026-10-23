@@ -1,3 +1,6 @@
 # Vendored upstream sources: keep them out of language stats and diffs.
 cpp/libqarpx/third_party/csim/** linguist-vendored
 cpp/libqarpx/third_party/eigen/** linguist-vendored
+
+# Generated stub: stubgen writes in text mode, so pin LF on every platform.
+cpp/libqarpx/python/qarpx.pyi text eol=lf

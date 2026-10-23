@@ -48,3 +48,6 @@ endif()
 # COMPONENT python so scikit-build-core's `install.components = ["python"]` picks
 # up *only* this target and not the dev install-tree lib/headers.
 install(TARGETS qarpx_pymod DESTINATION . COMPONENT python)
+# The committed stub, as a PEP 561 stub-only package: a qarpx.pyi beside a
+# single-module extension is not read by type checkers.
+install(FILES qarpx.pyi DESTINATION qarpx-stubs RENAME __init__.pyi COMPONENT python)

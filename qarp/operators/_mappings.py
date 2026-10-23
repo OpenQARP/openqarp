@@ -55,14 +55,11 @@ class JordanWigner(Mapping):
         Returns:
              The result of the mapping as a list of, or single, QubitOperator.
         """
-        qop = None
         if isinstance(op, FermionOperator):
-            qop = jordan_wigner(op)
+            return jordan_wigner(op)
         if isinstance(op, list):
-            qop = [jordan_wigner(i) for i in op]
-        if qop is None or not (isinstance(op, FermionOperator) or isinstance(op, list)):
-            raise RuntimeError("Unrecognised type passed to .encode_operator().")
-        return qop
+            return [jordan_wigner(i) for i in op]
+        raise RuntimeError("Unrecognised type passed to .encode_operator().")
 
     def encode_state(self, onv: Onv) -> list[int]:
         """Perform a state mapping of a provided onv to an initial bitrepresentation.

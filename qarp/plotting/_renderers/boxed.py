@@ -62,7 +62,7 @@ class BoxedGateRenderer(GateRenderer):
         self._draw_label_connector(ax, x, base_y, y_text)
 
         # Determine text color based on box background
-        box_color = (self.config.gate_colors or {}).get("box", "#EFEFEF")  # type: ignore[union-attr]
+        box_color = (self.config.gate_colors or {}).get("box", "#EFEFEF")
         if is_identity or self.config.gate_style == "outline":
             text_color = self.config.text_color
         else:

@@ -88,7 +88,7 @@ class Grover(CompositeAlgorithm):
         self.n_iterations, self.predicted_success_probability = optimal_grover_iterations(
             self.n_qubits, self.n_marked
         )
-        self.block: Optional[AnyBlock] = None
+        self.block: Optional[GroverBlock] = None
         self.distribution: Optional[SamplingDictionary] = None
         self.most_likely_states: Optional[tuple[int, ...]] = None
         self.success_probability: Optional[float] = None

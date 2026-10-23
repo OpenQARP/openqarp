@@ -2,7 +2,7 @@
 
 import qarpx as qx
 
-from ._internals import _cmd, _CutMarker, _measure_cmd
+from ._internals import _CutMarker, _measure_cmd
 
 
 class Reconstructer:
@@ -118,6 +118,8 @@ class Reconstructer:
         """
         qubit_set = set(qubits)
         qubit_map = {gq: lq for lq, gq in enumerate(sorted(qubits))}
+        # Indexed by root qubit; only qubits in the subset are ever read.
+        remap = [qubit_map.get(q, 0) for q in range(max([n_qubits, *qubit_set]) + 1)]
         new_commands = []
         qpd_cbit_counter = 0
 
@@ -126,14 +128,12 @@ class Reconstructer:
             for cmd in commands:
                 if not isinstance(cmd, qx.Command):
                     continue
-                if len(cmd.qubits) == 2:
-                    q0, q1 = cmd.qubits[0], cmd.qubits[1]
-                    in_set = q0 in qubit_set, q1 in qubit_set
-                    if in_set[0] != in_set[1]:
-                        raise RuntimeError(
-                            f"2q gate on ({q0},{q1}) straddles subcircuit boundary. "
-                            "Cut the circuit before filtering."
-                        )
+                inside = {q in qubit_set for q in cmd.qubits}
+                if len(inside) == 2:
+                    raise RuntimeError(
+                        f"{len(cmd.qubits)}q gate on {tuple(cmd.qubits)} straddles subcircuit "
+                        "boundary. Cut the circuit before filtering."
+                    )
 
         for cmd in commands:
             if not isinstance(cmd, qx.Command):
@@ -147,9 +147,7 @@ class Reconstructer:
                 new_commands.append(_measure_cmd(local_qubits[0], qpd_cbit_counter))
                 qpd_cbit_counter += 1
             else:
-                new_commands.append(
-                    _cmd(cmd.gate, *local_qubits, *(cmd.params if cmd.params else []))
-                )
+                new_commands.append(cmd.remap_qubits(remap))
 
         local_n_qubits = len(qubits)
         return new_commands, local_n_qubits

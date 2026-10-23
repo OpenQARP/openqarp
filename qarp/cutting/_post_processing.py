@@ -44,7 +44,7 @@ class PostProcessing(ABC):
         self.observable = observable
 
         self._experiments = None  # list of command lists (one per full experiment)
-        self._jobs = None  # dict {str(i_sub): list of (cmds, n_qubits)}
+        self._jobs: dict | None = None  # dict {str(i_sub): list of (cmds, n_qubits)}
         self._coefficients = None
 
     @abstractmethod

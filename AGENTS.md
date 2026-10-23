@@ -32,8 +32,9 @@ touching those areas.
 
 ## Commands
 
-- Editable install: `pip install -e ".[full-dev]"` (`[dev]` is ruff, mypy
-  and pre-commit only — no pytest, no optional backends; `[full-dev]` is not
+- Editable install: `pip install -e ".[full-dev]"` (`[dev]` is ruff, mypy,
+  pre-commit and nanobind's stub generator only — no pytest, no optional
+  backends; `[full-dev]` is not
   every extra — `docs`, `notebooks`, `integrations`, `bench` and
   `cudaq-runtime` are excluded).  C++ edits then need
   the install re-run.  Run it **inside the repo-root venv** (`python -m venv
@@ -60,8 +61,11 @@ touching those areas.
   dies at `import qarp` with `UnsupportedOperation`.
 - Lint + format, blocking in CI and pre-commit (config in `[tool.ruff]`):
   `ruff check --fix . && ruff format .`
-- Types: `mypy qarp/ tests/ --disable-error-code=import-untyped
-  --disable-error-code=method-assign`
+- Types: `mypy qarp/ tests/ --disable-error-code=import-untyped`.  mypy reads
+  `qarpx` from the committed stub, `cpp/libqarpx/python/qarpx.pyi`.  After a
+  binding change, regenerate it with `python scripts/generate_stubs.py` under
+  Python 3.12 and commit it with the change; `tests/test_stubs.py` fails on a
+  stale stub (§15).
 - Git worktrees: a shared venv resolving `qarpx` to another checkout's build
   now fails fast at `import qarp` (ABI + source-dir stamps, `qarp/_abi.py`).
   The fix is a venv + editable install inside the worktree;
@@ -86,8 +90,11 @@ touching those areas.
   built block.  Never hand-zip parameter vectors against any other list —
   use `block.parameter_map(values)` / `optimal_parameters` (§17).
 - **Block inheritance**: new internal blocks extend `SimpleBlock` (leaf) or
-  `CompositeBlockBase` (tree).  The `Block` alias is gone — annotate "any
-  block" with `AnyBlock` (= `qx.Block`); it is a type, not a base class.
+  `CompositeBlockBase` (tree).  There is no `Block` base class — annotate
+  "any block" with `AnyBlock` (= `qx.Block`), a type, not a base class.  A
+  parameter that reads members only the Python blocks have (`.symbols`,
+  `parameter_map`) takes `QarpBlock` instead, which rejects a raw `qx` block
+  (§13).
 - **SDK imports are integration-only** — qiskit/pytket/pennylane/qulacs never
   appear in core code paths; the emit/absorb adapters import them lazily
   (§15).  They live only in the test-only `[integrations]` extra (nightly

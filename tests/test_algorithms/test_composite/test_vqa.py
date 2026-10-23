@@ -68,6 +68,13 @@ def test_gradient_with_sampler_is_refused_at_gradient_time():
         vqa.engine.run_gradient(vqa.ket.parameter_map([0.3]))
 
 
+def test_a_sampler_primitive_is_refused_by_the_objective():
+    vqa = VQA(QubitOperator("Z0"), _ry_ket(), "t", primitive=Sampler(n_shots=10))
+    vqa.build()
+    with pytest.raises(TypeError, match="expectation-valued"):
+        vqa.run()
+
+
 def test_access_before_run_raises():
     vqa = VQA(QubitOperator("Z0"), _ry_ket(), "t", initial_parameters=[0.1])
     with pytest.raises(RuntimeError, match="call run"):

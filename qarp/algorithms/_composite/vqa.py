@@ -1,11 +1,11 @@
-from typing import Dict, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 import numpy as np
 from sympy import Symbol
 
 from qarp.operators import QubitOperator
 
-from ...blocks import AnyBlock
+from ...blocks import AnyBlock, QarpBlock
 from ...engines import Engine
 from ...engines._gradients import gradient_method_from_flag
 from ...optimizers import Optimizer, ScipyOptimizer
@@ -20,9 +20,11 @@ class VQA(CompositeAlgorithm):
     def __init__(
         self,
         operator: Union[QubitOperator, AnyBlock],
-        ket: AnyBlock,
+        ket: QarpBlock,
         name: str,
-        initial_parameters: Optional[Union[Mapping, np.typing.NDArray[np.float64]]] = None,
+        initial_parameters: Optional[
+            Union[Mapping, Sequence[float], np.typing.NDArray[np.float64]]
+        ] = None,
         gradient: Union[bool, str] = False,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = False,
@@ -76,8 +78,8 @@ class VQA(CompositeAlgorithm):
         super().__init__(engine=engine, primitive=primitive)
 
         # Additional attributes
-        self.result = None
-        self.final_block = None
+        self.result: Any = None
+        self.final_block: Optional[QarpBlock] = None
 
         # Validate ket symbols and set initial parameters
         if not self.ket.symbols:
@@ -107,7 +109,7 @@ class VQA(CompositeAlgorithm):
             raise RuntimeError("No optimization result — call run() first.")
         return self.ket.parameter_map(self.result.x)
 
-    def get_final_state_block(self) -> AnyBlock:
+    def get_final_state_block(self) -> QarpBlock:
         """The ket bound at the optimal parameters (set by ``run()``)."""
         if self.final_block is None:
             raise RuntimeError("No optimization result — call run() first.")
@@ -143,12 +145,11 @@ class VQA(CompositeAlgorithm):
             The final energy and final parameters as a float and list of floats.
         """
         self.energy_history = []
+        symbols = self.ket.symbols
+        assert symbols is not None  # build() published them
 
         def objective(x):
-            val = self.engine.run(dict(zip(self.ket.symbols, x, strict=True)))[0]
-            if isinstance(val, complex):
-                val = val.real
-            val = float(val)
+            val = self._real_part(self.engine.run(dict(zip(symbols, x, strict=True)))[0])
             self._last_objective = val
             return val
 
@@ -158,43 +159,42 @@ class VQA(CompositeAlgorithm):
             def gradient_fn(x):
                 # The objective takes the real part; so does its gradient.
                 grad = self.engine.run_gradient(
-                    dict(zip(self.ket.symbols, x, strict=True)),
+                    dict(zip(symbols, x, strict=True)),
                     method=self.gradient_method or "default",
                 )[0].real
                 self._last_gradnorm = float(np.linalg.norm(grad))
                 return grad
 
+        iteration = 0
+        previous_energy: Optional[float] = None
+        previous_theta: Optional[np.ndarray] = None
+
         def callback(x):
+            nonlocal iteration, previous_energy, previous_theta
             # Reads the last-evaluation caches — no extra quantum work.
             energy = self._last_objective
+            assert energy is not None  # the optimizer evaluates before each callback
             gradnorm = self._last_gradnorm if self.gradient else None
-            dE = 0.0 if callback.previous_energy is None else energy - callback.previous_energy
+            dE = 0.0 if previous_energy is None else energy - previous_energy
             step_size = (
                 0.0
-                if callback.previous_theta is None
-                else float(np.linalg.norm(np.asarray(x) - callback.previous_theta))
+                if previous_theta is None
+                else float(np.linalg.norm(np.asarray(x) - previous_theta))
             )
             if self.verbose:
-                self._log_iteration(callback.iter, energy, dE, step_size, gradnorm, label=self.name)
+                self._log_iteration(iteration, energy, dE, step_size, gradnorm, label=self.name)
             if self.save_energy_history:
                 self.energy_history.append(energy)
-            callback.previous_energy = energy
-            callback.previous_theta = np.asarray(x, dtype=float).copy()
-            callback.iter += 1
-
-        callback.iter = 0
-        callback.previous_energy = None
-        callback.previous_theta = None
-
-        if not (self.verbose or self.save_energy_history):
-            callback = None
+            previous_energy = energy
+            previous_theta = np.asarray(x, dtype=float).copy()
+            iteration += 1
 
         self.result = self._minimize(
             objective,
             self.initial_parameters,
             self.optimizer,
             gradient=gradient_fn,
-            callback=callback,
+            callback=callback if self.verbose or self.save_energy_history else None,
             success_label=self.name,
             suppress_success=self.suppress_success_message,
         )

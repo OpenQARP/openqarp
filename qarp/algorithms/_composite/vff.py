@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 import numpy as np
 
@@ -8,6 +8,7 @@ from qarp.blocks import (
     AnyBlock,
     CompositeBlock,
     LayerBlock,
+    QarpBlock,
     SimpleBlock,
     SynthesizedTimeEvolutionBlock,
     TrotterBlock,
@@ -23,12 +24,12 @@ class VFF(CompositeAlgorithm):
     def __init__(
         self,
         operator: Union[QubitOperator, AnyBlock],
-        ansatz_block: AnyBlock,
+        ansatz_block: QarpBlock,
         use_trotter: bool = False,
         t_time: float = 1.0,
         t_steps: int = 1,
         t_order: int = 1,
-        initial_parameters: Optional[np.typing.NDArray[np.float64]] = None,
+        initial_parameters: Optional[Union[Sequence[float], np.typing.NDArray[np.float64]]] = None,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = True,
         primitive: Optional[PrimitiveAlgorithm] = None,
@@ -138,7 +139,9 @@ class VFF(CompositeAlgorithm):
         """Positional parameter surface: ansatz symbols first, then the
         diagonal layer's — a documented concatenation of two canonical
         orders, NOT globally sorted.  Available after build()."""
-        return tuple(self.ansatz_block.symbols) + tuple(self.D.symbols)
+        ansatz, diagonal = self.ansatz_block.symbols, self.D.symbols
+        assert ansatz is not None and diagonal is not None  # checked, and built by build()
+        return tuple(ansatz) + tuple(diagonal)
 
     @property
     def optimal_parameters(self):
@@ -149,7 +152,7 @@ class VFF(CompositeAlgorithm):
 
     def objective(self, x):
         parameter_map = dict(zip(self._all_symbols, x, strict=True))
-        vals = np.real(self.engine.run(parameter_map))
+        vals = [self._real_part(v) for v in self.engine.run(parameter_map)]
         val = 1 - sum(vals) / self.n_qubits
         self._last_objective = val
         return val
@@ -157,12 +160,13 @@ class VFF(CompositeAlgorithm):
     def run(self):
         objective_function = lambda x: self.objective(x)
 
-        def callback(intermediate_result):
-            # Reads the last-evaluation cache — no extra quantum work.
-            print(f"Iteration: {callback.iter} \t Loss value: {self._last_objective}")
-            callback.iter += 1
+        iteration = 0
 
-        callback.iter = 0
+        def callback(intermediate_result):
+            nonlocal iteration
+            # Reads the last-evaluation cache — no extra quantum work.
+            print(f"Iteration: {iteration} \t Loss value: {self._last_objective}")
+            iteration += 1
 
         if self.verbose:
             res = self.optimizer.minimize(

@@ -118,7 +118,7 @@ class Graph(nxGraph):
         n_qubits = self.n_qubits
         for u, v in self.edges:
             _reject_self_loop(u, v)
-        edges = [(int(u), int(v)) for u, v in self.edges]
+        edges: list[tuple[int, ...]] = [(int(u), int(v)) for u, v in self.edges]
         return HypergraphStateBlock(n_qubits=n_qubits, edges=edges, **kwargs)
 
     # ── sparse matrix accessors (weighted by the `weight` edge attribute) ──

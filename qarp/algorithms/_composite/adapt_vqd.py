@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from copy import deepcopy
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union, cast
 
 import numpy as np
 from sympy import Symbol
@@ -8,7 +9,7 @@ from qarp.operators import QubitOperator
 from qarp.operators.functions import hermitian_conjugated
 
 from ..._types import Consumes
-from ...blocks import AnyBlock
+from ...blocks import AnyBlock, QarpBlock
 from ...engines import Engine
 from ...engines._gradients import gradient_method_from_flag
 from ...optimizers import Optimizer, ScipyOptimizer
@@ -21,10 +22,10 @@ from .vqd import deflation_gradient, squared_overlap
 class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
     def __init__(
         self,
-        reference_block: AnyBlock,
+        reference_block: QarpBlock,
         hamiltonian: QubitOperator,
         excitation_pool: List[QubitOperator],
-        orthogonal_states: List[AnyBlock],
+        orthogonal_states: Sequence[AnyBlock],
         betas: List[float],
         gradient: Union[bool, str] = False,
         optimizer: Optional[Optimizer] = None,
@@ -124,7 +125,8 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
         if self.primitive.consumes is Consumes.AMPLITUDES:
             return self._pool_scan_statevector(wfn, params)
 
-        term_vector = []
+        # One primitive per pool entry, or under ADAPT-VQD one list of them.
+        term_vector: list[Any] = []
         for e in self.pool:
             comm = 2 * e * self.hamiltonian
             comm = 0.5 * (comm + hermitian_conjugated(comm))
@@ -159,11 +161,9 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
                 t = np.array(values[1:][::2])
                 o = np.array(values[1:][1::2])
                 gradients[i] += c + sum(2 * np.array(self.betas) * t * o)
-        else:
-            self.engine.build(term_vector)
-            gradients = self.engine.run(params)
-
-        return [g.real for g in gradients]
+            return [g.real for g in gradients]
+        self.engine.build(term_vector)
+        return [self._real_part(g) for g in self.engine.run(params)]
 
     def _pool_scan_statevector(self, wfn, params) -> list:
         """Exact pool gradients from mapped vectors (no operator products).
@@ -275,18 +275,19 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
         # gradient evaluation.
         self.engine.build(vqe_meas)
 
+        last_energy: Optional[float] = None
+
         def vqe(x):
+            nonlocal last_energy
             pars = dict(zip(self.ansatz_symbols, x, strict=True))
             vals = self.engine.run(pars)
-            en = vals[0]
+            en = cast(complex, vals[0])  # an estimator result is a scalar
             penalty = sum(
                 beta * squared_overlap(prim, o)
                 for beta, prim, o in zip(self.betas, ovs, vals[1:], strict=True)
             )
-            vqe.en = en
+            last_energy = float(np.real(en))
             return float(np.real(en + penalty))
-
-        vqe.en = None
 
         def vqd_gradient(x):
             pars = dict(zip(self.ansatz_symbols, x, strict=True))
@@ -310,7 +311,8 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
         )
         self.ansatz_parameters = list(result.x)
 
-        self.iter_energies.append(vqe.en)
+        assert last_energy is not None  # minimize evaluates the objective
+        self.iter_energies.append(last_energy)
         if self.terminate_if_coeff_zero and abs(self.ansatz_parameters[-1]) < 1e-8:
             self.converged = True
             if self.verbose:
@@ -321,7 +323,7 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
             self._iteration_print(
                 largest_grad=gradients[np.argmax(grads_abs)],
                 exponent_chosen=",".join(str(a) for a in args_added),
-                energy=vqe.en.real,
+                energy=last_energy,
             )
         self.iter += 1
 
@@ -353,7 +355,7 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
         (alias of ``ansatz_parameters_dict``, populated by ``run()``)."""
         return dict(zip(self.ansatz_symbols, self.ansatz_parameters, strict=True))
 
-    def get_final_state_block(self):
+    def get_final_state_block(self) -> QarpBlock:
         """Use the current object reference, ansatz excitations and symbols to construct a wavefunction object.
 
         Returns:

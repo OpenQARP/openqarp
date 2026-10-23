@@ -147,11 +147,11 @@ class _ControlledBlockOp:
         return f"ControlledBlock({self.circuit_name})"
 
     def get_n_controls(self) -> int:
-        return int(self._block.n_controls or 1)
+        return int(self._block.num_controls)
 
     def get_control_state(self) -> int:
         # LSB-first per conventions §6: bit k is control qubit k.
-        state = self._block.control_state or [True] * self.get_n_controls()
+        state = self._block.ctrl_state
         return sum(1 << k for k, bit in enumerate(state) if bit)
 
     def get_op(self):
@@ -173,10 +173,6 @@ class _BoxCommand:
     def __repr__(self):
         qs = ", ".join(str(q) for q in self.qubits)
         return f"{self.op} [{qs}]"
-
-
-def _is_built(block) -> bool:
-    return bool(getattr(block, "_built", False) or getattr(block, "is_built", False))
 
 
 def _is_measure_only(block) -> bool:
@@ -279,7 +275,7 @@ class CircuitAdapter:
         Composite + built + not decomposing → one box per child.
         Otherwise → flat primitive gates.
         """
-        built = _is_built(source)
+        built = source.is_built
         if (
             not decompose_boxes
             and built
@@ -336,7 +332,7 @@ class CircuitAdapter:
         plain box spanning all qubits if the control metadata can't be read."""
         try:
             inner = child.inner() if callable(getattr(child, "inner", None)) else None
-            if inner is None or not child.n_controls:
+            if inner is None or not child.num_controls:
                 raise AttributeError("missing control metadata")
             return _BoxCommand(_ControlledBlockOp(child, inner), target_qubits)
         except Exception:

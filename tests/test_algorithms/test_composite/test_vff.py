@@ -15,12 +15,15 @@ class hamiltonians:
 
 
 from scipy.optimize import OptimizeResult
+from sympy import Symbol
 
+import qarpx as qx
 from qarp.algorithms import VFF
 from qarp.blocks import (
     ComputationalBasisStateBlock,
     HEABlock,
     HnBlock,
+    SimpleBlock,
     SPABlock,
 )
 from qarp.operators import JordanWigner
@@ -181,3 +184,17 @@ def test_wrong_length_parameter_vector_raises():
     vff = VFF(U, hea, optimizer=AdamOptimizer({"maxiter": 2, "lr": 0.1})).build()
     with pytest.raises(ValueError):
         vff.objective(np.zeros(len(vff._all_symbols) - 1))
+
+
+def test_vff_over_a_raw_unitary():
+    """VFF's Hilbert–Schmidt test reads |00⟩ with probability |Tr(V†U)|²/4 for the trial
+    V = Ry(a) Rz(θ) Ry(−a).  At a = π/4, θ = π, V = −iH, so a raw H as U gives 1;
+    without U in the circuit it gives |Tr(iH)|²/4 = 0."""
+    h = qx.SimpleBlock(1, "h")
+    h.h(0)
+    ansatz = SimpleBlock(1)
+    ansatz.ry(0, Symbol("a"))
+    vff = VFF(h, ansatz.build(), verbose=False).build()
+    cmds = list(vff.primitives[0].ket.flatten())
+    bound = qx.substitute_all(cmds, {"a": np.pi / 4, "theta_0": np.pi})
+    assert abs(qx.QarpSimulator().statevector(bound, 2)[0]) ** 2 == pytest.approx(1, abs=1e-12)

@@ -66,6 +66,9 @@ public:
     /// sequence to the simulator.
     [[nodiscard]] std::vector<uint32_t> uninitialised_condition_cbits() const;
 
+protected:
+    [[nodiscard]] bool accepts_gates() const override { return false; }
+
 private:
     std::vector<ref<Block>> children_;
 

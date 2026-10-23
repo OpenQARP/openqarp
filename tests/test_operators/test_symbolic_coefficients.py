@@ -12,13 +12,14 @@ import pickle
 import pytest
 import sympy
 
+import qarpx as qx
 from qarp.operators import FermionOperator, QubitOperator
 from qarp.operators.functions import (
     hermitian_conjugated,
     jordan_wigner,
 )
 
-SYMENGINE_ENABLED = hasattr(QubitOperator, "substitute")
+SYMENGINE_ENABLED = qx.__with_symengine__
 
 needs_symengine = pytest.mark.skipif(
     not SYMENGINE_ENABLED,
@@ -170,3 +171,13 @@ def test_symbolic_raises_without_backend():
         QubitOperator("X0", a)
     with pytest.raises(RuntimeError, match="SymEngine"):
         FermionOperator("2^", a)
+
+
+def test_with_symengine_flag_matches_the_build():
+    """Oracle: whether a symbolic coefficient constructs on this build."""
+    try:
+        QubitOperator("X0", a)
+        constructs = True
+    except RuntimeError:
+        constructs = False
+    assert qx.__with_symengine__ is constructs

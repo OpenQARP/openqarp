@@ -28,18 +28,7 @@ the same window.
   good.
 - **Plan text on the plan-only branches.**  `pauli_engine_plan.md` and
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
-  `prepare_structured_qpe`; the counter is 14 after structured execution and
-  the hook is gone.  Fix when each branch rebases.
-- **`is_built` is a method on a raw `qx.Block`.**  The Python blocks shadow
-  it with a property, so code that reads `block.is_built` without calling it
-  takes an unbuilt raw block for built, and `flatten()` then raises:
-  `ResourceEstimator.estimate` (`qarp/resources/_estimator.py`),
-  `CuttingPrimitive.build` (`cutting_primitive.py`) and `CircuitAdapter`
-  (`qarp/plotting/_circuit_adapter.py`).  Bind it with `def_prop_ro`
-  (`cpp/libqarpx/python/bindings.cpp`), which bumps the ABI counter; the
-  `_is_built` helpers in `qarp/_program.py` and `_circuit_adapter.py` then
-  go, and `tests/test_blocks/test_block.py` stops calling it.  A regression
-  test per call site, each with an unbuilt raw block.
+  `prepare_structured_qpe`; the counter is 15 and the hook is gone.  Fix when each branch rebases.
 
 ## Breaking changes waiting for a minor release
 
@@ -90,6 +79,25 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   at 12 threads is slow on its own.  Repeat the Threads measurements of
   `openblas_thread_sharing_plan.md` on bare-metal Linux and revisit the
   default from them.
+- **`check_untyped_defs` for `tests/`.**  `compiled_backend_stubs_plan.md`
+  turns it on for `qarp/` only, so unannotated test bodies, which is nearly
+  every test, are still unchecked.  It reports 762 errors in 134 test files
+  on macOS, 416 of them `arg-type`.  It touches nearly half the test files,
+  so it gets its own plan; land it after the layout move, which would
+  otherwise conflict with it across them.
+- **`qarp` typed for its users.**  `qarp` ships no `py.typed`, so user code
+  sees it untyped.  Running mypy over the example notebooks and the docs
+  snippets finds five gaps to close before it does: a list of Python blocks
+  of different kinds infers as `list[_BlockMixin]`, which a
+  `Sequence[QarpBlock]` parameter rejects, so the six classes need one
+  shared typing base; `symbols` is `Optional`, so `len(block.symbols)` fails
+  in 22 notebook cells and 3 docs snippets, and making it always a tuple
+  changes `symbols is None` checks; `PreparesKnownState`'s members are
+  attached by `setattr`, so mypy sees none of them on the state blocks;
+  `run()` returns `PrimitiveResult`, `float | complex | SamplingDistribution`,
+  so 45 notebook and docs sites must narrow a result before reading it, which
+  a return typed by primitive kind would remove; and a `MonteCarlo` walker's
+  `state_data` is `np.ndarray | AnyBlock`, so 3 notebook cells must narrow it.
 - **`Sampler(postselect=PostSelection(...))`.**  Applying post-selection
   inside `Sampler.run()` waited on a result type that could carry
   `success_rate` without breaking the dict return; `SamplingDistribution`
