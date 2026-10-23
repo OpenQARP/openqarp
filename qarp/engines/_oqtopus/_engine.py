@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, NamedTuple, Optional, Sequence, Union
+from typing import Any, Mapping, NamedTuple, Optional, Sequence
 
 import qarpx as qx
 
-from ..._types import SamplingDictionary, Shots
+from ..._types import PrimitiveResult, Shots
 from ...devices import device_from_oqtopus
 from ...errors import CapabilityError, RemoteJobError
-from .._engine import Engine, _find_true_mcm
+from .._engine import CompiledCircuit, Engine, _find_true_mcm, _substituted
 from .._runnable import Runnable
 from ._result import counts_to_sampling_result
 from ._transport import JobOutcome, OqtopusTransport
@@ -84,7 +84,6 @@ class OqtopusEngine(Engine):
         self._mitigation_info = None if mitigation_info is None else dict(mitigation_info)
         self._seed = None  # hardware randomness is not seedable
         self._primitives: list[Runnable] = []
-        self._l2p_per_primitive: list = []
         self._device = device_from_oqtopus(transport.get_device(device_id))
         self._emitter = qx.QASM3Emitter()
 
@@ -99,6 +98,11 @@ class OqtopusEngine(Engine):
 
     def _routed(self) -> bool:
         return True
+
+    def _compile_stamp(self) -> tuple:
+        # The device record itself: circuits compiled against another
+        # service's topology, or by another engine class, are recompiled.
+        return (type(self), self._device)
 
     # ── compile ────────────────────────────────────────────────────────────
 
@@ -156,27 +160,23 @@ class OqtopusEngine(Engine):
 
     # ── dispatch ───────────────────────────────────────────────────────────
 
-    def _dispatch_one(self, prim: Runnable, substituted, l2p_list, ordinal: int):
+    def _dispatch_one(self, prim: Runnable, compiled, ordinal: int, params):
         shots = self._resolve_shots(prim)
         jobs = [
             (f"{self._job_name}:{type(prim).__name__}:{ordinal + k}", cmds, shots)
-            for k, cmds in enumerate(substituted)
+            for k, cmds in enumerate(_substituted(compiled, params))
         ]
         outcomes = self._submit_and_wait(jobs)
-        results = [
-            self._to_result(o, wiring, n_q, shots)
-            for o, wiring, n_q in zip(outcomes, l2p_list, prim._n_qubits_list, strict=True)
-        ]
+        results = [self._to_result(o, c, shots) for o, c in zip(outcomes, compiled, strict=True)]
         return prim.run(results), ordinal + len(jobs)
 
     def _sweep(
         self,
         primitives,
-        circuits_per_prim,
-        l2p_per_prim,
+        compiled_per_prim,
         param_sets,
         shots_override,
-    ) -> list[list[Union[float, complex, SamplingDictionary]]]:
+    ) -> list[list[PrimitiveResult]]:
         """Submit every (parameter set × primitive × circuit) job up front,
         wait once, then assemble ``results[set_idx][prim_idx]``.  This is what
         makes a parameter-shift gradient one round trip."""
@@ -188,27 +188,23 @@ class OqtopusEngine(Engine):
             for prim_idx, prim in enumerate(primitives):
                 shots = self._resolve_shots(prim, shots_override)
                 positions = []
-                for cmds in circuits_per_prim[prim_idx]:
-                    substituted = qx.substitute_all(cmds, ps) if ps else cmds
-                    jobs.append((f"{self._job_name}:{type(prim).__name__}:{k}", substituted, shots))
+                for cmds in _substituted(compiled_per_prim[prim_idx], ps):
+                    jobs.append((f"{self._job_name}:{type(prim).__name__}:{k}", cmds, shots))
                     positions.append(k)
                     k += 1
                 per_prim.append(positions)
             index.append(per_prim)
         outcomes = self._submit_and_wait(jobs)
 
-        results_by_set: list[list[Union[float, complex, SamplingDictionary]]] = []
+        results_by_set: list[list[PrimitiveResult]] = []
         for set_idx in range(len(param_sets)):
-            set_results: list[Union[float, complex, SamplingDictionary]] = []
+            set_results: list[PrimitiveResult] = []
             for prim_idx, prim in enumerate(primitives):
                 shots = self._resolve_shots(prim, shots_override)
                 sampling_results = [
-                    self._to_result(outcomes[pos], wiring, n_q, shots)
-                    for pos, wiring, n_q in zip(
-                        index[set_idx][prim_idx],
-                        l2p_per_prim[prim_idx],
-                        prim._n_qubits_list,
-                        strict=True,
+                    self._to_result(outcomes[pos], c, shots)
+                    for pos, c in zip(
+                        index[set_idx][prim_idx], compiled_per_prim[prim_idx], strict=True
                     )
                 ]
                 set_results.append(prim.run(sampling_results))
@@ -242,16 +238,15 @@ class OqtopusEngine(Engine):
             raise
 
     @staticmethod
-    def _to_result(outcome: JobOutcome, wiring: Optional[_Wiring], n_qubits: int, shots: int):
-        if wiring is None:
-            # The base's rebuild=False path hands None for circuits this engine
-            # never compiled: they carry no measurement layer and no wiring.
-            raise CapabilityError(
-                "OqtopusEngine: the primitive's circuits were not compiled by this "
-                "engine (built elsewhere, reused with rebuild=False); rebuild them here."
-            )
+    def _to_result(outcome: JobOutcome, compiled: CompiledCircuit, shots: int):
         if outcome["status"] != "succeeded" or outcome["counts"] is None:
             raise RemoteJobError(outcome["job_id"], outcome["status"], outcome["message"])
+        # Every circuit this engine compiles carries a _Wiring; a true
+        # mid-circuit stream never reaches dispatch (_post_compile_check).
+        wiring: _Wiring = compiled.layout
         return counts_to_sampling_result(
-            outcome["counts"], n_qubits=n_qubits, n_shots=shots, wiring=wiring.cbit_to_logical
+            outcome["counts"],
+            n_qubits=compiled.n_qubits,
+            n_shots=shots,
+            wiring=wiring.cbit_to_logical,
         )

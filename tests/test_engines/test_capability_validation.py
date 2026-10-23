@@ -12,6 +12,7 @@ primitives are unaffected.
 import pytest
 
 import qarpx as qx
+from qarp import SamplingDistribution
 from qarp.algorithms import Sampler, StateVector, Target
 from qarp.blocks import SimpleBlock
 from qarp.devices import Device, NoiseModel, get_nearest_neighbour_architecture
@@ -77,7 +78,7 @@ def test_noisy_engine_accepts_sampling_primitive():
     eng = QarpEngine(n_qubits=1, noise_model=NoiseModel.bit_flip(0.05), n_shots=100, seed=0)
     samp = Sampler(ket=_plus_ket(), n_shots=100)
     eng.build([samp])
-    assert isinstance(eng.run()[0], dict)
+    assert isinstance(eng.run()[0], SamplingDistribution)
 
 
 # ── mid-circuit measurement × amplitude consumption ──────────────────────
@@ -94,7 +95,7 @@ def test_mcm_ket_fine_for_sampling():
     eng = QarpEngine(n_shots=100, seed=0)
     samp = Sampler(ket=_mcm_ket(), n_shots=100)
     eng.build([samp])
-    assert isinstance(eng.run()[0], dict)
+    assert isinstance(eng.run()[0], SamplingDistribution)
 
 
 def test_terminal_measure_fine_for_amplitude_primitive():

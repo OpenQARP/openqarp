@@ -319,8 +319,9 @@ class OqtopusEngine(Engine):
     def _routed(self) -> bool: return True
     def _compile_one(self, flat, block_n_qubits): ...       # compile_for_device + measurement layer (_Wiring)
     def _post_compile_check(self, prim, compiled, layout): ...  # _reject_true_mcm
-    def _dispatch_one(self, prim, substituted, l2p_list, ordinal): ...
-    def _sweep(self, primitives, circuits_per_prim, l2p_per_prim, param_sets, shots_override): ...
+    def _compile_stamp(self): ...                     # (type, device): foreign circuits recompile
+    def _dispatch_one(self, prim, compiled, ordinal, params): ...   # CompiledCircuit.layout is the _Wiring
+    def _sweep(self, primitives, compiled_per_prim, param_sets, shots_override): ...
 
 # qarp/errors.py
 class RemoteJobError(RuntimeError):
@@ -411,7 +412,7 @@ block) appear only as *additional* rows.
 | `PauliAveraging(Z₀)` on `Ry(θ)|0⟩`: `cos θ` within 5σ for θ ∈ {0.3, 1.1, 2.5} | analytic | `…::test_expectation_cos` |
 | Routed: line topology `0–1–2`, ket `X(0)·CX(0,2)` → single key `101` (logical order) | analytic + §14 reindex rule | `…::test_routed_counts_logical_order` |
 | Engine lays the measurement layer: a measurement-free block submits `bit[n] c;` and `c[i] = measure q[i]` for every *logical* qubit; a block measuring one qubit explicitly still measures the rest (uniform H⊗3 within 5σ) | §12.1 emission table; analytic | `…::test_measure_all_appended`, `…::test_partially_measured_block_still_reports_every_qubit` |
-| Transport whose `cancel` raises → the original `TimeoutError` still propagates; circuits compiled by another engine reused with `rebuild=False` → `CapabilityError` | contract | `…::test_failed_cancel_does_not_mask_the_timeout`, `…::test_foreign_compiled_circuits_are_refused` |
+| Transport whose `cancel` raises → the original `TimeoutError` still propagates; circuits compiled by another engine reused with `rebuild=False` are recompiled here (stamp mismatch), measurement layer included | contract; analytic `sin²(θ/2)` | `…::test_failed_cancel_does_not_mask_the_timeout`, `…::test_foreign_compiled_circuits_are_recompiled` |
 | `RemoteOqtopusTransport()` with `OQTOPUS_URL` set and no config file resolves the env; `cancel` swallows transport errors | contract | `test_oqtopus_transport.py` |
 | `batch_run` over 3 parameter sets: `len(transport.log["submit"]) == 3 × n_circuits`, one `wait_all`; per-set values equal `run()` at the same params within 5σ | structural + analytic (`cos θ` rows) | `…::test_sweep_submits_all_then_waits` |
 | Parameter-shift VQE, 1 qubit, `H = Z`, ansatz `Ry(θ)`: converges to `θ ≈ π`, energy `−1 ± 5σ` | analytic minimum | `…::test_vqe_one_qubit_parameter_shift` |
@@ -508,9 +509,7 @@ Declared during implementation and folded into the sections above:
   (the SDK alone reads only the file).
 - **Review fix pass**: every logical qubit a block leaves unmeasured is
   measured too (the Sampler contract is the full register, as on
-  `QarpEngine`); a failing `cancel` never masks the error that triggered it;
-  circuits compiled by another engine and reused with `rebuild=False` raise
-  `CapabilityError` instead of crashing.
+  `QarpEngine`); a failing `cancel` never masks the error that triggered it.
 - **Phase 3a rows** (Test plan, open items 2–4).  The planned
   "untranspiled Bell" row used `h`, which the gateway refuses under
   `transpiler_lib: None`; the row now submits the `sx_rz` form and a second
@@ -520,3 +519,11 @@ Declared during implementation and folded into the sections above:
   layout, API, test plan).  It pairs with `LocalOqtopusTransport` on the
   distinction a user cares about, where the circuits run, rather than on the
   package it wraps.
+- **Ported to the lazy-circuit / structured-execution Engine template**
+  (API).  `develop` now hands hooks `CompiledCircuit` records: the routing
+  record travels as `CompiledCircuit.layout` (the `_Wiring`) instead of an
+  engine-held list, `_dispatch_one` binds parameters itself, and
+  `_compile_stamp` is `(type, device)`, so circuits compiled by another
+  engine or against another topology are recompiled under `rebuild=False`
+  rather than refused.  No structured programs are planned: `_plan_unbuilt`
+  and `_plan_built` keep their defaults, every circuit runs as a gate stream.

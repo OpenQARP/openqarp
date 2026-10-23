@@ -49,7 +49,7 @@ def reference_commuting_unitary(paulis: list[str], angles: list[float]) -> np.nd
 
 def build_block_unitary(block: qx.Block) -> np.ndarray:
     """Build the full unitary by simulating the block's flattened commands."""
-    if not block.is_built():
+    if not block.is_built:
         block.build()
     return np.array(qx.QarpSimulator().unitary_matrix(block.flatten(), block.n_qubits))
 

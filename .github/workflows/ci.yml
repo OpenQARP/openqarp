@@ -127,7 +127,15 @@ jobs:
       - run: python -m pip install "$(ls dist/*.whl)[full-dev]"
       - run: |
           mypy --version
-          mypy qarp/ tests/ --disable-error-code=import-untyped --disable-error-code=method-assign
+          mypy qarp/ tests/ --disable-error-code=import-untyped
+      # Outside the checkout no mypy.ini applies: the wheel's own qarpx-stubs
+      # must resolve.
+      - name: The wheel's qarpx stub resolves
+        run: |
+          cd "$(mktemp -d)"
+          printf 'import qarpx as qx\nreveal_type(qx.SimpleBlock(1, "probe").n_qubits)\n' > probe.py
+          mypy probe.py | tee out.txt
+          grep -q 'Revealed type is "builtins.int"' out.txt
 
   pytest:
     needs: [wheel]

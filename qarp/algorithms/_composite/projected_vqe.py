@@ -26,6 +26,7 @@ from qarp.algorithms._primitives import StateVector, Target
 from qarp.blocks import (
     AnyBlock,
     ParticleNumberProjectorBlock,
+    QarpBlock,
     SpinSquaredProjectorBlock,
     SyProjectorBlock,
     SzProjectorBlock,
@@ -215,16 +216,14 @@ class _ProjectedStateVector(StateVector):
         self.last_statevector: Optional[np.ndarray] = None
         self.last_projected_statevector: Optional[np.ndarray] = None
 
-    def build(self) -> "_ProjectedStateVector":
+    def circuits(self) -> list:
         if self.projector_matrix is None or self.hamiltonian_matrix is None:
             raise RuntimeError(
                 "ProjectedVQE.build() must set projector_matrix and hamiltonian_matrix "
                 "on the primitive before the engine build."
             )
         self.target = Target.EXPECTATION_VALUE
-        self.ket.build()
-        self.sub_blocks = [self.ket]
-        return self
+        return [self.ket]
 
     def run_from_amplitudes(self, compiled_circuits: list, simulator=None) -> float:
         assert self.projector_matrix is not None and self.hamiltonian_matrix is not None
@@ -273,10 +272,10 @@ class ProjectedVQE(VQE):
     def __init__(
         self,
         operator: QubitOperator,
-        ket: AnyBlock,
+        ket: QarpBlock,
         projector: Optional[Union[AnyBlock, Sequence[AnyBlock]]] = None,
         projector_matrix: Optional[np.ndarray] = None,
-        initial_parameters: Optional[np.typing.NDArray[np.float64]] = None,
+        initial_parameters: Optional[Union[Sequence[float], np.typing.NDArray[np.float64]]] = None,
         optimizer: Optional[Optimizer] = None,
         verbose: bool = False,
         engine: Optional[Engine] = None,
@@ -354,11 +353,15 @@ class ProjectedVQE(VQE):
                 f"ket has {self.ket.n_qubits} qubits but the projector uses {n_qubits}."
             )
 
+        operator, primitive = self.operator, self.primitive
+        # Both fixed at construction: a QubitOperator, and the projected primitive.
+        assert isinstance(operator, QubitOperator)
+        assert isinstance(primitive, _ProjectedStateVector)
         self.projector_matrix = self._build_projector_matrix(n_qubits)
-        self.hamiltonian_matrix = self.operator.sparse_matrix(n_qubits).toarray()
+        self.hamiltonian_matrix = operator.sparse_matrix(n_qubits).toarray()
 
-        self.primitive.projector_matrix = self.projector_matrix
-        self.primitive.hamiltonian_matrix = self.hamiltonian_matrix
+        primitive.projector_matrix = self.projector_matrix
+        primitive.hamiltonian_matrix = self.hamiltonian_matrix
 
         return super().build()
 
@@ -367,9 +370,13 @@ class ProjectedVQE(VQE):
 
         # One extra evaluation at the optimum refreshes the primitive's cached
         # statevectors (the optimizer's last call is not necessarily at x_opt).
-        self.engine.run(dict(zip(self.ket.symbols, np.asarray(parameters), strict=True)))
-        projected = self.primitive.last_projected_statevector
-        self.final_ansatz_statevector = self.primitive.last_statevector
+        symbols, primitive = self.ket.symbols, self.primitive
+        assert symbols is not None  # VQA checked them non-empty
+        assert isinstance(primitive, _ProjectedStateVector)  # fixed at construction
+        self.engine.run(dict(zip(symbols, np.asarray(parameters), strict=True)))
+        projected = primitive.last_projected_statevector
+        assert projected is not None  # cached by the run above
+        self.final_ansatz_statevector = primitive.last_statevector
 
         weight = float(np.real(np.vdot(projected, projected)))
         if weight > self.postselection_tol:

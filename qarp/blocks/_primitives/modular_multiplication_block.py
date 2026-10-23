@@ -3,6 +3,8 @@
 from math import gcd
 from typing import List, Optional
 
+import numpy as np
+
 from .._block import SimpleBlock
 
 
@@ -72,6 +74,11 @@ class ModularMultiplicationBlock(SimpleBlock):
             target_qubits=target_qubits,
             name=name,
         )
+
+    def classical_action(self, indices: np.ndarray) -> np.ndarray:
+        """``x → m·x mod N`` for ``x < N``, identity above — the block's unitary."""
+        x = np.asarray(indices, dtype=np.int64)
+        return np.where(x < self.modulus, (self.multiplier * x) % self.modulus, x)
 
     def build_vanilla(self) -> None:
         permutation = [

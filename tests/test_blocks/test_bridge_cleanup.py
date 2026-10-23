@@ -43,7 +43,7 @@ def test_raw_block_deepcopy_without_importing_qarp():
         "b.h(0)\n"
         "b.build()\n"
         "c = copy.deepcopy(b)\n"
-        "assert c is not b and c.n_qubits == 2 and c.is_built()\n"
+        "assert c is not b and c.n_qubits == 2 and c.is_built\n"
         "p = copy.deepcopy(qarpx.Param(0.25))\n"
         "assert p.value() == 0.25\n"
     )

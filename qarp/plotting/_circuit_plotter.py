@@ -438,6 +438,7 @@ class CircuitPlotter:
             if str(cmd.op).lower() == "measure":
                 before_ids = {id(a) for a in ax.get_children()}
                 y = y_positions[cmd.qubits[0]]
+                assert self.config.gate_colors is not None  # __post_init__ fills it
                 measure_color = self.config.gate_colors["measure"]
                 if self.config.gate_style == "outline":
                     # Meter box: amber outline on a tinted face, ink glyph.

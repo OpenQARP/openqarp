@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
@@ -44,56 +44,33 @@ class QPE(CompositeAlgorithm):
         self.n_ancilla = n_ancilla
         self.freqs = [x / (2**self.n_ancilla) for x in range(2 ** (self.n_ancilla))]
 
-        self.block = None
-        self.distribution = None
-        self.bitstring = None
-        self.result = None
-        self.result_probability = None
-        self._plan = None
+        self.block: Optional[QPEBlock] = None
+        self.distribution: Any = None
+        self.bitstring: Any = None
+        self.result: Any = None
+        self.result_probability: Any = None
 
     def build(self):
         """
-        Build the Canonical Phase Estimation circuit.
+        Build the Canonical Phase Estimation circuit through the engine.
 
-        First offers the problem to the engine's structured fast path
-        (``Engine.prepare_structured_qpe`` — matrix exponentiation, the
-        controlled-U ladder is never compiled).  Engines without the path,
-        or refusing it (EXACT readout, noise, routing, parametric U — see
-        ``QarpEngine.prepare_structured_qpe``), return None and the full
-        QPE circuit is built instead.
+        ``QPEBlock`` declares its controlled-U ladder (``structure()``), so an
+        engine that plans declarations (§14 *Structured execution*) never
+        builds the ladder and ``block`` stays unbuilt; any other engine
+        builds and compiles it.
 
         Returns:
             self: The instance of the class.
         """
-        # Ensure unitary and state are built so their commands are available.
-        self.unitary.build()
-        self.state.build()
-
-        self._plan = self.engine.prepare_structured_qpe(
-            "qpe", self.unitary, self.state, self.n_ancilla, self.primitive
-        )
-        if self._plan is not None:
-            return self
-
-        # Generic path: build and compile the full QPE circuit.
-        self.block = QPEBlock(
-            self.state,
-            self.unitary,
-            self.n_ancilla,
-            self.unitary.n_qubits,
-        ).build()
-
-        self.primitive.ket = self.block
+        self.block = QPEBlock(self.state, self.unitary, self.n_ancilla, self.unitary.n_qubits)
         if isinstance(self.primitive, Sampler) and self.primitive.measured_qubits is None:
             # The block records measurements on the ancilla register only
             # (qubits 0..n_ancilla-1); marginalise the system register out so
             # the phase extraction reads pure ancilla bits — otherwise any
             # eigenstate ≠ |0…0⟩ shifts the result by whole integers.
             self.primitive.measured_qubits = list(range(self.n_ancilla))
-        # engine.build() builds the primitive itself — building here too would
-        # compile every circuit twice.
+        self.primitive.ket = self.block
         self.engine.build([self.primitive])
-
         return self
 
     def run(self):
@@ -103,17 +80,13 @@ class QPE(CompositeAlgorithm):
         Returns:
             result: The estimated eigenvalue.
         """
-        if self._plan is not None:
-            # Fast path: matrix-exponentiation QPE (no full circuit simulation).
-            self.distribution = self._plan.sample()
-        else:
-            if self.block is None or not self.block.is_built:
-                raise ValueError("Circuit not built. Call build() before run().")
-            self.distribution = self.engine.run()[0]
+        if self.block is None:
+            raise ValueError("Circuit not built. Call build() before run().")
+        self.distribution = self.engine.run()[0]
 
         self.bitstring = max(self.distribution, key=self.distribution.get)
         self.result_probability = self.distribution[self.bitstring]
-        # Both structured path and Sampler emit LSB-first tuples.
+        # Sampler emits LSB-first tuples.
         self.result = bits_to_label(self.bitstring) / 2**self.n_ancilla
 
         return self.result

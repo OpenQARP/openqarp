@@ -8,7 +8,7 @@ from qarp.operators import NoGrouping, QubitOperator
 from qarp.operators.functions import hermitian_conjugated
 
 from ..._types import Consumes
-from ...blocks import AnyBlock, CompositeBlock, TrotterAnsatzBlock
+from ...blocks import CompositeBlock, QarpBlock, TrotterAnsatzBlock
 from ...engines import Engine
 from ...engines._gradients import gradient_method_from_flag
 from ...optimizers import Optimizer, ScipyOptimizer
@@ -23,11 +23,11 @@ class AdaptAnsatzMixin:
     Also the base of ``AdaptVQD``: the ansatz construction stays single-sited
     """
 
-    ref: AnyBlock
+    ref: QarpBlock
     ansatz_excitations: list
     ansatz_symbols: list
 
-    def _ansatz_wfn(self) -> AnyBlock:
+    def _ansatz_wfn(self) -> QarpBlock:
         """Reference ⊕ current ADAPT ansatz, built.
 
         With an empty ansatz (iteration 0) the bare reference is returned —
@@ -53,7 +53,7 @@ class AdaptAnsatzMixin:
 class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
     def __init__(
         self,
-        reference_block: AnyBlock,
+        reference_block: QarpBlock,
         system_hamiltonian: QubitOperator,
         excitation_pool: List[QubitOperator],
         optimizer: Optional[Optimizer] = None,
@@ -112,7 +112,7 @@ class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
 
         self.ansatz_excitations: list[QubitOperator] = []
         self.ansatz_symbols: list[Symbol] = []
-        self.ansatz_parameters_dict: dict[float, float] = {}
+        self.ansatz_parameters_dict: dict[Symbol, float] = {}
         self.iter_energies: list[float] = []
         self.converged = False
         self.gradient_thresh = gradient_thresh
@@ -153,7 +153,7 @@ class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
         self.engine.build(ev_comm_vector)
         return np.array(self.engine.run(self.ansatz_parameters_dict)).real
 
-    def _pool_scan_statevector(self, wfn: AnyBlock) -> np.ndarray:
+    def _pool_scan_statevector(self, wfn: QarpBlock) -> np.ndarray:
         """Exact pool gradients ``⟨ψ|(E·H + H·E†)|ψ⟩ = 2·Re⟨ψ|E|Hψ⟩``.
 
         Algebraically identical to the engine path's per-operator commutator
@@ -221,7 +221,9 @@ class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
                 self.pool.pop(argmax)
                 self.pool_indices.pop(argmax)
         wfn = self._ansatz_wfn()
-        symbol_values_ordered = [self.ansatz_parameters_dict[symb] for symb in wfn.symbols]
+        symbols = wfn.symbols
+        assert symbols is not None  # the ansatz holds at least one selected excitation
+        symbol_values_ordered = np.array([self.ansatz_parameters_dict[symb] for symb in symbols])
         vqe = VQE(
             self.hamiltonian,
             ket=wfn,
@@ -235,7 +237,7 @@ class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
         vqe.build()
         vqe.suppress_success_message = True
         energy, opt_params = vqe.run()
-        self.ansatz_parameters_dict = dict(zip(wfn.symbols, opt_params, strict=True))
+        self.ansatz_parameters_dict = dict(zip(symbols, opt_params, strict=True))
         self.iter_energies.append(energy)
 
         if self.verbose:
@@ -277,7 +279,7 @@ class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
         (alias of ``ansatz_parameters_dict``)."""
         return self.ansatz_parameters_dict
 
-    def get_final_state_block(self):
+    def get_final_state_block(self) -> QarpBlock:
         """Use the current object reference, ansatz excitations and symbols to construct a wavefunction object.
 
         Returns:

@@ -242,6 +242,7 @@ _PROSE_CONTRACT = {
 
 
 def _scenario_commands(scenario: str):
+    b: SimpleBlock | ConditionalBlock
     if scenario == "symbolic":
         b = SimpleBlock(1)
         b.rx(0, qx.Param.symbol("theta"))

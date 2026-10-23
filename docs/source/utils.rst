@@ -52,22 +52,23 @@ You can visualise the block using our in-house visualisation tool:
 Fermi-Hubbard toy models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The module :code:`qarp.utils` contains two functions for constructing a Fermi-Hubbard Hamiltonian, with a Trotter
-block, corresponding to either the UCC Doubles (UCCD) or the UCC Singles and Doubles (UCCSD) ansatz.
-UCCD and UCCSD are parametrized ansatz, widely used in chemistry and electronic simulation, entailing doubles
-or single and double fermionic exicitation operators. More details about these ansatzes are provided in the block 
-documentation.
+The module :code:`qarp.utils` contains two functions for constructing a Fermi-Hubbard Hamiltonian with a Trotterized
+UCC Singles and Doubles (UCCSD) block.  UCCSD is a parametrized ansatz, widely used in chemistry and electronic
+simulation, built from single and double fermionic excitation operators.  More details about the ansatz are provided
+in the block documentation.
 
-The functions :code:`FH_ham_and_wf` and :code:`FH_ham_and_wf_singles_and_doubles` generate a Fermi-Hubbard Hamiltonian and a UCCD
-Trotterized block, taking the following arguments:
+The functions :code:`FH_ham_and_wf` and :code:`FH_ham_and_wf_singles_and_doubles` both take the following arguments:
 
-* `n` (int):  Number of site. For each site there are two single particle states 
-* `t` (float): Kinetic or hopping energy between site.
+* `n` (int):  Number of sites. For each site there are two single particle states
+* `t` (float): Kinetic or hopping energy between sites.
 * `U` (float): Interaction energy
 
-The function constructs a Fermi Hubbard chain Hamiltonian and then, performing a Jordan-Wigner transformation, maps it to
-Pauli matrices. Further, it constructs a UCCD (or UCCSD) block, from the evaluation of the occupation number vector
-on a basis state. Further details are provided in the `operators` documentation.
+Each constructs a Fermi-Hubbard chain Hamiltonian and then, performing a Jordan-Wigner transformation, maps it to
+Pauli matrices.  Further, it constructs a UCCSD block on the half-filled reference state.
+:code:`FH_ham_and_wf` always uses generalised excitations and prepares the reference with a
+:code:`MappedONVStateBlock`; :code:`FH_ham_and_wf_singles_and_doubles` prepares it with a
+:code:`ComputationalBasisStateBlock` and takes `generalised` (bool, default True) to choose.  Further details are
+provided in the `operators` documentation.
 
 Let's see an example usage.
 
@@ -79,5 +80,5 @@ Let's see an example usage.
     t=1 #hopping
     n=2 #number of sites
 
-    FH_ham, UCCD_wfn=FH_ham_and_wf(n,t,U) #returns Hamiltonian and UCCD wfn
-    FH_ham,UCCDS_wfn= FH_ham_and_wf_singles_and_doubles(n,t,U) #returns Hamiltonian and UCCDS wfn
+    FH_ham, uccsd_wfn = FH_ham_and_wf(n, t, U)  # Hamiltonian and generalised UCCSD wfn
+    FH_ham, uccsd_wfn = FH_ham_and_wf_singles_and_doubles(n, t, U, generalised=False)

@@ -16,7 +16,7 @@ def _unitary(block):
     return np.array(qx.QarpSimulator().unitary_matrix(block.flatten(), block.n_qubits))
 
 
-@pytest.mark.parametrize("n", [1, 2, 3])
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 6])
 def test_synthesized_unitary_matches_target_exactly(n):
     """Quantum Shannon Decomposition recovers the target unitary exactly.
 
@@ -32,7 +32,36 @@ def test_synthesized_unitary_matches_target_exactly(n):
     block = SynthesizedUnitaryBlock(Q).build()
     U = _unitary(block)
     residual = np.angle(np.trace(Q.conj().T @ U))
-    assert np.abs(U - Q).max() < 1e-9, f"residual global phase {residual}"
+    assert np.abs(U - Q).max() < 1e-11, f"residual global phase {residual}"
+
+
+def _padded_dft(n, size):
+    """Normalised DFT of ``size`` on the first basis states, identity elsewhere."""
+    rows, cols = np.meshgrid(np.arange(size), np.arange(size), indexing="ij")
+    matrix = np.eye(2**n, dtype=complex)
+    matrix[:size, :size] = np.exp(2j * np.pi * rows * cols / size) / np.sqrt(size)
+    return matrix
+
+
+@pytest.mark.parametrize(("n", "size"), [(4, 16), (5, 32), (6, 64), (6, 60), (7, 128)])
+def test_dft_blocks_synthesize_exactly(n, size):
+    """DFT blocks, whose cosine-sine splits have sines far below one, synthesize exactly."""
+    target = _padded_dft(n, size)
+
+    block = SynthesizedUnitaryBlock(target).build()
+
+    assert np.abs(_unitary(block) - target).max() < 1e-11
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_dft_with_column_phases_synthesizes_exactly(seed):
+    """Column phases move the DFT's vanishing entries onto one-qubit leaves."""
+    phases = np.exp(1j * np.random.default_rng(seed).uniform(0, 2 * np.pi, 32))
+    target = _padded_dft(5, 32) * phases
+
+    block = SynthesizedUnitaryBlock(target).build()
+
+    assert np.abs(_unitary(block) - target).max() < 1e-11
 
 
 def test_unitary_matrix_method_not_shadowed():

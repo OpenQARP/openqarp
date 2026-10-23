@@ -198,3 +198,17 @@ def test_constructor_validation(preparation_width, oracle_width, n_ancilla, erro
 
     with pytest.raises(error, match=message):
         AmplitudeEstimationBlock(_input(preparation_width), _input(oracle_width), n_ancilla)
+
+
+def test_state_preparation_block_holds_the_input():
+    """The input's name does not hide the ``state_preparation`` gate method, which
+    raises on this composite (§13)."""
+    preparation = SimpleBlock(1)
+    preparation.ry(0, 0.3)
+    preparation.build()
+    block = AmplitudeEstimationBlock(preparation, PhaseShiftBlock(np.pi), 1)
+    assert [str(c) for c in block.state_preparation_block.flatten()] == ["Ry(0.3) [q0]"]
+    amplitudes = np.zeros(2**block.n_qubits)
+    amplitudes[[0, -1]] = 0.6, 0.8
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.state_preparation(amplitudes)

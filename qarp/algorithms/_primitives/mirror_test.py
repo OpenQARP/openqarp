@@ -10,13 +10,12 @@ final all-qubit ``MeasureBlock``.  ``run(results)`` reads the engine's
 :class:`qx.SamplingResult` and returns ``P(all zeros)``.
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
 import qarpx as qx
 
 from ..._types import Shots
-from ...blocks import AnyBlock, SimpleBlock
-from ...blocks._block import CompositeBlockBase
+from ...blocks import AnyBlock, CompositeBlock, QarpBlock, SimpleBlock
 from .primitive_algorithm import PrimitiveAlgorithm
 from .target import Target
 
@@ -54,52 +53,43 @@ class MirrorTest(PrimitiveAlgorithm):
         if self.operator is not None and not isinstance(self.operator, qx.Block):
             raise TypeError("operator must be a Block instance or None")
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         self._validate_inputs()
 
-        # Determine the working register size from the inputs.
-        self.ket.build()
-        self.bra.build()
-        if self.operator is not None:
-            self.operator.build()
+        # The working register size from the inputs.
         self.n_qubits = max(
             self.ket.n_qubits,
             self.bra.n_qubits,
             self.operator.n_qubits if self.operator is not None else 0,
         )
 
-        # Compose: ket · (operator)? · bra† · measure-all.
+        # Compose: ket · (operator)? · bra† · measure-all, unbuilt.  A
+        # narrower input sits on the low qubits of the working register.
         full_qubits = list(range(self.n_qubits))
-        composite = CompositeBlockBase(n_qubits=self.n_qubits, name="MirrorTest")
-
-        ket_built = self.ket.build()
-        ket_built.target_qubits = full_qubits
-        composite.add_child(ket_built)
+        self.ket.target_qubits = full_qubits[: self.ket.n_qubits]
+        children = [self.ket]
 
         if self.operator is not None:
-            op_built = self.operator.build()
-            op_built.target_qubits = full_qubits
-            composite.add_child(op_built)
+            self.operator.target_qubits = full_qubits[: self.operator.n_qubits]
+            children.append(self.operator)
 
-        # Lazy Python-wrapper dagger (deepcopy + flag): `add_child` folds the
-        # pending flag into concrete daggered commands via
-        # `_materialise_pending_ops`, keeping the child deepcopy-safe.
-        bra_dag = self.bra.build().dagger()
-        bra_dag.target_qubits = full_qubits
-        composite.add_child(bra_dag)
+        # A Python block daggers lazily, folded in by `_materialise_pending_ops`
+        # so the child stays deepcopy-safe; a raw qx block daggers only once built.
+        bra = self.bra
+        if not isinstance(bra, QarpBlock) and not bra.is_built:
+            bra = bra.build()
+        bra_dag = bra.dagger()
+        bra_dag.target_qubits = full_qubits[: bra_dag.n_qubits]
+        children.append(bra_dag)
 
         # Measure every qubit into the corresponding cbit so the engine emits
         # one outcome integer per shot.
         measure_layer = SimpleBlock(self.n_qubits, name="measure")
         measure_layer.measure([(q, q) for q in range(self.n_qubits)])
-        measure_layer.build()
         measure_layer.target_qubits = full_qubits
-        composite.add_child(measure_layer)
+        children.append(measure_layer)
 
-        composite.build()
-
-        self.sub_blocks = [composite]
-        return self
+        return [CompositeBlock(children, n_qubits=self.n_qubits, name="MirrorTest")]
 
     def run(self, results: list) -> float:
         """``P(all zeros)`` = the squared overlap estimate.

@@ -67,7 +67,7 @@ def test_build_real_only_one_sub_block():
     )
     ht.build()
     assert len(ht.sub_blocks) == 1
-    assert ht.sub_blocks[0].n_cbits == 1
+    assert ht.sub_blocks[0].build().n_cbits == 1
 
 
 def test_build_imaginary_only_one_sub_block():
@@ -79,7 +79,7 @@ def test_build_imaginary_only_one_sub_block():
     )
     ht.build()
     assert len(ht.sub_blocks) == 1
-    assert ht.sub_blocks[0].n_cbits == 1
+    assert ht.sub_blocks[0].build().n_cbits == 1
 
 
 def test_build_both_two_sub_blocks():
@@ -91,7 +91,7 @@ def test_build_both_two_sub_blocks():
     )
     ht.build()
     assert len(ht.sub_blocks) == 2
-    assert all(b.n_cbits == 1 for b in ht.sub_blocks)
+    assert all(b.build().n_cbits == 1 for b in ht.sub_blocks)
 
 
 def test_build_expectation_path_populates_sub_blocks():

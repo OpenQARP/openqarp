@@ -259,9 +259,9 @@ def test_shift_path_evaluates_every_point_in_one_sweep(monkeypatch):
     calls = []
     original = engine._sweep
 
-    def spy(prims, circuits, l2p, points, override, **kw):
+    def spy(prims, compiled, points, override, **kw):
         calls.append(len(points))
-        return original(prims, circuits, l2p, points, override, **kw)
+        return original(prims, compiled, points, override, **kw)
 
     monkeypatch.setattr(engine, "_sweep", spy)
     engine.run_gradient({"a": 0.3, "b": 1.1})  # default → parameter shift

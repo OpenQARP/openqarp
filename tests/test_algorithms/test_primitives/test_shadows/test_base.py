@@ -103,6 +103,22 @@ def test_parameterized_ket_rejected():
         s.build()
 
 
+def test_a_raw_ket_is_rejected_and_runs_once_wrapped():
+    """⟨Φ+|Z0 Z1|Φ+⟩ = 1 for the Bell state; the seeded estimate sits within 0.2."""
+    import qarpx as qx
+    from qarp.blocks import CompositeBlock
+
+    raw = qx.SimpleBlock(2, "bell")
+    raw.h(0)
+    raw.cx(0, 1)
+    with pytest.raises(TypeError, match="CompositeBlock"):
+        PauliShadow(QubitOperator("Z0 Z1"), raw, n_settings=20, seed=0)
+    s = PauliShadow(QubitOperator("Z0 Z1"), CompositeBlock([raw]), n_settings=2000, seed=0)
+    eng = QarpEngine(seed=1)
+    eng.build([s])
+    assert eng.run()[0] == pytest.approx(1.0, abs=0.2)
+
+
 def test_n_settings_below_floor_rejected():
     s = PauliShadow(QubitOperator("Z0"), _bell(), n_settings=3, seed=0)
     with pytest.raises(ValueError, match="below the default batch count"):

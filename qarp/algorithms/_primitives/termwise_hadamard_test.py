@@ -6,6 +6,7 @@ optionally weighted by per-term coefficients.  When ``operator`` is a
 :class:`PauliBlockFactory` and the per-term coefficients are used as weights.
 """
 
+from collections.abc import Sequence
 from typing import List, Optional, Union
 
 import qarpx as qx
@@ -28,7 +29,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
     def __init__(
         self,
         bra: Optional[AnyBlock] = None,
-        operator: Optional[Union[AnyBlock, List[AnyBlock], QubitOperator]] = None,
+        operator: Optional[Union[AnyBlock, Sequence[AnyBlock], QubitOperator]] = None,
         ket: Optional[AnyBlock] = None,
         coefficients: Optional[List[float]] = None,
         real: bool = True,
@@ -38,7 +39,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
         """
         Args:
             bra: Optional state preparation block for ⟨ψ|.
-            operator: Block, list of Blocks, or QubitOperator (expanded into per-term Blocks).
+            operator: Block, sequence of Blocks, or QubitOperator (expanded into per-term Blocks).
                 ``None`` with an explicit ``bra`` (not ``ket``) measures the bare
                 overlap ``<bra|ket>`` (``Target.OVERLAP``).
             ket: State preparation block for ``|ψ⟩``.
@@ -59,6 +60,8 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
         # Normalize operator to a list (or QubitOperator deferred to build).
         if isinstance(operator, qx.Block):
             self.operator: Union[List[AnyBlock], QubitOperator] = [operator]
+        elif isinstance(operator, Sequence) and not isinstance(operator, str):
+            self.operator = list(operator)
         else:
             self.operator = operator  # type: ignore[assignment]
 
@@ -85,7 +88,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
                 raise ValueError("operator must be provided")
             return
         if not isinstance(self.operator, (list, QubitOperator)):
-            raise TypeError("operator must be Block, list of Blocks, or QubitOperator")
+            raise TypeError("operator must be Block, sequence of Blocks, or QubitOperator")
         if isinstance(self.operator, list):
             if not self.operator:
                 raise ValueError("operator list cannot be empty")
@@ -101,7 +104,7 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
         ):
             raise ValueError("coefficients must match the length of operator list")
 
-    def build(self) -> "TermwiseHadamardTest":
+    def circuits(self) -> list:
         self._validate_inputs()
         # The constructor stores a SAMPLING placeholder (the operator may still
         # be an unexpanded QubitOperator there); the real target — a weighted
@@ -118,13 +121,17 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
             # The blocks carry arg(coefficient) as a phase in their circuits, so
             # the classical weight is the magnitude only; weighting by the full
             # complex coefficient would apply the phase twice.
-            self.coefficients = [abs(op.coefficient) for op in self.operator]
+            coefficients = []
+            for op in pauli_blocks:
+                assert op.coefficient is not None  # include_coefficients=True sets it
+                coefficients.append(abs(op.coefficient))
+            self.coefficients = coefficients
 
         # An overlap has no operator terms: one operator-less child, which
         # HadamardTest builds as <bra|ket> directly (run() weights it by 1.0).
         terms: list = [None] if target is Target.OVERLAP else self.operator
         self.sub_algorithms = []
-        self.sub_blocks = []
+        circuits: list = []
         for op in terms:
             child = HadamardTest(
                 bra=self.bra,
@@ -136,8 +143,8 @@ class TermwiseHadamardTest(PrimitiveAlgorithm):
             )
             child.build()
             self.sub_algorithms.append(child)
-            self.sub_blocks.extend(child.sub_blocks)
-        return self
+            circuits.extend(child.sub_blocks)
+        return circuits
 
     def run(self, results: list) -> complex:
         if not self.sub_algorithms:

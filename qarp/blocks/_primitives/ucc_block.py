@@ -1,12 +1,13 @@
-from typing import List, Optional
+from collections import abc
+from typing import List, Optional, Self, cast
 
 from sympy import Symbol
 
-from qarp.operators import FermionOperator, GroupingStrategy, JordanWigner, Mapping
+from qarp.operators import FermionOperator, GroupingStrategy, JordanWigner, Mapping, QubitOperator
 from qarp.operators.onv import Onv
 from qarp.operators.ucc import ucc_doubles, ucc_singles
 
-from .._block import CompositeBlockBase
+from .._block import CompositeBlockBase, _as_symbol
 from .trotter_block import TrotterAnsatzBlock
 
 
@@ -100,7 +101,8 @@ class UCCBlock(CompositeBlockBase):
         if symbol_postfix != "":
             self._pairing_symbols = [Symbol(s.name + symbol_postfix) for s in self._pairing_symbols]
 
-        self.qubit_exponents = self.mapping.encode_operator(operators)
+        # A list in, a list out.
+        self.qubit_exponents = cast(List[QubitOperator], self.mapping.encode_operator(operators))
         self.symbols = self._pairing_symbols
 
     @property
@@ -113,12 +115,11 @@ class UCCBlock(CompositeBlockBase):
         """
         return list(zip(self._pairing_symbols, self.qubit_exponents, strict=True))
 
-    def replace_symbols(self, new_parameters: dict) -> "UCCBlock":  # type: ignore[override]
+    def replace_symbols(self, new_parameters: abc.Mapping[Symbol | str, Symbol | str]) -> Self:
         new_object = super().replace_symbols(new_parameters)
+        renames = {_as_symbol(k): _as_symbol(v) for k, v in new_parameters.items()}
         if hasattr(new_object, "_pairing_symbols"):
-            new_object._pairing_symbols = [
-                new_parameters.get(s, s) for s in new_object._pairing_symbols
-            ]
+            new_object._pairing_symbols = [renames.get(s, s) for s in new_object._pairing_symbols]
         return new_object
 
     def build_vanilla(self) -> None:
@@ -126,7 +127,7 @@ class UCCBlock(CompositeBlockBase):
             raise RuntimeError("Cannot build UCCBlock: no symbols defined")
         tab = TrotterAnsatzBlock(
             n_qubits=self.n_qubits,
-            qubit_exponents=self.qubit_exponents,  # type: ignore[arg-type]
+            qubit_exponents=self.qubit_exponents,
             symbols=self._pairing_symbols,
             steps=self.steps,
             time=self.time,

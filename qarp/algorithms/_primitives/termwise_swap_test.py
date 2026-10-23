@@ -5,6 +5,7 @@ single ``ket``, sums the (optionally coefficient-weighted) overlap-squared
 estimates.  Each child SWAPTest contributes one entry to ``sub_blocks``.
 """
 
+from collections.abc import Sequence
 from typing import List, Optional, Union
 
 import qarpx as qx
@@ -23,14 +24,14 @@ class TermwiseSWAPTest(PrimitiveAlgorithm):
 
     def __init__(
         self,
-        bra: Union[AnyBlock, List[AnyBlock]],
+        bra: Union[AnyBlock, Sequence[AnyBlock]],
         ket: Optional[AnyBlock] = None,
         coefficients: Optional[List[float]] = None,
         n_shots: Optional[Union[int, Shots]] = None,
     ):
         """
         Args:
-            bra: Single Block or list of bra-state preparation blocks.
+            bra: Single Block or sequence of bra-state preparation blocks.
             ket: Single ket-state preparation block.
             coefficients: Optional per-bra weight (default: all 1.0).
             n_shots: Number of shots; ``None`` defers to the engine default.
@@ -60,21 +61,21 @@ class TermwiseSWAPTest(PrimitiveAlgorithm):
         if self.coefficients is not None and len(self.coefficients) != len(self.bra):
             raise ValueError("coefficients must match the length of bra list")
 
-    def build(self) -> "TermwiseSWAPTest":
+    def circuits(self) -> list:
         self._validate_inputs()
         self.n_qubits = self.ket.n_qubits
         if self.coefficients is None:
             self.coefficients = [1.0] * len(self.bra)
 
         self.sub_algorithms = []
-        self.sub_blocks = []
-        for i, bra in enumerate(self.bra):
+        circuits: list = []
+        for bra in self.bra:
             child = SWAPTest(bra=bra, ket=self.ket, n_shots=self.n_shots)
             child.build()
             self.sub_algorithms.append(child)
-            # Each child SWAPTest produces exactly one sub_block.
-            self.sub_blocks.extend(child.sub_blocks)
-        return self
+            # Each child SWAPTest produces exactly one circuit.
+            circuits.extend(child.sub_blocks)
+        return circuits
 
     def run(self, results: list) -> float:
         if not self.sub_algorithms:

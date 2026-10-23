@@ -49,6 +49,9 @@ public:
     [[nodiscard]] uint32_t num_controls() const { return num_controls_; }
     [[nodiscard]] const std::vector<bool>& ctrl_state() const { return ctrl_state_; }
 
+protected:
+    [[nodiscard]] bool accepts_gates() const override { return false; }
+
 private:
     ref<Block> inner_;
     uint32_t num_controls_;

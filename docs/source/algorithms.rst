@@ -84,10 +84,45 @@ The following code demonstrates how to use the :code:`Sampler` to collect measur
 
     result = my_engine.run()
     print("Measurement distribution:", result[0])
-    # Expected output: approximately {(0, 0): 0.5, (1, 1): 0.5}
+    # Expected output: approximately SamplingDistribution({(0, 0): 0.5, (1, 1): 0.5})
 
-The :code:`Sampler` returns a dictionary mapping measurement outcomes (as tuples) to their observed probabilities,
-normalised by the number of shots.
+The :code:`Sampler` returns a :class:`~qarp.SamplingDistribution`: a read-only mapping from measurement outcomes
+(LSB-first bit tuples over :code:`measured_qubits`) to their probabilities, normalised by the number of shots.  It
+reads like a dictionary and iterates in ascending order of the integer :math:`\sum_i b_i 2^i` its bits encode.
+:code:`to_dict()` returns a plain, mutable :code:`dict`.
+
+The same data is available as two aligned read-only arrays, which is the fast path for wide distributions: under
+:code:`n_shots=qarp.EXACT` a dense 22-qubit state has millions of outcomes, and building a tuple for each costs far
+more than computing them.
+
+.. code-block:: python
+
+    dist = result[0]
+    dist.outcomes           # array([0, 3]): the integers of (0, 0) and (1, 1)
+    dist.probabilities      # about array([0.5, 0.5]), up to shot noise
+    dist.n_bits_measured    # 2
+    dist.probability_of(3)  # the probability of (1, 1): lookup by packed integer, 0.0 if absent
+
+The distribution also answers the usual questions about a readout directly, on the arrays.  Positions index the
+key tuple, not physical qubits.
+
+.. code-block:: python
+
+    from qarp import SamplingDistribution
+
+    dist.n_shots                     # 1000; None under n_shots=qarp.EXACT
+    dist.counts()                    # array([n00, n11]), summing to 1000
+    dist.standard_errors()           # sqrt(p (1 - p) / n_shots) per outcome
+    dist.marginal([0])               # the distribution of the first bit alone
+    dist.parity_expectation([0, 1])  # <Z Z> over both bits: 1.0 for a Bell state
+    dist.most_likely()               # ((0, 0), p) or ((1, 1), p); ties go to the smaller outcome
+    dist.top(2)                      # the two most probable (bits, probability) pairs
+    dist.to_dense()                  # length 2**n_bits_measured vector indexed by packed outcome
+
+    exact = SamplingDistribution.from_dict({(0, 0): 0.5, (1, 1): 0.5})
+    dist.total_variation(exact)      # 1/2 sum |p - q|: shot noise, about 0.01 here
+    dist.hellinger_fidelity(exact)   # (sum sqrt(p q))**2, qiskit's definition
+    exact.sample(1000, seed=0)       # a 1000-shot draw from the exact distribution
 
 StateVector
 ^^^^^^^^^^^^
@@ -615,7 +650,7 @@ The following one-qubit example starts with good-state probability
     distribution = amplification.run()
     print(distribution)
     print(amplification.success_probability)
-    # {(1,): approximately 1.0}
+    # SamplingDistribution({(1,): 1.0}), up to rounding
     # 1.0
 
 Sampler bit tuples are LSB-first. ``good_states`` instead uses ordinary

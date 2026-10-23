@@ -10,6 +10,9 @@ namespace qarpx::synthesis {
 namespace {
 
 constexpr double kModulusTol = 1e-9;
+// Global phases below this are rounding of zero.  A skipped phase is lost,
+// and under control it becomes a relative phase.
+constexpr double kPhaseEps = 1e-15;
 
 /// Recursive diagonal-unitary builder.  `phases` carries the per-index phase
 /// profile for the current level; the recursion strips the highest qubit at
@@ -21,8 +24,7 @@ void diagonal_recursive(
     uint32_t n)
 {
     if (n == 0) {
-        // Base case: single phase — emit a global phase if non-trivial.
-        if (std::abs(phases[0]) > kModulusTol) {
+        if (std::abs(phases[0]) > kPhaseEps) {
             block.gphase(Param(phases[0]));
         }
         return;

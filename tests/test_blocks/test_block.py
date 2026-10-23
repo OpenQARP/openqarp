@@ -7,12 +7,16 @@ preservation).  This file keeps a small set of basic invariants that test the
 Python wrapper layer directly.
 """
 
+import copy
+
 import numpy as np
 import pytest
 from sympy import Symbol
 
+import qarp.blocks as qb
 import qarpx as qx
-from qarp.blocks import SimpleBlock
+from qarp.blocks import CompositeBlock, ConditionalBlock, HnBlock, SimpleBlock
+from qarp.blocks._block import _BlockMixin
 
 
 def test_simple_block_construction():
@@ -277,7 +281,7 @@ def test_raw_simple_block_deepcopy():
     clone = copy.deepcopy(raw)
 
     assert type(clone) is qx.SimpleBlock
-    assert clone.is_built()
+    assert clone.is_built
     assert [str(c) for c in clone.commands()] == [str(c) for c in raw.commands()]
     # Independent buffers: mutating the original must not touch the clone.
     raw.x(0)
@@ -299,7 +303,7 @@ def test_transformed_block_deepcopy_as_simple_shell():
     clone = copy.deepcopy(tb)
     assert isinstance(clone, qx.Block)
     assert type(clone) is qx.SimpleBlock
-    assert clone.is_built()
+    assert clone.is_built
     assert [str(c) for c in clone.flatten()] == [str(c) for c in tb.flatten()]
 
 
@@ -391,7 +395,14 @@ def test_deepcopy_base_state_canary():
     import copy
 
     bound_props = {n for n, v in vars(qx.Block).items() if isinstance(v, property)}
-    assert bound_props == {"name", "n_qubits", "n_cbits", "target_qubits", "target_cbits"}, (
+    assert bound_props == {
+        "name",
+        "n_qubits",
+        "n_cbits",
+        "target_qubits",
+        "target_cbits",
+        "is_built",
+    }, (
         "qx.Block grew/lost a bound field — extend this canary and verify "
         "clone handling (subclass ctor fields are NOT auto-copied)."
     )
@@ -411,7 +422,7 @@ def test_deepcopy_base_state_canary():
     assert clone.n_cbits == 2
     assert list(clone.target_qubits) == [2, 0, 1]
     assert list(clone.target_cbits) == [1, 0]
-    assert clone.is_built()
+    assert clone.is_built
     assert [str(c) for c in clone.commands()] == [str(c) for c in b.commands()]
 
 
@@ -706,7 +717,7 @@ def test_controlled_block_positional_order_matches_other_blocks():
 def test_controlled_block_matches_analytic_block_diagonal():
     """ControlledBlock(HnBlock(2), 1) with the control at qubit 0 (LSB) is
     |0><0| ⊗ I + |1><1| ⊗ (H⊗H) with the control as the innermost factor."""
-    from qarp.blocks import ControlledBlock, HnBlock
+    from qarp.blocks import ControlledBlock
 
     H = np.array([[1, 1], [1, -1]]) / np.sqrt(2)
     P0 = np.diag([1.0, 0.0])
@@ -791,3 +802,188 @@ def test_default_block_names_carry_no_newlines():
     ]
     for b in blocks:
         assert "\n" not in b.name, b.name
+
+
+# ── Binding contract: build lifecycle, composites, Command ────────────────
+
+
+def test_raw_block_build_lifecycle():
+    """``is_built`` is a property on raw blocks too, and ``build()`` returns the block."""
+    b = qx.SimpleBlock(1, "raw")
+    b.h(0)
+    assert b.is_built is False
+    assert b.build() is b
+    assert b.is_built is True
+
+
+def _x_body(kind):
+    body = qx.SimpleBlock(1, "x") if kind == "raw" else SimpleBlock(1)
+    body.x(0)
+    return body.build()
+
+
+_HOLDERS = {
+    "composite": lambda kind: (CompositeBlock if kind == "python" else qx.CompositeBlock)(
+        [_x_body(kind)], 1
+    ),
+    "controlled": lambda kind: (qb.ControlledBlock if kind == "python" else qx.ControlledBlock)(
+        _x_body(kind), 1, [True]
+    ),
+    "conditional": lambda kind: (ConditionalBlock if kind == "python" else qx.ConditionalBlock)(
+        [0], [True], _x_body(kind)
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", ["python", "raw"])
+@pytest.mark.parametrize("holder", list(_HOLDERS))
+def test_gate_methods_on_a_block_holding_blocks_raise(holder, kind):
+    """A block that holds other blocks runs only theirs (§13), so it takes no gates of its own."""
+    block = _HOLDERS[holder](kind)
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.z(0)
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.rz(0, 0.5)
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.h([0])
+    with pytest.raises(TypeError, match="runs only the gates"):
+        block.set_commands([qx.Command(qx.GateType.Z, 0)])
+    assert list(block.commands()) == []
+
+
+def test_else_only_conditional_deepcopies():
+    """Oracle: the hand-written stream of a conditional with only an else-branch X."""
+    body = SimpleBlock(1)
+    body.x(0)
+    body.build()
+    cond = ConditionalBlock([0], [True], None, else_body=body)
+    cond.build()
+    clone = copy.deepcopy(cond)
+    assert clone.then_body is None
+    assert [str(c) for c in clone.flatten()] == [
+        "BranchBegin [] if c0==1",
+        "BranchElse []",
+        "X [q0]",
+        "BranchEnd []",
+    ]
+
+
+def test_conditional_without_either_body_is_rejected():
+    with pytest.raises(TypeError):
+        qx.ConditionalBlock([0], [True], None)
+    with pytest.raises(TypeError):
+        ConditionalBlock([0], [True], None)
+
+
+def test_command_reads_a_numpy_integer_as_a_qubit():
+    """Oracle: X on q0 then CX(q0, q1) takes |00⟩ to |11⟩, outcome 3."""
+    x = qx.Command(qx.GateType.X, 0)
+    cx = qx.Command(qx.GateType.CX, 0, np.int64(1))
+    assert list(cx.qubits) == [0, 1]
+    assert dict(qx.QarpSimulator().run([x, cx], 2, 20, 1).counts) == {3: 20}
+
+
+# Built inside the test: a qarpx object held by the parametrize list outlives
+# nanobind's shutdown and is reported as a leak.
+@pytest.mark.parametrize(
+    "make_args",
+    [
+        lambda: (qx.GateType.Rz, 0, 1),
+        lambda: (qx.GateType.Rz, 0, np.int64(1)),
+        lambda: (qx.GateType.Rz, 0, True),
+        lambda: (qx.GateType.H, 0, 0.5),
+        lambda: (qx.GateType.CX, 0, qx.Param(1.0)),
+        lambda: (qx.GateType.MCZ, 0, 1, 0.5),
+        lambda: (qx.GateType.Barrier, 0, 0.5),
+        lambda: (qx.GateType.GPhase, 3),
+    ],
+    ids=[
+        "rz-int",
+        "rz-numpy-int",
+        "rz-bool",
+        "h-angle",
+        "cx-one-qubit",
+        "mcz-angle",
+        "barrier-angle",
+        "gphase-qubit",
+    ],
+)
+def test_command_rejects_a_wrong_qubit_or_parameter_count(make_args):
+    """Rz takes one qubit and one parameter, H one qubit and none, CX two qubits and none,
+    MCZ and Barrier any qubits and no parameter, GPhase no qubit and one parameter."""
+    with pytest.raises(ValueError, match="takes"):
+        qx.Command(*make_args())
+
+
+def test_command_builds_a_parametric_gate_from_a_param():
+    cmd = qx.Command(qx.GateType.Rz, 0, qx.Param(1.0))
+    assert list(cmd.qubits) == [0]
+    assert [p.value() for p in cmd.params] == [1.0]
+
+
+def test_command_equality_with_a_foreign_type():
+    assert (qx.Command() == 5) is False
+    assert (qx.Command() != 5) is True
+
+
+# ── The Python block classes ───────────────────────────────────────────────
+
+_PYTHON_BLOCKS = [
+    (qb.SimpleBlock, qx.SimpleBlock),
+    (qb.CompositeBlockBase, qx.CompositeBlock),
+    (qb.ControlledBlock, qx.ControlledBlock),
+    (qb.MeasureBlock, qx.MeasureBlock),
+    (qb.ResetBlock, qx.ResetBlock),
+    (qb.ConditionalBlock, qx.ConditionalBlock),
+]
+
+
+@pytest.mark.parametrize("cls, base", _PYTHON_BLOCKS, ids=lambda v: v.__name__)
+def test_a_python_block_class_inherits_only_its_qarpx_class(cls, base):
+    """The mixin is attached, not inherited: nanobind refuses a second base."""
+    assert _BlockMixin not in cls.__mro__
+    assert cls.__mro__[1] is base
+
+
+def _instances():
+    x = SimpleBlock(1)
+    x.x(0)
+    return [
+        x,
+        qb.CompositeBlockBase(1),
+        qb.ControlledBlock(x, 1, [True]),
+        qb.MeasureBlock(0, 0),
+        qb.ResetBlock(0),
+        ConditionalBlock([0], [True], x),
+    ]
+
+
+def test_qarp_block_admits_each_python_block_and_rejects_a_raw_one():
+    assert all(isinstance(b, qb.QarpBlock) for b in _instances())
+    assert not isinstance(qx.SimpleBlock(1, "raw"), qb.QarpBlock)
+
+
+def _rz_a_ry_b():
+    a, b = Symbol("a"), Symbol("b")
+    block = SimpleBlock(1)
+    block.rz(0, a)
+    block.ry(0, b)
+    return block.build(), b
+
+
+def test_a_string_key_binds_the_symbol_of_that_name():
+    """Bound: ``a``; free: ``b`` (counted by hand)."""
+    block, b = _rz_a_ry_b()
+    bound = block.set_symbols({"a": 0.5})
+    assert bound.symbols == (b,)
+    assert bound.parameter_map([0.3]) == {b: 0.3}
+    assert [p.value() for p in bound.flatten()[0].params] == [0.5]
+
+
+def test_a_string_rename_then_a_string_bind_leaves_only_the_other_symbol():
+    block, b = _rz_a_ry_b()
+    renamed = block.replace_symbols({"a": "c"})
+    assert renamed.symbols == (b, Symbol("c"))
+    bound = renamed.set_symbols({"c": 0.5})
+    assert bound.symbols == (b,)
+    assert bound.parameter_map([0.3]) == {b: 0.3}

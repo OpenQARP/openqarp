@@ -125,7 +125,7 @@ Editable install
 .. code-block:: bash
 
    pip install -e ".[full-dev]"   # editable + optional backends + test + dev tooling
-   # pip install -e ".[dev]"      # ruff, mypy and pre-commit only — no pytest
+   # pip install -e ".[dev]"      # ruff, mypy, pre-commit and the stub generator only — no pytest
 
 This is the recommended default (``rebuild = false`` in ``pyproject.toml``):
 Python edits are live, and a C++ edit needs the install re-run.  Nothing else

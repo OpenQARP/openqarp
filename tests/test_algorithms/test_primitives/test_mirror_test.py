@@ -7,12 +7,14 @@ cover the Python layer only: constructor wiring, input validation,
 end-to-end physical checks through ``QarpEngine``.
 """
 
+import math
 from types import SimpleNamespace
 
 import pytest
 
+import qarp
 from qarp.algorithms import MirrorTest, Target
-from qarp.blocks import ComputationalBasisStateBlock, HnBlock
+from qarp.blocks import ComputationalBasisStateBlock, HnBlock, SimpleBlock
 from qarp.engines import QarpEngine
 
 # ── Constructor ─────────────────────────────────────────────────────────
@@ -65,7 +67,7 @@ def test_mirror_test_build_single_composite_subblock():
     assert len(mt.sub_blocks) == 1
     composite = mt.sub_blocks[0]
     assert mt.n_qubits == 3
-    assert composite.n_cbits == 3
+    assert composite.build().n_cbits == 3
 
 
 def test_mirror_test_build_n_qubits_is_max_of_widths():
@@ -77,7 +79,26 @@ def test_mirror_test_build_n_qubits_is_max_of_widths():
     mt.build()
 
     assert mt.n_qubits == 4
-    assert mt.sub_blocks[0].n_cbits == 4
+    assert mt.sub_blocks[0].build().n_cbits == 4
+
+
+def test_a_narrower_input_sits_on_the_low_qubits():
+    """``|ψ⟩ = RY(a)|0⟩`` on one qubit, ``U = X ⊗ I`` on two: on qubit 0,
+    ``|⟨ψ, 0|U|ψ, 0⟩|² = sin² a``; on qubit 1, U would flip the idle qubit and
+    the overlap would vanish."""
+    a = 0.7
+
+    def ry() -> SimpleBlock:
+        block = SimpleBlock(1)
+        block.ry(0, a)
+        return block
+
+    op = SimpleBlock(2)
+    op.x(0)
+    mt = MirrorTest(bra=ry(), ket=ry(), operator=op, n_shots=qarp.EXACT)
+    engine = QarpEngine()
+    engine.build([mt])
+    assert engine.run()[0] == pytest.approx(math.sin(a) ** 2, abs=1e-10)
 
 
 def test_mirror_test_build_with_operator_completes():
@@ -199,3 +220,19 @@ def test_mirror_test_composite_bra_dagger_and_deepcopy():
 
     mt_copy = copy.deepcopy(mt.sub_blocks[0])
     assert len(list(mt_copy.flatten())) == len(list(mt.sub_blocks[0].flatten()))
+
+
+def test_an_unbuilt_raw_bra_is_daggered():
+    """Raw H as bra and ket: both prepare |+⟩, so P(all zeros) = |⟨+|+⟩|² = 1.
+    Without the bra† the circuit is H alone and gives 1/2."""
+    import qarpx as qx
+
+    def plus():
+        block = qx.SimpleBlock(1, "plus")
+        block.h(0)
+        return block
+
+    mt = MirrorTest(bra=plus(), ket=plus().build(), n_shots=1000)
+    eng = QarpEngine(n_shots=1000, seed=1)
+    eng.build([mt])
+    assert eng.run()[0] == 1.0

@@ -1,5 +1,6 @@
 import importlib
 import importlib.util
+from collections.abc import Mapping
 from math import comb
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union, cast
 
@@ -31,7 +32,7 @@ except ImportError:
 
     # tqdm is optional and undeclared: the fallback must stay callable so the
     # call sites work without it (progress kwargs dropped, iteration preserved).
-    def tqdm(iterable, **_kwargs):  # type: ignore[no-redef]
+    def tqdm(iterable, **_kwargs):
         return iterable
 
 
@@ -287,7 +288,7 @@ class SpectrumEstimator:
 
     def prepare_observed_data(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         n_bins: Optional[int] = None,
         freqs: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -376,7 +377,7 @@ class SpectrumEstimator:
         degeneracies = probs * self.hilbert_dim
 
         # Build observed signal
-        iterator = tqdm(  # type: ignore
+        iterator = tqdm(
             zip(phase_freqs, degeneracies, strict=True),
             total=len(phase_freqs),
             desc="Building observed signal",
@@ -404,7 +405,7 @@ class SpectrumEstimator:
 
         A = np.zeros((n_samples, n_candidates))
 
-        iterator = tqdm(  # type: ignore
+        iterator = tqdm(
             range(n_samples),
             desc="Building matrix",
             disable=not (show_progress and self.verbose and TQDM_AVAILABLE),
@@ -438,18 +439,18 @@ class SpectrumEstimator:
         data_scale = np.linalg.norm(observed_data)
         scaled_l1_penalty = l1_penalty * data_scale / self.hilbert_dim
 
-        weights = cp.Variable(n_candidates, nonneg=True)  # type: ignore
+        weights = cp.Variable(n_candidates, nonneg=True)
         residual = A @ weights - observed_data
-        sparsity_penalty = scaled_l1_penalty * cp.norm1(weights)  # type: ignore
-        objective = cp.Minimize(cp.sum_squares(residual) + sparsity_penalty)  # type: ignore
-        constraints = [cp.sum(weights) == self.hilbert_dim]  # type: ignore
+        sparsity_penalty = scaled_l1_penalty * cp.norm1(weights)
+        objective = cp.Minimize(cp.sum_squares(residual) + sparsity_penalty)
+        constraints = [cp.sum(weights) == self.hilbert_dim]
 
-        problem = cp.Problem(objective, constraints)  # type: ignore
+        problem = cp.Problem(objective, constraints)
         problem.solve(solver=self.solver, verbose=False)
 
         self.optimization_info["status"] = problem.status
         self.optimization_info["objective_value"] = problem.value
-        self.optimization_info["data_term"] = cp.sum_squares(residual).value  # type: ignore
+        self.optimization_info["data_term"] = cp.sum_squares(residual).value
         self.optimization_info["sparsity_term"] = sparsity_penalty.value
 
         weights_optim = cast(np.ndarray, weights.value)
@@ -497,20 +498,18 @@ class SpectrumEstimator:
         data_scale = np.sum(np.abs(observed_data))
         scaled_l1_penalty = l1_penalty * data_scale / self.hilbert_dim
 
-        weights = cp.Variable(n_candidates, nonneg=True)  # type: ignore
+        weights = cp.Variable(n_candidates, nonneg=True)
         residual = A @ weights - observed_data
-        abs_residual = cp.Variable(n_samples)  # type: ignore
+        abs_residual = cp.Variable(n_samples)
 
         constraints = [
-            cp.sum(weights) == self.hilbert_dim,  # type: ignore
+            cp.sum(weights) == self.hilbert_dim,
             abs_residual >= residual,
             abs_residual >= -residual,
         ]
 
-        objective = cp.Minimize(  # type: ignore
-            cp.sum(abs_residual) + scaled_l1_penalty * cp.norm1(weights)  # type: ignore
-        )
-        problem = cp.Problem(objective, constraints)  # type: ignore
+        objective = cp.Minimize(cp.sum(abs_residual) + scaled_l1_penalty * cp.norm1(weights))
+        problem = cp.Problem(objective, constraints)
         problem.solve(solver=self.solver, verbose=False)
 
         self.optimization_info["status"] = problem.status
@@ -553,21 +552,19 @@ class SpectrumEstimator:
         A = self._build_system_matrix(sample_bins, candidate_phases, show_progress=True)
         n_candidates = len(candidate_phases)
 
-        weights = cp.Variable(n_candidates, nonneg=True)  # type: ignore
+        weights = cp.Variable(n_candidates, nonneg=True)
         residual = A @ weights - observed_data
 
         data_scale = np.linalg.norm(observed_data)
-        sparsity_penalty = l1_penalty * data_scale / self.hilbert_dim * cp.norm1(weights)  # type: ignore
+        sparsity_penalty = l1_penalty * data_scale / self.hilbert_dim * cp.norm1(weights)
         constraint_violation = (
-            constraint_penalty * data_scale * cp.square(cp.sum(weights) - self.hilbert_dim)  # type: ignore
+            constraint_penalty * data_scale * cp.square(cp.sum(weights) - self.hilbert_dim)
         )
 
-        objective = cp.Minimize(  # type: ignore
-            cp.sum_squares(residual) + sparsity_penalty + constraint_violation  # type: ignore
-        )
-        constraints = [cp.sum(weights) <= self.hilbert_dim * 1.1]  # type: ignore
+        objective = cp.Minimize(cp.sum_squares(residual) + sparsity_penalty + constraint_violation)
+        constraints = [cp.sum(weights) <= self.hilbert_dim * 1.1]
 
-        problem = cp.Problem(objective, constraints)  # type: ignore
+        problem = cp.Problem(objective, constraints)
         problem.solve(solver=self.solver, verbose=False)
 
         self.optimization_info["status"] = problem.status
@@ -652,7 +649,7 @@ class SpectrumEstimator:
 
         weights: np.ndarray = np.array([])
 
-        refinement_iterator = tqdm(  # type: ignore
+        refinement_iterator = tqdm(
             range(n_refinements),
             desc="Refinement iterations",
             disable=not (self.verbose and TQDM_AVAILABLE),
@@ -864,21 +861,21 @@ class SpectrumEstimator:
 
         # AST semidefinite program: minimise ½‖x−y‖² + τ·½(t + u₀) s.t. the bordered
         # Hermitian-Toeplitz matrix is PSD.  x is the denoised moment sequence.
-        x = cp.Variable(n, complex=True)  # type: ignore
-        u = cp.Variable(n, complex=True)  # type: ignore
-        t_var = cp.Variable()  # type: ignore
-        toeplitz = cp.bmat(  # type: ignore
+        x = cp.Variable(n, complex=True)
+        u = cp.Variable(n, complex=True)
+        t_var = cp.Variable()
+        toeplitz = cp.bmat(
             [[u[i - j] if i >= j else cp.conj(u[j - i]) for j in range(n)] for i in range(n)]
         )
-        bordered = cp.bmat(  # type: ignore
+        bordered = cp.bmat(
             [
                 [toeplitz, cp.reshape(x, (n, 1), order="C")],
                 [cp.reshape(cp.conj(x), (1, n), order="C"), cp.reshape(t_var, (1, 1), order="C")],
             ]
         )
-        data_fit = 0.5 * (cp.sum_squares(cp.real(x - y)) + cp.sum_squares(cp.imag(x - y)))  # type: ignore
-        objective = cp.Minimize(data_fit + tau * 0.5 * (t_var + cp.real(u[0])))  # type: ignore
-        cp.Problem(objective, [bordered >> 0, cp.imag(u[0]) == 0]).solve(solver=cp.SCS)  # type: ignore
+        data_fit = 0.5 * (cp.sum_squares(cp.real(x - y)) + cp.sum_squares(cp.imag(x - y)))
+        objective = cp.Minimize(data_fit + tau * 0.5 * (t_var + cp.real(u[0])))
+        cp.Problem(objective, [bordered >> 0, cp.imag(u[0]) == 0]).solve(solver=cp.SCS)
 
         if x.value is None:
             raise RuntimeError("Atomic-norm SDP failed to solve.")
@@ -976,10 +973,10 @@ class SpectrumEstimator:
             uniform weights summing to the Hilbert dimension if the solve fails.
         """
         A = self._build_system_matrix(sample_bins, phases)
-        weights = cp.Variable(len(phases), nonneg=True)  # type: ignore
-        objective = cp.Minimize(cp.sum_squares(A @ weights - observed_data))  # type: ignore
-        constraints = [cp.sum(weights) == self.hilbert_dim]  # type: ignore
-        problem = cp.Problem(objective, constraints)  # type: ignore
+        weights = cp.Variable(len(phases), nonneg=True)
+        objective = cp.Minimize(cp.sum_squares(A @ weights - observed_data))
+        constraints = [cp.sum(weights) == self.hilbert_dim]
+        problem = cp.Problem(objective, constraints)
         problem.solve(solver=self.solver, verbose=False)
 
         if weights.value is None:
@@ -1161,7 +1158,7 @@ class SpectrumEstimator:
 
     def _optimize_auto(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         auto_modes: Optional[Sequence[ModeName]] = None,
         **call_kwargs,
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -1233,7 +1230,7 @@ class SpectrumEstimator:
 
     def estimate(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         n_candidates: int = 200,
         n_bins: Optional[int] = None,
         cluster: bool = True,
@@ -1458,7 +1455,7 @@ class SpectrumEstimator:
 
     def plot(
         self,
-        distribution: Dict[Union[str, int, float, Tuple[int, ...]], float],
+        distribution: Mapping[Any, float],
         true_phases: Optional[np.ndarray] = None,
         true_degeneracies: Optional[np.ndarray] = None,
         n_bins: Optional[int] = None,

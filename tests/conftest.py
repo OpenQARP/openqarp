@@ -29,7 +29,6 @@ class _StubEngine(Engine):
     def __init__(self) -> None:
         self._seed = None
         self._primitives = []
-        self._l2p_per_primitive = []
 
     def _sweep(self, *args, **kwargs):
         raise NotImplementedError

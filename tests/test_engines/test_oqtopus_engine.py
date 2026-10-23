@@ -406,9 +406,14 @@ def test_failed_cancel_does_not_mask_the_timeout():
     assert [e["call"] for e in transport.log if e["call"] == "cancel"] == ["cancel"]
 
 
-def test_foreign_compiled_circuits_are_refused():
+def test_foreign_compiled_circuits_are_recompiled():
+    """Circuits another engine compiled carry its stamp, not ours: with
+    ``rebuild=False`` they are compiled afresh here, measurement layer included."""
     s = Sampler(ket=_ry_ket(0.3))
     QarpEngine(n_shots=10, seed=0).build([s])
-    eng = _engine(1)
-    with pytest.raises(CapabilityError, match="compiled"):
-        eng.batch_run([s], [{}], rebuild=False)
+    transport = LocalOqtopusTransport(n_qubits=1, seed=3)
+    eng = OqtopusEngine("local", transport=transport, n_shots=4000)
+    (out,) = eng.batch_run([s], [{}], rebuild=False)[0]
+    assert any(e["call"] == "submit" for e in transport.log)
+    assert "measure" in transport.log[-2]["program"]
+    assert abs(out.get((1,), 0.0) - math.sin(0.15) ** 2) < 5 * math.sqrt(0.25 / 4000)

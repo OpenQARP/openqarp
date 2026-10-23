@@ -93,8 +93,9 @@ public:
     /// Replace the local command buffer wholesale.  Used by Python's
     /// ``__deepcopy__`` to clone an ad-hoc-populated block whose state
     /// lives in ``commands_`` rather than in a ``build_vanilla`` override.
-    /// Does NOT touch ``built_`` — pair with ``set_built`` if needed.
-    void set_commands(std::vector<Command> cmds) { commands_ = std::move(cmds); }
+    /// Does NOT touch ``built_`` — pair with ``set_built`` if needed.  Guarded
+    /// by `accepts_gates()`, as the builder methods are.
+    void set_commands(std::vector<Command> cmds);
 
     /// Force the ``built_`` flag.  Mirrors the source state when a Python
     /// ``__deepcopy__`` clones an already-built block.
@@ -271,6 +272,15 @@ public:
 protected:
     std::vector<Command> commands_;
     bool built_ = false;
+
+    /// False for blocks whose own command buffer never executes (composite,
+    /// controlled, conditional); their builder methods then throw
+    /// `composite_gate_error`.
+    [[nodiscard]] virtual bool accepts_gates() const { return true; }
+
+    /// The command buffer every builder method appends to, guarded by
+    /// `accepts_gates()`.
+    std::vector<Command>& gate_buffer();
 
     /// Helper: append a command.
     void add_command(Command cmd);

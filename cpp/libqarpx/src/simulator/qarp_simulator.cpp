@@ -745,7 +745,156 @@ void validate_initial_state(const std::vector<std::complex<double>>& psi,
             "yourself — no silent renormalisation.");
 }
 
+/// `run`'s terminal sample-once readout: n_shots draws from |sv|² with one
+/// mt19937 seeded by `base_s`; each shot's classical bits are read out of its
+/// sampled outcome at the (terminal) recorded measurements of `commands`.
+void sample_terminal(const std::complex<double>* sv,
+                     uint64_t                    dim,
+                     const std::vector<Command>& commands,
+                     int                         n_shots,
+                     uint32_t                    base_s,
+                     SamplingResult&             result) {
+    std::vector<double> probs(dim);
+    for (uint64_t i = 0; i < dim; ++i) probs[i] = std::norm(sv[i]);
+
+    // (qubit, cbit) pairs of recorded measurements, in program order.
+    std::vector<std::pair<uint32_t, uint32_t>> recorded;
+    for (const auto& c : commands)
+        if (c.gate == GateType::Measure && !c.cbits.empty())
+            recorded.emplace_back(c.qubits[0], c.cbits[0]);
+    result.n_cbits = classical_register_width(commands);
+
+    std::mt19937 rng(base_s);
+    std::discrete_distribution<uint64_t> dist(probs.begin(), probs.end());
+    if (recorded.empty()) {
+        for (int i = 0; i < n_shots; ++i)
+            result.counts[dist(rng)]++;
+    } else {
+        result.cbit_history.reserve(n_shots);
+        for (int i = 0; i < n_shots; ++i) {
+            const uint64_t outcome = dist(rng);
+            result.counts[outcome]++;
+            std::vector<bool> reg(result.n_cbits, false);
+            for (const auto& [q, c] : recorded)
+                reg[c] = (outcome >> q) & 1;
+            result.cbit_history.push_back(std::move(reg));
+        }
+    }
+}
+
 }  // namespace
+
+// ── structured programs ──────────────────────────────────────────────────────
+
+void QarpSimulator::execute_program(const Program&                      program,
+                                    int                                 n_qubits,
+                                    std::vector<std::complex<double>>&  state) const {
+    const uint64_t dim = uint64_t{1} << n_qubits;
+    std::vector<std::complex<double>> scratch;
+    for (const auto& kernel : program.kernels()) {
+        if (const auto* g = std::get_if<GatesKernel>(&kernel)) {
+            for (const auto& cmd : fuse_for_dispatch(g->commands, n_qubits))
+                apply_command(cmd, state.data(), dim);
+        } else if (const auto* p = std::get_if<PermutationKernel>(&kernel)) {
+            if (scratch.size() != dim) scratch.resize(dim);
+            apply_permutation(*p, state, scratch);
+        } else if (const auto* d = std::get_if<DenseKernel>(&kernel)) {
+            apply_dense_block(d->qubits.data(), d->qubits.size(), d->matrix,
+                              state.data(), dim);
+        } else if (const auto* c = std::get_if<ControlledPowersKernel>(&kernel)) {
+            apply_controlled_powers(*c, state);
+        }
+    }
+}
+
+namespace {
+
+void check_program_width(const Program& program, int n_qubits, const char* where) {
+    if (n_qubits < 0 || program.min_register_width() > static_cast<uint32_t>(n_qubits))
+        throw std::invalid_argument(
+            "QarpSimulator::" + std::string(where) + ": a kernel acts on qubit "
+            + std::to_string(program.min_register_width() - 1) + " of a "
+            + std::to_string(n_qubits) + "-qubit register");
+}
+
+}  // namespace
+
+std::vector<std::complex<double>>
+QarpSimulator::program_statevector(const Program& program,
+                                   int            n_qubits,
+                                   const std::optional<std::vector<std::complex<double>>>&
+                                                  initial_state) const {
+    check_program_width(program, n_qubits, "program_statevector");
+    for (const auto& kernel : program.kernels())
+        if (const auto* g = std::get_if<GatesKernel>(&kernel); g && any_needs_trajectory(g->commands))
+            throw std::runtime_error(
+                "QarpSimulator::program_statevector: program contains mid-circuit "
+                "measurement, Reset, or classical condition — statevector is not "
+                "deterministic.");
+    if (noise_active())
+        throw std::runtime_error(
+            "QarpSimulator::program_statevector: noise model is active — the noisy "
+            "ensemble is not representable as a single statevector.");
+
+    const uint64_t dim = uint64_t{1} << n_qubits;
+    std::vector<std::complex<double>> state(dim);
+    if (initial_state) {
+        validate_initial_state(*initial_state, dim, "program_statevector");
+        std::copy(initial_state->begin(), initial_state->end(), state.begin());
+    } else {
+        state[0] = {1.0, 0.0};
+    }
+    execute_program(program, n_qubits, state);
+    return state;
+}
+
+SamplingResult QarpSimulator::program_run(const Program&          program,
+                                          int                     n_qubits,
+                                          int                     n_shots,
+                                          std::optional<uint32_t> seed,
+                                          const std::optional<std::vector<std::complex<double>>>&
+                                                                  initial_state) const {
+    check_program_width(program, n_qubits, "program_run");
+    if (noise_active())
+        throw std::runtime_error(
+            "QarpSimulator::program_run: noise model is active — structured programs "
+            "run the noiseless sample-once path only.");
+    const auto& kernels = program.kernels();
+    const std::vector<Command>* last = nullptr;
+    for (std::size_t i = 0; i < kernels.size(); ++i) {
+        const auto* g = std::get_if<GatesKernel>(&kernels[i]);
+        if (!g) continue;
+        if (i + 1 == kernels.size()) {
+            last = &g->commands;
+        } else if (any_needs_trajectory(g->commands)) {
+            throw std::invalid_argument(
+                "QarpSimulator::program_run: a measurement or classical condition "
+                "outside the program's last gates kernel");
+        }
+    }
+    if (last && !measurements_are_terminal(*last))
+        throw std::invalid_argument(
+            "QarpSimulator::program_run: the last gates kernel's measurements are "
+            "not terminal");
+
+    const uint64_t dim    = uint64_t{1} << n_qubits;
+    const uint32_t base_s = seed.has_value() ? *seed : std::random_device{}();
+    std::vector<std::complex<double>> state(dim);
+    if (initial_state) {
+        validate_initial_state(*initial_state, dim, "program_run");
+        std::copy(initial_state->begin(), initial_state->end(), state.begin());
+    } else {
+        state[0] = {1.0, 0.0};
+    }
+    execute_program(program, n_qubits, state);
+
+    SamplingResult result;
+    result.n_qubits = n_qubits;
+    result.n_shots  = n_shots;
+    static const std::vector<Command> kNoCommands;
+    sample_terminal(state.data(), dim, last ? *last : kNoCommands, n_shots, base_s, result);
+    return result;
+}
 
 // ── statevector ───────────────────────────────────────────────────────────────
 
@@ -881,32 +1030,8 @@ SamplingResult QarpSimulator::run(const std::vector<Command>& commands,
                           reinterpret_cast<std::complex<double>*>(sv.data()),
                           dim);
 
-        std::vector<double> probs(dim);
-        for (uint64_t i = 0; i < dim; ++i) probs[i] = std::norm(sv[i]);
-
-        // (qubit, cbit) pairs of recorded measurements, in program order.
-        std::vector<std::pair<uint32_t, uint32_t>> recorded;
-        for (const auto& c : commands)
-            if (c.gate == GateType::Measure && !c.cbits.empty())
-                recorded.emplace_back(c.qubits[0], c.cbits[0]);
-        result.n_cbits = classical_register_width(commands);
-
-        std::mt19937 rng(base_s);
-        std::discrete_distribution<uint64_t> dist(probs.begin(), probs.end());
-        if (recorded.empty()) {
-            for (int i = 0; i < n_shots; ++i)
-                result.counts[dist(rng)]++;
-        } else {
-            result.cbit_history.reserve(n_shots);
-            for (int i = 0; i < n_shots; ++i) {
-                const uint64_t outcome = dist(rng);
-                result.counts[outcome]++;
-                std::vector<bool> reg(result.n_cbits, false);
-                for (const auto& [q, c] : recorded)
-                    reg[c] = (outcome >> q) & 1;
-                result.cbit_history.push_back(std::move(reg));
-            }
-        }
+        sample_terminal(reinterpret_cast<const std::complex<double>*>(sv.data()), dim,
+                        commands, n_shots, base_s, result);
         return result;
     }
 
@@ -1176,209 +1301,6 @@ QarpSimulator::unitary_matrix(const std::vector<Command>& commands,
         release_quantum_state(raw);
     }
     return U;
-}
-
-// ── helpers shared by QPE and DOS-QPE ────────────────────────────────────────
-
-namespace {
-
-/// Compute U, U^2, U^4, ..., U^(2^(n_ancilla-1)) by repeated squaring.
-std::vector<Eigen::MatrixXcd>
-compute_u_powers(const Eigen::MatrixXcd& U, int n_ancilla) {
-    std::vector<Eigen::MatrixXcd> pows(n_ancilla);
-    pows[0] = U;
-    for (int k = 1; k < n_ancilla; ++k)
-        pows[k] = pows[k - 1] * pows[k - 1];
-    return pows;
-}
-
-/// Apply controlled-U^(2^k) to the state vector sv.
-///
-/// Layout  sv[a | (s << n_a) | (env << (n_a + n_s))]
-///   a   = ancilla index         (dim_a values)
-///   s   = state-register index  (dim_s values)
-///   env = extra-register index  (n_env_extra values; 1 for QPE, dim_s for DOSQPE)
-///
-/// For each (a, env) where bit k of a is 1, applies U to the state sub-vector
-/// (stride = dim_a, base = a + env * dim_a * dim_s).
-void apply_controlled_u_power(
-    std::vector<CTYPE>&          sv,
-    const Eigen::MatrixXcd&      Uk,
-    int                          k,            // control qubit bit-position
-    int64_t                      dim_a,
-    int64_t                      dim_s,
-    int64_t                      n_env_extra)  // 1 for QPE, dim_s for DOSQPE
-{
-    const int64_t stride     = dim_a;
-    const int64_t block_size = dim_a * dim_s;  // stride between env blocks
-
-    Eigen::VectorXcd col(dim_s), result(dim_s);
-
-    for (int64_t env = 0; env < n_env_extra; ++env) {
-        const int64_t env_offset = env * block_size;
-        for (int64_t a = 0; a < dim_a; ++a) {
-            if (!((a >> k) & 1)) continue;      // control qubit k not set
-            // Extract strided state sub-vector
-            for (int64_t s = 0; s < dim_s; ++s)
-                col[s] = sv[env_offset + a + s * stride];
-            result.noalias() = Uk * col;
-            for (int64_t s = 0; s < dim_s; ++s)
-                sv[env_offset + a + s * stride] = result[s];
-        }
-    }
-}
-
-/// Sample the ancilla register from sv (marginalise over all other qubits).
-SamplingResult
-sample_ancilla(const std::vector<CTYPE>& sv,
-               int64_t                   dim_total,
-               int64_t                   dim_a,
-               int                       n_ancilla,
-               int                       n_shots,
-               std::optional<uint32_t>   seed)
-{
-    std::vector<double> probs_a(dim_a, 0.0);
-    for (int64_t i = 0; i < dim_total; ++i)
-        probs_a[i & (dim_a - 1)] += std::norm(sv[i]);
-
-    std::mt19937 rng(seed.has_value() ? *seed : std::random_device{}());
-    std::discrete_distribution<uint64_t> dist(probs_a.begin(), probs_a.end());
-
-    SamplingResult result;
-    result.n_qubits = n_ancilla;
-    result.n_shots  = n_shots;
-    for (int i = 0; i < n_shots; ++i)
-        result.counts[dist(rng)]++;
-    return result;
-}
-
-}  // anonymous namespace
-
-// ── simulate_qpe_structured ───────────────────────────────────────────────────
-
-SamplingResult
-QarpSimulator::simulate_qpe_structured(
-    const std::vector<Command>& u_cmds,
-    const std::vector<Command>& state_prep,
-    const std::vector<Command>& iqft_cmds,
-    int                          n_state,
-    int                          n_ancilla,
-    int                          n_shots,
-    std::optional<uint32_t>      seed) const
-{
-    const int     n_total  = n_ancilla + n_state;
-    const int64_t dim_a    = INT64_C(1) << n_ancilla;
-    const int64_t dim_s    = INT64_C(1) << n_state;
-    const int64_t dim_total= INT64_C(1) << n_total;
-
-    // 1. U matrix and powers
-    auto U      = unitary_matrix(u_cmds, n_state);
-    auto U_pows = compute_u_powers(U, n_ancilla);
-
-    // 2. Initialise full state to |0⟩
-    std::vector<CTYPE> sv(dim_total, {0., 0.});
-    sv[0] = {1., 0.};
-
-    // 3. State prep on state register (qubits 0..n_s-1 → n_a..n_a+n_s-1)
-    {
-        std::vector<uint32_t> remap(static_cast<size_t>(n_state));
-        for (int j = 0; j < n_state; ++j)
-            remap[static_cast<size_t>(j)] = static_cast<uint32_t>(j + n_ancilla);
-        for (const auto& cmd : state_prep)
-            apply_command(cmd.remap_qubits(remap),
-                          reinterpret_cast<std::complex<double>*>(sv.data()),
-                          static_cast<uint64_t>(dim_total));
-    }
-
-    // 4. H on each ancilla qubit (qubits 0..n_a-1)
-    for (int k = 0; k < n_ancilla; ++k) {
-        Command hcmd(GateType::H, static_cast<uint32_t>(k));
-        apply_command(hcmd,
-                      reinterpret_cast<std::complex<double>*>(sv.data()),
-                      static_cast<uint64_t>(dim_total));
-    }
-
-    // 5. Controlled-U^(2^k) ladder (no extra register → n_env_extra = 1)
-    for (int k = 0; k < n_ancilla; ++k)
-        apply_controlled_u_power(sv, U_pows[k], k, dim_a, dim_s, 1);
-
-    // 6. IQFT on ancilla (qubits 0..n_a-1, no remap needed)
-    for (const auto& cmd : iqft_cmds)
-        apply_command(cmd,
-                      reinterpret_cast<std::complex<double>*>(sv.data()),
-                      static_cast<uint64_t>(dim_total));
-
-    // 7. Sample ancilla register
-    return sample_ancilla(sv, dim_total, dim_a, n_ancilla, n_shots, seed);
-}
-
-// ── simulate_dosqpe_structured ────────────────────────────────────────────────
-
-SamplingResult
-QarpSimulator::simulate_dosqpe_structured(
-    const std::vector<Command>& u_cmds,
-    const std::vector<Command>& state_prep,
-    const std::vector<Command>& iqft_cmds,
-    int                          n_state,
-    int                          n_ancilla,
-    int                          n_shots,
-    std::optional<uint32_t>      seed) const
-{
-    const int     n_total  = n_ancilla + 2 * n_state;
-    const int64_t dim_a    = INT64_C(1) << n_ancilla;
-    const int64_t dim_s    = INT64_C(1) << n_state;
-    const int64_t dim_total= INT64_C(1) << n_total;
-
-    // 1. U matrix and powers
-    auto U      = unitary_matrix(u_cmds, n_state);
-    auto U_pows = compute_u_powers(U, n_ancilla);
-
-    // 2. Initialise full state to |0⟩
-    std::vector<CTYPE> sv(dim_total, {0., 0.});
-    sv[0] = {1., 0.};
-
-    // 3. State prep on state register (qubits 0..n_s-1 → n_a..n_a+n_s-1)
-    {
-        std::vector<uint32_t> remap(static_cast<size_t>(n_state));
-        for (int j = 0; j < n_state; ++j)
-            remap[static_cast<size_t>(j)] = static_cast<uint32_t>(j + n_ancilla);
-        for (const auto& cmd : state_prep)
-            apply_command(cmd.remap_qubits(remap),
-                          reinterpret_cast<std::complex<double>*>(sv.data()),
-                          static_cast<uint64_t>(dim_total));
-    }
-
-    // 4. CNOT entanglement: state[j] → purif[j]  (CX(n_a+j, n_a+n_s+j))
-    for (int j = 0; j < n_state; ++j) {
-        Command cx(GateType::CX,
-                   static_cast<uint32_t>(n_ancilla + j),
-                   static_cast<uint32_t>(n_ancilla + n_state + j));
-        apply_command(cx,
-                      reinterpret_cast<std::complex<double>*>(sv.data()),
-                      static_cast<uint64_t>(dim_total));
-    }
-
-    // 5. H on each ancilla qubit
-    for (int k = 0; k < n_ancilla; ++k) {
-        Command hcmd(GateType::H, static_cast<uint32_t>(k));
-        apply_command(hcmd,
-                      reinterpret_cast<std::complex<double>*>(sv.data()),
-                      static_cast<uint64_t>(dim_total));
-    }
-
-    // 6. Controlled-U^(2^k) ladder
-    // Extra register = purification (dim_s values) → n_env_extra = dim_s
-    for (int k = 0; k < n_ancilla; ++k)
-        apply_controlled_u_power(sv, U_pows[k], k, dim_a, dim_s, dim_s);
-
-    // 7. IQFT on ancilla
-    for (const auto& cmd : iqft_cmds)
-        apply_command(cmd,
-                      reinterpret_cast<std::complex<double>*>(sv.data()),
-                      static_cast<uint64_t>(dim_total));
-
-    // 8. Sample ancilla register
-    return sample_ancilla(sv, dim_total, dim_a, n_ancilla, n_shots, seed);
 }
 
 // ── run_gradient (adjoint backpropagation) ───────────────────────────────────
