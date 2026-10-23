@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 import qarpx as qx
+from qarp import SamplingDistribution
 from qarp.algorithms import Sampler, StateVector
 from qarp.blocks import SimpleBlock
 from qarp.engines import CudaqEngine, Engine
@@ -27,6 +28,7 @@ from qarp.engines._cudaq_engine import (
     _STATEVECTOR_HOST_QUBIT_CAP,
     _check_statevector_host,
 )
+from qarp.engines._engine import CompiledCircuit
 from qarp.errors import CapabilityError
 from qarp.operators import QubitOperator
 
@@ -167,7 +169,7 @@ def test_check_statevector_host_cap():
 
     class _Prim:
         def __init__(self, n):
-            self._n_qubits_list = [n]
+            self.compiled = [CompiledCircuit([], n, ())]
 
     _check_statevector_host(_Prim(_STATEVECTOR_HOST_QUBIT_CAP))  # OK
     with pytest.raises(CapabilityError, match="host statevector"):
@@ -194,7 +196,7 @@ def test_build_then_run_returns_one_result_per_primitive():
     out = eng.run()
     assert len(out) == 1
     dist = out[0]
-    assert isinstance(dist, dict)
+    assert isinstance(dist, SamplingDistribution)
     assert abs(sum(dist.values()) - 1.0) < 1e-9
 
 

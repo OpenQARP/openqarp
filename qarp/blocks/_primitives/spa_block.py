@@ -71,7 +71,7 @@ class SPABlock(CompositeBlock):
     def get_entangler_block(self, i, j, layer_index):
         if self.real:
             theta = Symbol(f"spa_theta_{layer_index}_{i}_{j}")
-            entangler = RSPBlock(theta, target_qubits=[i, j])
+            entangler: RSPBlock | AGateBlock = RSPBlock(theta, target_qubits=[i, j])
             # self.symbols += [theta]
         else:
             phi = Symbol(f"spa_phi_{layer_index}_{i}_{j}")

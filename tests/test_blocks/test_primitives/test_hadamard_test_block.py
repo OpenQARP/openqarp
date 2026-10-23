@@ -273,3 +273,14 @@ def test_transition_multiplexor_reuses_common_ansatz_gates():
     # The common CX is emitted once.  A generic controlled-CX would be CCX.
     assert any(command.gate.name == "CX" for command in commands)
     assert not any(command.gate.name == "CCX" for command in commands)
+
+
+def test_raw_blocks_as_state_and_unitary():
+    """Raw qarpx blocks build to themselves.  Oracle: ⟨1|Z|1⟩ = -1, which a
+    circuit missing the controlled-U (giving ⟨1|I|1⟩ = 1) does not give."""
+    state = qx.SimpleBlock(1, "one")
+    state.x(0)
+    unitary = qx.SimpleBlock(1, "z")
+    unitary.z(0)
+    block = HadamardTestBlock(state=state, unitary=unitary).build()
+    assert _ancilla_expectation(_unitary(block), block.n_qubits) == pytest.approx(-1.0, abs=1e-12)

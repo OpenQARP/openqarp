@@ -1,0 +1,38 @@
+# The PR-template rule "an unticked box on a ready PR is a blocker", as a
+# status check.  Draft PRs pass unconditionally: Gate 1 happens while Draft
+# and its boxes are meant to be open.  HTML comments are stripped first —
+# the reviewer paste-blocks in the template live inside them.
+name: pr-checklist
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review, converted_to_draft]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-checklist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: No unticked box on a non-draft PR
+        env:
+          # The body is untrusted text: it reaches the script only through
+          # the environment, never by interpolation into the script.
+          BODY: ${{ github.event.pull_request.body }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$DRAFT" = "true" ]; then
+            echo "Draft PR — checklist not enforced yet."
+            exit 0
+          fi
+          open=$(printf '%s\n' "$BODY" \
+            | perl -0pe 's/<!--.*?-->//gs' \
+            | grep -nE '^\s*[-*] \[ \]' || true)
+          if [ -n "$open" ]; then
+            echo "Unticked checklist items in the PR description (tick, or tick + strike through with a reason):"
+            echo "$open"
+            exit 1
+          fi
+          echo "All checklist items ticked."

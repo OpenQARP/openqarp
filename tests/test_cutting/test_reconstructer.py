@@ -106,6 +106,30 @@ def test_reconstruct_filter_qubits():
             assert _count_gates(filtered_all) == _count_gates(cmds)
 
 
+@pytest.mark.parametrize("flipped, sign", [([1, 2], 1.0), ([1, 2, 3], -1.0)])
+def test_a_three_qubit_gate_keeps_its_qubits_when_filtered(flipped, sign):
+    """Subset [1, 2, 3] of a four-qubit X…X · CCZ(1, 2, 3).  CCZ flips the sign of
+    |111⟩ only; a CZ on the first two would also flip local |011⟩ (LSB)."""
+    block = qx.SimpleBlock(4, "ccz")
+    for q in flipped:
+        block.x(q)
+    block.mcz([1, 2, 3])
+    block.build()
+    kept, n = Reconstructer.reconstruct_filter_qubits(list(block.flatten()), 4, [1, 2, 3])
+    assert n == 3
+    index = sum(1 << (q - 1) for q in flipped)
+    amplitude = qx.QarpSimulator().statevector(kept, n)[index]
+    assert amplitude == pytest.approx(sign)
+
+
+def test_a_three_qubit_gate_across_the_boundary_raises():
+    block = qx.SimpleBlock(3, "ccz")
+    block.mcz([0, 1, 2])
+    block.build()
+    with pytest.raises(RuntimeError, match="straddles"):
+        Reconstructer.reconstruct_filter_qubits(list(block.flatten()), 3, [0, 1])
+
+
 def test_remove_measure_gates():
     for n_q in range(2, 5):
         for n_lay in range(1, 3):

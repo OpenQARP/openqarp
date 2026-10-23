@@ -18,7 +18,7 @@ import numpy as np
 
 from qarp.operators import QubitOperator
 
-from ...blocks import AnyBlock, CompositeBlock, TrotterBlock
+from ...blocks import AnyBlock, CompositeBlock, QarpBlock, TrotterBlock
 from ...engines import Engine, QarpEngine
 from ...errors import CapabilityError
 from .._primitives.state_vector import _operator_width, pauli_apply, pauli_expectation
@@ -70,7 +70,7 @@ class QITE(CompositeAlgorithm):
     def __init__(
         self,
         hamiltonian: QubitOperator,
-        initial_block: AnyBlock,
+        initial_block: QarpBlock,
         dtau: float,
         n_steps: int,
         *,
@@ -147,7 +147,7 @@ class QITE(CompositeAlgorithm):
         self._pool: Optional[List[QubitOperator]] = None
         self._layers: List[AnyBlock] = []
         self._last_a: Optional[np.ndarray] = None
-        self._final_block: Optional[AnyBlock] = None
+        self._final_block: Optional[CompositeBlock] = None
         self._final_state: Optional[np.ndarray] = None
 
     def build(self) -> "QITE":
@@ -251,7 +251,7 @@ class QITE(CompositeAlgorithm):
     def _energy(self, psi: np.ndarray) -> float:
         return float(pauli_expectation(psi, psi, self.hamiltonian, self.n_qubits).real)
 
-    def get_final_state_block(self) -> AnyBlock:
+    def get_final_state_block(self) -> QarpBlock:
         """The accumulated ``initial_block ∘ layer₁ ∘ … ∘ layerₙ`` (after ``run``)."""
         if self._final_block is None:
             raise RuntimeError("No result — call run() first.")

@@ -7,7 +7,7 @@ same joint ancilla/data measurement.  It therefore uses one real and/or one
 imaginary transition circuit per group instead of one Hadamard test per term.
 """
 
-from typing import List, Optional, Self, Union
+from typing import List, Optional, Union
 
 import qarpx as qx
 
@@ -116,7 +116,7 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
         n_qubits = self.n_qubits
         assert n_qubits is not None
 
-        for term, coefficient in self.operator.terms.items():  # type: ignore[union-attr]
+        for term, coefficient in self.operator.terms.items():
             c = complex(coefficient)
             if abs(c.imag) > 1e-12:
                 raise ValueError(
@@ -132,11 +132,9 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
             self._terms.append(pauli)
             self._coeffs.append(value)
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         self._validate_inputs()
         self.n_qubits = self.ket.n_qubits
-        self.bra.build()
-        self.ket.build()
         self._decompose_operator()
 
         # A zero operator needs no circuits.  A non-zero identity term still
@@ -145,8 +143,7 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
             self._groups = []
             self._group_bases = []
             self._group_masks = []
-            self.sub_blocks = []
-            return self
+            return []
 
         self._groups = self.grouping.group(self._terms, self.n_qubits)
         if not self._groups:
@@ -157,7 +154,7 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
             [term_mask(self._terms[index]) for index in group] for group in self._groups
         ]
 
-        self.sub_blocks = []
+        circuits = []
         quadratures = [
             estimate_imaginary
             for estimate_imaginary, enabled in ((False, self.real), (True, self.imaginary))
@@ -165,15 +162,15 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
         ]
         for basis in self._group_bases:
             for estimate_imaginary in quadratures:
-                block = InterferometricMeasurementBlock(
-                    bra=self.bra,
-                    ket=self.ket,
-                    basis=basis,
-                    estimate_imaginary=estimate_imaginary,
+                circuits.append(
+                    InterferometricMeasurementBlock(
+                        bra=self.bra,
+                        ket=self.ket,
+                        basis=basis,
+                        estimate_imaginary=estimate_imaginary,
+                    )
                 )
-                block.build()
-                self.sub_blocks.append(block)
-        return self
+        return circuits
 
     def _estimate_group(self, result, group_index: int) -> float:
         if result.n_shots <= 0:

@@ -1,12 +1,12 @@
 from copy import deepcopy
-from typing import Any, Dict, Iterable, List, Optional, Self, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Self, Sequence, Union, cast
 
 import numpy as np
 from sympy import Symbol
 
 from qarp.operators import QubitOperator
 
-from ...blocks import AnyBlock
+from ...blocks import AnyBlock, QarpBlock
 from ...engines import Engine
 from ...engines._gradients import gradient_method_from_flag
 from ...optimizers import Optimizer, ScipyOptimizer
@@ -76,7 +76,7 @@ class VQD(CompositeAlgorithm):
     def __init__(
         self,
         operator: Union[QubitOperator, AnyBlock],
-        kets: List[AnyBlock],
+        kets: Sequence[QarpBlock],
         weights: List[float],
         initial_parameters: Optional[Iterable[Iterable[float]]] = None,
         verbose: bool = False,
@@ -131,6 +131,7 @@ class VQD(CompositeAlgorithm):
         self.optimizer = optimizer
         self.iter = 0
 
+        ket_symbols: list[tuple[Any, ...]] = []
         for ket in kets:
             if not ket.symbols:
                 raise ValueError(
@@ -138,8 +139,9 @@ class VQD(CompositeAlgorithm):
                     "optimize (symbols is None or empty). Pass parameterized "
                     "ansatz blocks, not bare state-preparation blocks."
                 )
+            ket_symbols.append(ket.symbols)
         if initial_parameters is None:
-            self.initial_parameters: list = [[0.0] * len(ket.symbols) for ket in kets]
+            self.initial_parameters: list = [[0.0] * len(symbols) for symbols in ket_symbols]
         else:
             # Per-state entries may each be a {symbol: value} mapping
             # (order-proof) or a vector positional against that ket's symbols.
@@ -150,8 +152,8 @@ class VQD(CompositeAlgorithm):
                     f"{len(kets)} kets; one entry per ket is required."
                 )
             self.initial_parameters = [
-                resolve_initial_parameters(ket.symbols, entry)
-                for ket, entry in zip(kets, entries, strict=True)
+                resolve_initial_parameters(symbols, entry)
+                for symbols, entry in zip(ket_symbols, entries, strict=True)
             ]
         self.state_parameters = []
         self.energies: list[Any] = [None] * len(self.kets)
@@ -179,22 +181,20 @@ class VQD(CompositeAlgorithm):
             raise RuntimeError("No complete optimization result — call run() first.")
         return self.state_parameters
 
-    def get_final_state_block(self, index: int) -> AnyBlock:
+    def get_final_state_block(self, index: int) -> QarpBlock:
         """Ket ``index`` bound at its optimal parameters."""
         bound = self.kets[index].set_symbols(self.optimal_parameters[index])
         bound.build()
         return bound
 
+    def _parameter_map(self, theta: Iterable[float]) -> Dict[Any, float]:
+        """Ket ``iter``'s symbols bound to ``theta``, positionally."""
+        symbols = self.kets[self.iter].symbols
+        assert symbols is not None  # checked non-empty at construction
+        return dict(zip(symbols, np.array(theta), strict=True))
+
     def objective(self, theta: Iterable[float]):
-        results = self.engine.run(
-            params=dict(
-                zip(
-                    self.kets[self.iter].symbols,  # type: ignore[arg-type]
-                    np.array(theta),
-                    strict=True,
-                )
-            )
-        )
+        results = self.engine.run(params=self._parameter_map(theta))
         ev = cast(complex, results[0])  # an estimator result is a scalar
         # Every overlap primitive is a copy of self.primitive, so one flag lookup
         # covers all of them; the built primitives are not consulted because the
@@ -203,11 +203,11 @@ class VQD(CompositeAlgorithm):
             w * squared_overlap(self.primitive, o)
             for w, o in zip(self.weights[: self.iter], results[1:], strict=True)
         )
-        self.energies[self.iter] = ev  # type: ignore[assignment]
+        self.energies[self.iter] = ev
         return float(np.real(ev)) + float(penalty)
 
     def objective_gradient(self, theta: Iterable[float]):
-        p = dict(zip(self.kets[self.iter].symbols, np.array(theta), strict=True))  # type: ignore[arg-type]
+        p = self._parameter_map(theta)
         term_gradients = self.engine.run_gradient(p, method=self.gradient_method or "default")
         grads = np.array(np.real(term_gradients[0]), dtype=float)
         if self.iter == 0:
@@ -257,35 +257,37 @@ class VQD(CompositeAlgorithm):
                 self._last_gradnorm = float(np.linalg.norm(gradients))
                 return gradients
 
+        iteration = 0
+        previous_energy: Optional[float] = None
+        previous_theta: Optional[np.ndarray] = None
+
         def callback(x):
+            nonlocal iteration, previous_energy, previous_theta
             # Reads the last-evaluation caches — no extra quantum work.
             # energies[state] is written by the same objective call, so the
             # deflation penalty is recovered without re-running the overlaps.
             energy = self._last_objective
+            assert energy is not None  # the optimizer evaluates before each callback
             ovlps_norm = float(np.real(self.energies[state] - energy))
-            dE = 0.0 if callback.previous_energy is None else energy - callback.previous_energy
+            dE = 0.0 if previous_energy is None else energy - previous_energy
             step_size = (
                 0.0
-                if callback.previous_theta is None
-                else float(np.linalg.norm(np.asarray(x) - callback.previous_theta))
+                if previous_theta is None
+                else float(np.linalg.norm(np.asarray(x) - previous_theta))
             )
             # Pre-formatted: the shared Cost column prints its value verbatim,
             # and the overlap norm keeps the tabular width of the other columns.
             self._log_iteration(
-                callback.iter,
+                iteration,
                 energy,
                 dE,
                 step_size,
                 cost=f"{ovlps_norm:{'.10f' if ovlps_norm < 0 else ' .10f'}}",
                 label=f"Macroiteration {state}",
             )
-            callback.previous_energy = energy
-            callback.previous_theta = np.asarray(x, dtype=float).copy()
-            callback.iter += 1
-
-        callback.iter = 0
-        callback.previous_energy = None
-        callback.previous_theta = None
+            previous_energy = energy
+            previous_theta = np.asarray(x, dtype=float).copy()
+            iteration += 1
 
         p = self.initial_parameters[self.iter]
         result = self._minimize(
@@ -299,7 +301,7 @@ class VQD(CompositeAlgorithm):
         # Re-evaluate at result.x so energies[iter] is the energy AT the
         # returned parameters, not scipy's last probe point.
         self.objective(result.x)
-        self.state_parameters.append(dict(zip(self.kets[self.iter].symbols, result.x, strict=True)))
+        self.state_parameters.append(self._parameter_map(result.x))
         self.iter += 1
         return result.fun, result.x
 

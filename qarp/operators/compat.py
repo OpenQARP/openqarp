@@ -41,6 +41,7 @@ def from_openfermion(operator):
     """Convert an openfermion FermionOperator/QubitOperator to the qarpx
     equivalent (exact term dict copy)."""
     openfermion = _openfermion()
+    out: _qx.FermionOperator | _qx.QubitOperator
     if isinstance(operator, openfermion.FermionOperator):
         out = _qx.FermionOperator()
     elif isinstance(operator, openfermion.QubitOperator):

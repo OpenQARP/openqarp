@@ -2,8 +2,9 @@
 (pipeline_hardening_plan.md P1.9).  Oracle: analytic single-qubit matrices."""
 
 import numpy as np
+import pytest
 
-from qarp.blocks import CompositeBlock, SimpleBlock
+from qarp.blocks import CompositeBlock, CompositeBlockBase, SimpleBlock
 
 H = np.array([[1, 1], [1, -1]]) / np.sqrt(2)
 X = np.array([[0, 1], [1, 0]])
@@ -53,3 +54,30 @@ def test_add_child_refreshes_symbols():
     top.add_child(rz)
     top.build()
     assert tuple(top.symbols) == (a,)
+
+
+class _ComputedChildren(CompositeBlock):
+    def __init__(self):
+        super().__init__([], n_qubits=1)
+
+    def build_vanilla(self):
+        self.add_child(_gate("h"))
+        self.add_child(_gate("x"))
+
+
+class _ComputedChildrenOnBase(CompositeBlockBase):
+    def __init__(self):
+        super().__init__(n_qubits=1)
+
+    def build_vanilla(self):
+        self.add_child(_gate("h"))
+        self.add_child(_gate("x"))
+
+
+def test_children_queued_but_never_wired_are_refused():
+    with pytest.raises(TypeError, match="never wired"):
+        _ComputedChildren().build()
+    # The base wires as it goes: H then X (analytic).
+    np.testing.assert_allclose(
+        _ComputedChildrenOnBase().build().unitary_matrix(), X @ H, atol=1e-12
+    )

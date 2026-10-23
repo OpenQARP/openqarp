@@ -1,10 +1,10 @@
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Mapping, Optional, Self, Tuple, Union
 
 import numpy as np
 from sympy import Symbol
 
 import qarpx as qx
-from qarp.blocks._block import SimpleBlock, _sorted_symbols
+from qarp.blocks._block import SimpleBlock, _as_symbol, _sorted_symbols
 from qarp.operators import FullyCommuting, GroupingStrategy, QubitOperator
 
 PauliTuple = Tuple[str, ...]  # ('X', 'I', 'Z', ...) — len == n_qubits
@@ -610,10 +610,11 @@ class TrotterAnsatzBlock(SimpleBlock):
         inner = scale_c(sub, 1.0 - 4.0 * reduction)
         return outer + outer + inner + outer + outer
 
-    def replace_symbols(self, new_parameters: Dict[Symbol, Symbol]) -> "SimpleBlock":  # type: ignore
+    def replace_symbols(self, new_parameters: Mapping[Symbol | str, Symbol | str]) -> Self:
         new_object = super().replace_symbols(new_parameters)
+        renames = {_as_symbol(k): _as_symbol(v) for k, v in new_parameters.items()}
         if new_object.symbols and hasattr(new_object, "symbol_qop_pairs"):
             new_object.symbol_qop_pairs = [
-                (new_parameters.get(s, s), qop) for s, qop in new_object.symbol_qop_pairs
+                (renames.get(s, s), qop) for s, qop in new_object.symbol_qop_pairs
             ]
         return new_object

@@ -6,10 +6,12 @@ Submodules are private implementation and may be reorganised without notice.
 import importlib.util as _importlib_util
 
 from .._lazy import lazy_exports as _lazy_exports
+from .._structure import Repeat
 
 from ._block import (
     AnyBlock,  # = qx.Block: the type to annotate with / isinstance against;
     # not a base class — subclass SimpleBlock (leaf) or CompositeBlockBase (tree).
+    QarpBlock,  # the Python block classes: for code reading `symbols` and the like
     SimpleBlock,
     ControlledBlock,
     MeasureBlock,
@@ -17,8 +19,8 @@ from ._block import (
     ConditionalBlock,
     # `CompositeBlockBase` is the bare tree primitive that internal blocks
     # extend and that isinstance checks target; `composite_block.CompositeBlock`
-    # below is the user-facing assembly wrapper (adds measurement-only-at-end
-    # orchestration and qubit-count inference from children).
+    # below is the user-facing assembly wrapper (adds a children list wired at
+    # build and qubit-count inference from children).
     CompositeBlockBase,
 )
 from ._composite_block import CompositeBlock
@@ -154,10 +156,12 @@ __all__ = [
     "QROMBlock",
     "QSPBlock",
     "QSVTBlock",
+    "QarpBlock",
     "QubitizationBlock",
     "RSPBlock",
     "ReadoutBlock",
     "ReflectionBlock",
+    "Repeat",
     "ResetBlock",
     "SPABlock",
     "SWAPTestBlock",

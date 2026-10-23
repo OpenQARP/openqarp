@@ -79,7 +79,7 @@ def test_t2_populates_symbol_parameter_map():
 # ── Unitary correctness vs. hand-built composite ─────────────────────────
 
 
-def _reference_composite(theta_val: float) -> "qx.SimpleBlock":
+def _reference_composite(theta_val: float) -> "qx.CompositeBlock":
     """Reference 4-qubit unitary: GivensBlock(+2θ) on [0,2] then α→β CX layer.
 
     Built with a concrete ``theta_val`` (not a symbol) so this reference is

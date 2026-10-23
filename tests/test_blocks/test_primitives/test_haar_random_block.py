@@ -14,9 +14,16 @@ class TestHaarRandomBlockInit:
         block = HaarRandomBlock(n_qubits=3, seed=0)
         assert block.n_qubits == 3
         assert block.t_design is None
-        assert block.depth is None
+        assert block.n_layers is None
         assert block.seed == 0
         assert block.name == "HaarRandomUnitary"
+
+    def test_depth_is_the_built_circuit_depth(self):
+        """One t-design layer on two qubits: three Euler rotations on each
+        qubit in parallel, one CX, then the final three, so depth 7."""
+        block = HaarRandomBlock(n_qubits=2, t_design=1, depth=1, seed=0).build()
+        assert block.n_layers == 1
+        assert block.depth() == 7
 
     def test_t_design_stored(self):
         block = HaarRandomBlock(n_qubits=3, t_design=2, seed=0)
@@ -149,7 +156,7 @@ class TestHaarRandomBlockReseed:
 
         assert reseeded.n_qubits == original.n_qubits
         assert reseeded.t_design == original.t_design
-        assert reseeded.depth == original.depth
+        assert reseeded.n_layers == original.n_layers
         assert reseeded.name == original.name
         assert reseeded.seed == 42
 

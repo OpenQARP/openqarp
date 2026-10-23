@@ -1,5 +1,10 @@
 """OpenQARP exception types."""
 
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    import qarpx as qx
+
 
 class CapabilityError(ValueError):
     """A declared capability is incompatible with the engine, circuit, or call.
@@ -8,8 +13,8 @@ class CapabilityError(ValueError):
     the ``Engine`` template's validation hooks at ``build()``, ``run()`` and
     ``batch_run()`` time (targets, exactness, noise×amplitudes, mid-circuit
     operations, ``initial_state`` support/routing), by engine constructors for
-    self-contradictory configuration, by ``StructuredQPEPlan.sample()``, and by
-    primitives whose own construction detects an unsupported combination.
+    self-contradictory configuration, and by primitives whose own construction
+    detects an unsupported combination.
 
     Also the rejection type of the emit/absorb SDK boundary: an emitter whose
     declared gate set or ``EmitterCapabilities`` cannot represent a command
@@ -21,3 +26,5 @@ class CapabilityError(ValueError):
     circuit.  Subclasses ``ValueError`` so broad ``except ValueError``
     handlers keep working.
     """
+
+    command: Optional["qx.Command"] = None

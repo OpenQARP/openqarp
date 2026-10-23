@@ -5,7 +5,7 @@ caller-supplied gate set of :class:`qarpx.GateType` values.
 """
 
 import random
-from typing import List
+from typing import Any, Callable, List
 
 from numpy import pi
 
@@ -55,7 +55,7 @@ def generate_random_circuit(
 
     block = SimpleBlock(num_qubits, name="random")
     qubits = list(range(num_qubits))
-    rotation_method = {
+    rotation_method: dict[qx.GateType, Callable[..., Any]] = {
         qx.GateType.Rx: block.rx,
         qx.GateType.Ry: block.ry,
         qx.GateType.Rz: block.rz,
@@ -63,7 +63,7 @@ def generate_random_circuit(
         qx.GateType.CRy: block.cry,
         qx.GateType.CRz: block.crz,
     }
-    one_qubit_method = {
+    one_qubit_method: dict[qx.GateType, Callable[..., Any]] = {
         qx.GateType.H: block.h,
         qx.GateType.X: block.x,
         qx.GateType.Y: block.y,
@@ -73,7 +73,7 @@ def generate_random_circuit(
         qx.GateType.T: block.t,
         qx.GateType.Tdg: block.tdg,
     }
-    two_qubit_method = {
+    two_qubit_method: dict[qx.GateType, Callable[..., Any]] = {
         qx.GateType.CX: block.cx,
         qx.GateType.CZ: block.cz,
         qx.GateType.SWAP: block.swap,

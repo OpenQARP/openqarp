@@ -8,13 +8,12 @@ Submits one or two ``sub_blocks`` (real / imaginary) and combines their
 ancilla statistics in :meth:`run`.
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
 import qarpx as qx
 
 from ..._types import Shots
-from ...blocks import AnyBlock, IdentityBlock
-from ...blocks._block import CompositeBlockBase
+from ...blocks import AnyBlock, CompositeBlock, IdentityBlock
 from ...blocks._primitives import HadamardTestBlock
 from .primitive_algorithm import PrimitiveAlgorithm
 from .target import Target
@@ -64,7 +63,7 @@ class HadamardTest(PrimitiveAlgorithm):
         if self.operator is not None and not isinstance(self.operator, qx.Block):
             raise TypeError("operator must be a Block instance or None")
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         self._validate_inputs()
 
         n_qubits = self.ket.n_qubits
@@ -80,42 +79,28 @@ class HadamardTest(PrimitiveAlgorithm):
             unitary_dagger = self.bra
         elif target == Target.TRANSITION_AMPLITUDE:
             state = IdentityBlock(n_qubits)
-            ko = CompositeBlockBase(n_qubits=n_qubits, name="ket+operator")
-            ket_built = self.ket.build()
-            ket_built.target_qubits = list(range(n_qubits))
-            op_built = self.operator.build()
-            op_built.target_qubits = list(range(n_qubits))
-            ko.add_child(ket_built)
-            ko.add_child(op_built)
-            ko.build()
-            unitary = ko
+            self.ket.target_qubits = list(range(n_qubits))
+            self.operator.target_qubits = list(range(n_qubits))
+            unitary = CompositeBlock(
+                [self.ket, self.operator], n_qubits=n_qubits, name="ket+operator"
+            )
             unitary_dagger = self.bra
         else:
             raise RuntimeError(f"Unhandled target {target}")
 
-        self.sub_blocks = []
-        if self.real:
-            blk_re = HadamardTestBlock(
-                state=state,
-                unitary=unitary,
-                unitary_dagger=unitary_dagger,
-                estimate_imaginary=False,
-                measure=True,
-            )
-            blk_re.build()
-            self.sub_blocks.append(blk_re)
-        if self.imaginary:
-            blk_im = HadamardTestBlock(
-                state=state,
-                unitary=unitary,
-                unitary_dagger=unitary_dagger,
-                estimate_imaginary=True,
-                measure=True,
-            )
-            blk_im.build()
-            self.sub_blocks.append(blk_im)
-
-        return self
+        circuits = []
+        for estimate_imaginary, enabled in ((False, self.real), (True, self.imaginary)):
+            if enabled:
+                circuits.append(
+                    HadamardTestBlock(
+                        state=state,
+                        unitary=unitary,
+                        unitary_dagger=unitary_dagger,
+                        estimate_imaginary=estimate_imaginary,
+                        measure=True,
+                    )
+                )
+        return circuits
 
     @staticmethod
     def _ancilla_zero_prob(sr) -> float:

@@ -677,6 +677,9 @@ void register_qiskit_emitter(nb::module_& m) {
              "sequence can cross.  Needs no SDK installed.")
         .def("emit", &QiskitEmitter::emit,
              "commands"_a, "n_qubits"_a, "circuit_name"_a = "circuit",
+             // The SDK circuit type: typed Any so the stub imports no SDK.
+             nb::sig("def emit(self, commands: collections.abc.Sequence[qarpx.Command], "
+                     "n_qubits: int, circuit_name: str = 'circuit') -> typing.Any"),
              "Translate a flat QARPx command sequence into a "
              "qiskit.QuantumCircuit.");
 }

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
@@ -41,11 +41,10 @@ class DOSQPE(CompositeAlgorithm):
         self.n_ancilla = n_ancilla
         self.hamming_weight = hamming_weight
 
-        self.block = None
-        self.n_qubits = None
-        self.state = None
-        self.distribution = None
-        self._plan = None
+        self.block: Optional[DOSQPEBlock] = None
+        self.n_qubits: Optional[int] = None
+        self.state: Optional[AnyBlock] = None
+        self.distribution: Any = None
 
     @property
     def freqs(self):
@@ -56,53 +55,36 @@ class DOSQPE(CompositeAlgorithm):
 
     def build(self):
         """
-        Build the DOS Phase Estimation circuit.
+        Build the DOS Phase Estimation circuit through the engine.
 
-        First offers the problem to the engine's structured fast path
-        (``Engine.prepare_structured_qpe`` — matrix exponentiation, the
-        controlled-U ladder is never compiled).  Engines without the path,
-        or refusing it (EXACT readout, noise, routing, parametric U — see
-        ``QarpEngine.prepare_structured_qpe``), return None and the full
-        DOSQPEBlock circuit is built instead.
+        ``DOSQPEBlock`` declares its controlled-U ladder (``structure()``), so
+        an engine that plans declarations (§14 *Structured execution*) never
+        builds the ladder and ``block`` stays unbuilt; any other engine
+        builds and compiles it.
 
         Returns:
             self: The instance of the class.
         """
-        self.n_qubits = self.unitary.build().n_qubits
+        self.n_qubits = self.unitary.n_qubits
         if self.n_qubits is None:
             raise ValueError("Unitary block must have a defined number of qubits.")
 
         if self.hamming_weight is None:
-            self.state = HnBlock(self.n_qubits).build()
+            self.state = HnBlock(self.n_qubits)
         else:
-            self.state = DickeStateBlock(self.n_qubits, self.hamming_weight).build()
+            self.state = DickeStateBlock(self.n_qubits, self.hamming_weight)
 
-        self._plan = self.engine.prepare_structured_qpe(
-            "dosqpe", self.unitary, self.state, self.n_ancilla, self.primitive
-        )
-        if self._plan is not None:
-            return self
-
-        # Generic path: build and compile the full DOSQPE circuit.
         self.block = DOSQPEBlock(
-            self.state,
-            self.unitary,
-            self.n_ancilla,
-            self.n_qubits,
-            measure=True,
-        ).build()
-
-        self.primitive.ket = self.block
+            self.state, self.unitary, self.n_ancilla, self.n_qubits, measure=True
+        )
         if isinstance(self.primitive, Sampler) and self.primitive.measured_qubits is None:
             # The block records measurements on the ancilla register only
             # (qubits 0..n_ancilla-1); marginalise the system register out so
             # the phase extraction reads pure ancilla bits — otherwise any
             # eigenstate ≠ |0…0⟩ shifts the result by whole integers.
             self.primitive.measured_qubits = list(range(self.n_ancilla))
-        # engine.build() builds the primitive itself — building here too would
-        # compile every circuit twice.
+        self.primitive.ket = self.block
         self.engine.build([self.primitive])
-
         return self
 
     def run(self):
@@ -112,13 +94,9 @@ class DOSQPE(CompositeAlgorithm):
         Returns:
             distribution: The distribution of the measurement results.
         """
-        if self._plan is not None:
-            # Fast path: matrix-exponentiation DOSQPE.
-            self.distribution = self._plan.sample()
-        else:
-            if self.block is None or not self.block.is_built:
-                raise ValueError("Circuit not built. Call build() before run().")
-            self.distribution = self.engine.run()[0]
+        if self.block is None:
+            raise ValueError("Circuit not built. Call build() before run().")
+        self.distribution = self.engine.run()[0]
 
         return self.distribution
 
@@ -235,7 +213,8 @@ class DOSQPE(CompositeAlgorithm):
         )
 
         # manually add legend entries
-        for i in range(self.n_qubits + 1):  # type: ignore[arg-type]
+        assert self.n_qubits is not None  # set by build()
+        for i in range(self.n_qubits + 1):
             if i in unique_occ_numbers:
                 ax.plot([], [], color=colors[i], lw=3, label=f"Occ. #: {i}")
 

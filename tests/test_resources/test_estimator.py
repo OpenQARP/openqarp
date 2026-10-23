@@ -160,3 +160,13 @@ def test_target_stage_is_custom_free_at_o1():
     v = report[Stage.TARGET]
     assert "Custom" not in v.op_histogram
     assert v.t_count_modeled is not None
+
+
+def test_an_unbuilt_raw_composite_is_built_before_counting():
+    """H then CX, in an unbuilt raw composite: one H and one CX (counted by hand)."""
+    h = qx.SimpleBlock(2, "h")
+    h.h(0)
+    cx = qx.SimpleBlock(2, "cx")
+    cx.cx(0, 1)
+    v = estimate(qx.CompositeBlock([h, cx], 2, "hcx"))[Stage.LOGICAL]
+    assert v.op_histogram == {"H": 1, "CX": 1}

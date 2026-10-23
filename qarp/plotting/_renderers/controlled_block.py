@@ -77,7 +77,7 @@ class ControlledBlockRenderer(GateRenderer):
         # Determine text color based on box background
         box_color = self.config.gate_colors.get(  # type: ignore
             "box", "#EFEFEF"
-        )  # type: ignore[union-attr]
+        )
         text_color = (
             self.config.text_color
             if self.config.gate_style == "outline"

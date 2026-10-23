@@ -291,5 +291,8 @@ void register_qiskit_absorber(nb::module_& m) {
         .def("source_name", &QiskitAbsorber::source_name)
         .def("absorb", &QiskitAbsorber::absorb,
              "circuit"_a,
+             // The SDK circuit type: typed Any so the stub imports no SDK.
+             nb::sig("def absorb(self, circuit: typing.Any) -> "
+                     "tuple[list[qarpx.Command], int, int]"),
              "Parse a qiskit.QuantumCircuit into (commands, n_qubits, n_cbits).");
 }

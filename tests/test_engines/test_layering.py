@@ -9,6 +9,8 @@ synthetic-results tests (e.g. ``test_primitives/test_hadamard_test.py``).
 import re
 from pathlib import Path
 
+import qarp._types
+import qarp.algorithms
 from qarp.algorithms import Sampler
 from qarp.engines import Runnable
 
@@ -28,11 +30,16 @@ def test_engines_do_not_import_algorithms():
     assert not offenders, f"qarp/engines/ must not import from qarp/algorithms/: {offenders}"
 
 
+def test_target_is_defined_below_the_engine_layer():
+    assert qarp.algorithms.Target is qarp._types.Target
+    assert qarp._types.Target.EXPECTATION_VALUE.name == "EXPECTATION_VALUE"
+
+
 def test_primitives_satisfy_runnable_structurally():
     # Structural, not nominal: every Runnable member must exist on a built
     # primitive without PrimitiveAlgorithm importing the protocol.
     prim = Sampler()
     members = [n for n in Runnable.__annotations__ if not n.startswith("_")]
-    members += ["_n_qubits_list", "build", "run", "run_from_amplitudes"]
+    members += ["build", "run", "run_from_amplitudes"]
     missing = [n for n in members if not hasattr(prim, n)]
     assert not missing, f"PrimitiveAlgorithm no longer satisfies Runnable: {missing}"

@@ -7,31 +7,39 @@ registration, no import in either direction).  Dependency rule, lint-enforced by
 engines-see-only-Runnable``.
 """
 
-from typing import Any, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Union
 
-from .._types import Consumes, Shots
+from .._types import Consumes, Shots, Target
+
+if TYPE_CHECKING:
+    from ._engine import CompiledCircuit
 
 
 class Runnable(Protocol):
-    """Members engines actually touch on an executable item.
+    """Members engines actually touch on an executable item, grouped by what
+    they describe: the quantity, the circuits, the estimator.  A new member
+    joins one group.
 
-    ``target`` / ``operator`` are typed ``Any``: their concrete types
-    (``Target``, ``QubitOperator``) live above this layer, so engines match
-    ``target.name`` by string and duck-type the rest — importing them here
-    would recreate the engines⇄algorithms cycle this protocol removes.
-    ``Consumes`` is importable: it lives in ``qarp._types``, below both layers.
+    ``Target`` and ``Consumes`` are importable: they live in ``qarp._types``,
+    below both layers, and engines compare them by identity.  ``operator``
+    stays ``Any``: ``QubitOperator`` lives above this layer, so engines
+    duck-type it — importing it here would recreate the engines⇄algorithms
+    cycle this protocol removes.
     """
 
-    sub_blocks: list
-    compiled_circuits: list[list]
-    _n_qubits_list: list[int]
-    n_shots: Optional[Union[int, Shots]]
-    # None, or LSB-indexed ket-seeding amplitudes (ndarray — typed Any for the
-    # same layering reason as target/operator).
-    initial_state: Any
-    supported_targets: frozenset
-    target: Any
+    # The quantity.
+    target: Target
     operator: Any
+    supported_targets: frozenset
+    # The circuits.
+    sub_blocks: list
+    # One per sub-block, written by the engine's build() alone.
+    compiled: "list[CompiledCircuit]"
+    # None, or LSB-indexed ket-seeding amplitudes (ndarray — typed Any for the
+    # same layering reason as operator).
+    initial_state: Any
+    n_shots: Optional[Union[int, Shots]]
+    # The estimator.
     consumes: Consumes
     supports_exact: bool
     supports_backprop_gradient: bool

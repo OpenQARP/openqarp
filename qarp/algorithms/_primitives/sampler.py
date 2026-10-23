@@ -1,13 +1,12 @@
 """``Sampler`` primitive — consumes a :class:`qarp.blocks.AnyBlock` and returns
-a probability distribution dict whose keys are tuples of ints (LSB = lowest-
-index measured qubit) and values are probabilities normalised by n_shots.
+a :class:`~qarp.SamplingDistribution`: probabilities normalised by n_shots,
+keyed by LSB-first bit tuples over the measured qubits.
 """
 
-from typing import Optional, Self, Union
+from typing import Optional, Union
 
-import numpy as np
-
-from ..._types import SamplingDictionary, Shots, outcome_arrays
+from ..._sampling_distribution import SamplingDistribution, distribution_from_result
+from ..._types import Shots
 from ...blocks import AnyBlock
 from .primitive_algorithm import PrimitiveAlgorithm
 from .target import Target
@@ -46,50 +45,21 @@ class Sampler(PrimitiveAlgorithm):
         super().__init__(ket=ket, n_shots=n_shots, target=Target.SAMPLING)
         self.measured_qubits = measured_qubits
         self.initial_state = initial_state
-        self.result: Optional[SamplingDictionary] = None
+        self.result: Optional[SamplingDistribution] = None
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         if self.ket is None:
             raise ValueError("Sampler requires a ket Block.")
-        self.ket.build()
-        # The ket is itself a Block, so it becomes this sampler's sole sub-block.
-        self.sub_blocks = [self.ket]
+        # The ket is itself a Block, so it is this sampler's sole circuit.
         self.n_qubits = self.ket.n_qubits
         if self.measured_qubits is None:
             self.measured_qubits = list(range(self.n_qubits))
-        return self
+        return [self.ket]
 
-    def run(self, results: list) -> SamplingDictionary:
-        """Convert the first result (``qx.SamplingResult``, or the duck-typed
-        ``ExactResult`` under ``n_shots=qarp.EXACT``) to a
-        {bitstring-tuple: probability} dict."""
+    def run(self, results: list) -> SamplingDistribution:
+        """Marginal of the first result (``qx.SamplingResult``, or the
+        duck-typed ``ExactResult`` under ``n_shots=qarp.EXACT``) on
+        ``measured_qubits``."""
         sr = results[0]
-        n_shots = sr.n_shots
-        measured = self.measured_qubits or list(range(sr.n_qubits))
-
-        # The vectorized path packs outcomes and keys into int64, which caps
-        # the register at 63 qubits; wider registers (tensor-network backends)
-        # take the exact arbitrary-precision loop instead.
-        if sr.n_qubits <= 63:
-            outcomes, weights = outcome_arrays(sr)
-            weights = weights / n_shots
-            # Project each outcome onto the measured qubits, repacked LSB-first
-            # so equal projections share one integer key; marginalising over
-            # non-measured qubits then reduces to accumulating weights per key.
-            qubits = np.asarray(measured, dtype=np.int64)
-            packed = ((outcomes[:, None] >> qubits) & 1) @ (np.int64(1) << np.arange(len(qubits)))
-            unique_keys, inverse = np.unique(packed, return_inverse=True)
-            probabilities = np.bincount(inverse, weights=weights)
-
-            unique_bits = (unique_keys[:, None] >> np.arange(len(qubits))) & 1
-            distribution: SamplingDictionary = dict(
-                zip(map(tuple, unique_bits.tolist()), probabilities.tolist(), strict=True)
-            )
-        else:
-            distribution = {}
-            for outcome, count in sr.counts.items():
-                bits = tuple((outcome >> q) & 1 for q in measured)
-                distribution[bits] = distribution.get(bits, 0.0) + count / n_shots
-
-        self.result = distribution
-        return distribution
+        self.result = distribution_from_result(sr, self.measured_qubits or range(sr.n_qubits))
+        return self.result

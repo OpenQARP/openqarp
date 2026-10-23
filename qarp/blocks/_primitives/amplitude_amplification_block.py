@@ -108,7 +108,7 @@ class AmplitudeAmplificationBlock(CompositeBlockBase):
     ) -> None:
         n_qubits = validate_amplification_blocks(state_preparation, oracle)
         self.power = validate_power(power)
-        self.state_preparation = deepcopy(state_preparation)
+        self.state_preparation_block = deepcopy(state_preparation)
         self.oracle = deepcopy(oracle)
         super().__init__(
             n_qubits=n_qubits,
@@ -124,9 +124,9 @@ class AmplitudeAmplificationBlock(CompositeBlockBase):
             # Each child is an independent copy: materialising a pending dagger or
             # symbol operation on one child cannot alter another occurrence of A.
             oracle = deepcopy(self.oracle)
-            state_dagger = deepcopy(self.state_preparation).dagger()
+            state_dagger = deepcopy(self.state_preparation_block).dagger()
             reflection = ReflectionBlock(self.n_qubits)
-            state_preparation = deepcopy(self.state_preparation)
+            state_preparation = deepcopy(self.state_preparation_block)
 
             for child in (oracle, state_dagger, reflection, state_preparation):
                 # Input placement belongs to the caller's surrounding circuit;

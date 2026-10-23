@@ -11,7 +11,7 @@ of them is imported here, so ``import qarp`` stays thin; ``from qarp import *``
 pulls them all.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 try:
     import qarpx as _qarpx  # noqa: F401
@@ -30,8 +30,10 @@ from ._abi import check_qarpx_abi as _check_qarpx_abi
 
 _check_qarpx_abi(_qarpx)
 
+
 from ._config import config
 from ._types import Consumes, ExactResult, SamplingDictionary, Shots
+from ._sampling_distribution import SamplingDistribution
 
 EXACT = Shots.EXACT
 from ._postselection import PostSelected, PostSelection
@@ -45,6 +47,7 @@ __all__ = [
     "PostSelected",
     "PostSelection",
     "SamplingDictionary",
+    "SamplingDistribution",
     "Shots",
     "absorb",
     "algorithms",

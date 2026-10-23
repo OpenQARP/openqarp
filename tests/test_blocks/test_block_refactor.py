@@ -127,10 +127,8 @@ def test_conditionalblock_with_python_body():
 
 def test_any_block_is_the_shared_base():
     assert AnyBlock is qx.Block
-    # issubclass against qx.Block directly: AnyBlock aliases an untyped
-    # nanobind class, which mypy sees as Any.
-    assert issubclass(SimpleBlock, qx.Block)
-    assert issubclass(CompositeBlockBase, qx.Block)
+    assert issubclass(SimpleBlock, AnyBlock)
+    assert issubclass(CompositeBlockBase, AnyBlock)
 
 
 def test_class_hnblock_inherits_from_simpleblock():

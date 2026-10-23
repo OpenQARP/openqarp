@@ -14,12 +14,16 @@ it rather than being quietly excluded.
 
 import copy
 import pickle
+import subprocess
+import sys
 
 import numpy as np
 import pytest
+from sympy import Symbol
 
 openfermion = pytest.importorskip("openfermion")
 
+import qarpx as qx
 from qarp.operators import QubitOperator
 from qarp.operators.functions import (
     count_qubits,
@@ -373,3 +377,71 @@ def test_copy_deepcopy_pickle_round_trip():
         assert norm_terms(clone) == norm_terms(op)
         clone += QubitOperator("Z5")  # independent storage
         assert clone != op
+
+
+# ── sparse_matrix (bound in C++) ──────────────────────────────────────────
+
+
+def test_sparse_matrix_on_a_bare_qarpx_import():
+    """Bound in C++, so present without qarp.  Oracle: Z0 on two qubits in the
+    LSB order (qubit q ↔ bit q) is I ⊗ Z = diag(1, -1, 1, -1)."""
+    code = (
+        "import sys\n"
+        "import numpy as np\n"
+        "import qarpx\n"
+        "assert 'qarp' not in sys.modules\n"
+        "m = qarpx.QubitOperator('Z0').sparse_matrix(2).toarray()\n"
+        "np.testing.assert_array_equal(m, np.diag([1, -1, 1, -1]))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize(
+    "n_qubits, dim", [(None, 1), (-1, 1), (2, 4)], ids=["inferred", "negative", "explicit"]
+)
+def test_sparse_matrix_of_an_identity_term(n_qubits, dim):
+    """Oracle: c·I is c times the identity on the register; None or a negative
+    width infers the operator's own (no qubits, dimension 1)."""
+    m = QubitOperator("", 2.0).sparse_matrix(n_qubits).toarray()
+    np.testing.assert_array_equal(m, 2.0 * np.eye(dim))
+
+
+def test_sparse_matrix_of_the_empty_operator_is_zero():
+    np.testing.assert_array_equal(QubitOperator().sparse_matrix(2).toarray(), np.zeros((4, 4)))
+
+
+@pytest.mark.parametrize("term, n_qubits", [("Z1", 1), ("Z0", 0)])
+def test_sparse_matrix_rejects_a_register_too_small(term, n_qubits):
+    with pytest.raises(ValueError):
+        QubitOperator(term).sparse_matrix(n_qubits)
+
+
+def test_sparse_matrix_rejects_a_non_integer_width():
+    with pytest.raises(TypeError):
+        QubitOperator("Z0").sparse_matrix(2.0)
+
+
+@pytest.mark.parametrize(
+    "kernel, op",
+    [
+        ("bravyi_kitaev", lambda: qx.FermionOperator("0^ 1")),
+        ("bravyi_kitaev", lambda: [qx.FermionOperator("0^ 1")]),
+        ("qubit_operator_coo", lambda: qx.QubitOperator("Z0")),
+        ("fermion_operator_coo", lambda: qx.FermionOperator("0^ 0")),
+    ],
+    ids=["bravyi_kitaev", "bravyi_kitaev_list", "qubit_operator_coo", "fermion_operator_coo"],
+)
+def test_the_operator_kernels_reject_a_non_integer_width(kernel, op):
+    with pytest.raises(TypeError):
+        getattr(qx, kernel)(op(), 1.5)
+
+
+@pytest.mark.skipif(not qx.__with_symengine__, reason="needs symbolic coefficients")
+def test_inplace_add_of_a_symbol_rebinds():
+    """No in-place symbolic overload: ``+=`` falls back to ``__add__`` and rebinds."""
+    op = QubitOperator("X0")
+    before = op
+    op += Symbol("a")
+    assert op is not before
+    assert before == QubitOperator("X0")

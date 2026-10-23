@@ -236,7 +236,7 @@ class HadamardTestBlock(CompositeBlockBase):
             false_command = false_commands[index] if index < len(false_commands) else None
             true_command = true_commands[index] if index < len(true_commands) else None
 
-            if self._commands_match(false_command, true_command):
+            if false_command is not None and self._commands_match(false_command, true_command):
                 flush_controlled_runs()
                 common_run.append(false_command)
             else:

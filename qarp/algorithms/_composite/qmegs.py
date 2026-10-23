@@ -1,4 +1,4 @@
-from typing import Callable, List, Literal, Optional, Tuple, Union, cast
+from typing import Any, Callable, List, Literal, Optional, Tuple, Union, cast
 
 import numpy as np
 import scipy
@@ -7,7 +7,7 @@ from scipy.integrate import quad
 from qarp.operators import QubitOperator
 
 from ..._types import Shots
-from ...blocks import AnyBlock
+from ...blocks import AnyBlock, SynthesizedTimeEvolutionBlock, TrotterBlock
 from ...engines import Engine
 from ...engines._runnable import Runnable
 from ...errors import CapabilityError
@@ -154,7 +154,7 @@ class QMEGS(CompositeAlgorithm):
 
     def __init__(
         self,
-        unitary: AnyBlock,
+        unitary: Union[TrotterBlock, SynthesizedTimeEvolutionBlock],
         state: AnyBlock,
         n_shots: Union[int, Shots, None],
         target_indices: List[int],  # target eigenvalue indices (Dset in the paper)
@@ -190,23 +190,23 @@ class QMEGS(CompositeAlgorithm):
         self.filtering_function = filtering_function or truncated_gaussian_density
 
         # Algorithm parameters (will be computed in build)
-        self.p = None  # overlap probabilities with each eigenstate
-        self.eigenvalues = None  # Store eigenvalues for consistent ordering
-        self.pmin = None  # minimum overlap with target eigenstates
-        self.ptail = None  # total probability in non-target eigenstates
-        self.alpha = None  # exclusion radius factor
-        self.q = None  # grid spacing factor
+        self.p: Optional[np.ndarray] = None  # overlap probabilities with each eigenstate
+        self.eigenvalues: Optional[np.ndarray] = None  # for consistent ordering
+        self.pmin: Optional[float] = None  # minimum overlap with target eigenstates
+        self.ptail: Optional[float] = None  # total probability in non-target eigenstates
+        self.alpha: Any = None  # exclusion radius factor
+        self.q: Any = None  # grid spacing factor
         self.sigma = sigma  # truncation level
         self.eta = eta  # error tolerance
         self._T_initial = T  # store initial time window for reset
         self.T = T  # time window (may be updated in run)
-        self.n_samples = None
+        self.n_samples: Optional[int] = None
 
         # Results storage
-        self.dataset = None
-        self.res = None
-        self.x_to_plot: List[float] = []
-        self.y_to_plot: List[complex] = []
+        self.dataset: Optional[List[Tuple[Any, ...]]] = None
+        self.res: Optional[list] = None
+        self.x_to_plot: List[np.ndarray] = []
+        self.y_to_plot: List[np.ndarray] = []
 
         self.validate_inputs()
 
@@ -226,7 +226,7 @@ class QMEGS(CompositeAlgorithm):
             )
         if not hasattr(self.unitary, "operator") or not hasattr(self.unitary, "set_time"):
             raise ValueError("unitary must have 'operator' attribute and 'set_time' method.")
-        if not isinstance(self.unitary.operator, QubitOperator):  # type: ignore[attr-defined]
+        if not isinstance(self.unitary.operator, QubitOperator):
             raise ValueError("unitary.operator must be a QubitOperator.")
         # isinstance, not ``!= "classical"``: a numpy pair makes ``!=``
         # return an array and the truth test raises before validation.
@@ -238,7 +238,7 @@ class QMEGS(CompositeAlgorithm):
                 )
         else:
             try:
-                pmin, ptail = (float(v) for v in self.overlaps)  # type: ignore[union-attr]
+                pmin, ptail = (float(v) for v in self.overlaps)
             except (TypeError, ValueError):
                 raise ValueError(
                     "overlaps must be 'classical' or a (pmin, ptail) pair of floats; "
@@ -297,8 +297,10 @@ class QMEGS(CompositeAlgorithm):
                 i for i in range(2**n_qubits) if i not in self.target_indices
             ]
             # self.p[i] always corresponds to self.eigenvalues[i]
+            operator = self.unitary.operator
+            assert operator is not None  # validate_inputs checked it
             self.p, self.eigenvalues = _overlaps_from_statevector(
-                trial_sv, self.unitary.operator, n_qubits, return_eigenvalues=True
+                trial_sv, operator, n_qubits, return_eigenvalues=True
             )
             # pmin: minimum overlap with target eigenstates
             self.pmin = np.min([self.p[i] for i in self.target_indices])
@@ -483,16 +485,16 @@ class QMEGS(CompositeAlgorithm):
 
     def _unitary_at_time(self, time: float, verbose: Optional[bool] = None) -> AnyBlock:
         """Concrete-time unitary block, with optional synthesis-error diagnostic."""
-        nonsymbolic_unitary = self.unitary.set_time(time)  # type: ignore[attr-defined, call-arg]
+        nonsymbolic_unitary = self.unitary.set_time(time)
         nonsymbolic_unitary.build()
 
         if verbose is None:
             verbose = self.verbose
         if verbose:
             # LSB — same basis as unitary_matrix below.
-            unitary_exact = self.unitary.operator.sparse_matrix(  # type: ignore[attr-defined]
-                self.unitary.n_qubits
-            ).todense()
+            operator = self.unitary.operator
+            assert operator is not None  # validate_inputs checked it
+            unitary_exact = operator.sparse_matrix(self.unitary.n_qubits).todense()
             unitary_exact = scipy.linalg.expm(-1j * unitary_exact * time)
             import qarpx as qx
 
@@ -589,10 +591,11 @@ class QMEGS(CompositeAlgorithm):
         self.y_to_plot = []
 
         # Generate measurement dataset
-        self.dataset = self.generate_data()
+        dataset = self.generate_data()
+        self.dataset = dataset
 
         # Update T (time window) based on actual data range
-        t_list = np.array([x[0] for x in self.dataset])
+        t_list = np.array([x[0] for x in dataset])
         self.T = max(t_list) - min(t_list)
 
         # Generate theta grid
@@ -601,7 +604,7 @@ class QMEGS(CompositeAlgorithm):
         # theta_js: grid of theta values = -π + j*q/T for j in [0, J]
         theta_js = np.array([-np.pi + j * self.q / self.T for j in range(J + 1)])
         # G_js: filtered density values
-        G_js = self.filtered_density_function(self.dataset, theta_js, self.n_samples)
+        G_js = self.filtered_density_function(dataset, theta_js, self.n_samples)
 
         # Initialize search parameters
         to_search = [True] * len(theta_js)

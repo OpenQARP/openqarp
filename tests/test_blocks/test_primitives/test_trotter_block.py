@@ -18,7 +18,7 @@ from scipy.linalg import expm
 from sympy import Symbol
 
 import qarpx as qx
-from qarp.blocks import ControlledBlock, TrotterBlock
+from qarp.blocks import ControlledBlock, TrotterAnsatzBlock, TrotterBlock
 from qarp.operators import (
     FullyCommuting,
     GroupingStrategy,
@@ -981,3 +981,12 @@ def test_steps_replay_identical_command_sequences():
     one = [str(c) for c in b1.flatten()]
     three = [str(c) for c in b3.flatten()]
     assert three == one * 3
+
+
+def test_a_string_rename_reaches_the_trotter_pairing():
+    """Oracle: the pairing, written by hand, in generation order."""
+    a, b = Symbol("a"), Symbol("b")
+    block = TrotterAnsatzBlock(2, [QubitOperator("X0"), QubitOperator("Z1")], [b, a]).build()
+    renamed = block.replace_symbols({"b": "z"})
+    assert renamed.symbols == (a, Symbol("z"))
+    assert [s for s, _ in renamed.symbol_qop_pairs] == [Symbol("z"), a]

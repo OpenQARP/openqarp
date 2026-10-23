@@ -51,6 +51,13 @@ def test_single_block_operator_normalized_to_list():
     assert th.operator == [op]
 
 
+def test_a_tuple_of_operator_blocks_is_normalized_to_list():
+    op = PauliBlock(pauli_string="Z", phase=None)
+    th = TermwiseHadamardTest(operator=(op, op), ket=_ket())
+    assert th.operator == [op, op]
+    th.build()
+
+
 # ── Validation (build()) ─────────────────────────────────────────────────
 
 
@@ -60,7 +67,9 @@ def test_validate_operator_required():
 
 
 def test_validate_operator_wrong_type():
-    with pytest.raises(TypeError, match="operator must be Block, list of Blocks, or QubitOperator"):
+    with pytest.raises(
+        TypeError, match="operator must be Block, sequence of Blocks, or QubitOperator"
+    ):
         TermwiseHadamardTest(operator=5, ket=_ket()).build()
 
 

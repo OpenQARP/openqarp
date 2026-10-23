@@ -1,13 +1,20 @@
 """Type definitions or aliases for OpenQARP."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 
-# Type alias for dictionary of sampling results
-SamplingDictionary = dict[tuple[int, ...], float]
+if TYPE_CHECKING:
+    from ._sampling_distribution import SamplingDistribution
+
+# Read-only view of a sampling result: LSB-first bit tuples to probabilities.
+# A SamplingDistribution and a plain dict both satisfy it.
+SamplingDictionary = Mapping[tuple[int, ...], float]
+PrimitiveResult = Union[float, complex, "SamplingDistribution"]
 
 
 class Shots(Enum):
@@ -59,7 +66,8 @@ def outcome_arrays(result) -> tuple[np.ndarray, np.ndarray]:
     An :class:`ExactResult` hands over its arrays; a ``qx.SamplingResult``
     (whose ``counts`` property converts the C++ map on every access) is read
     once.  Outcomes are packed into int64, so registers wider than 63 qubits
-    must take the dict path instead.
+    are read from ``counts`` into Python-int arrays instead
+    (``distribution_from_result``).
     """
     keys = getattr(result, "keys", None)
     if keys is not None:
@@ -69,6 +77,30 @@ def outcome_arrays(result) -> tuple[np.ndarray, np.ndarray]:
         np.fromiter(counts.keys(), dtype=np.int64, count=len(counts)),
         np.fromiter(counts.values(), dtype=np.float64, count=len(counts)),
     )
+
+
+class Target(Enum):
+    """The quantity a primitive computes.
+
+    Lives here, below both layers, so engines can dispatch on it without
+    importing from ``qarp.algorithms``; ``qarp.algorithms.Target`` is this
+    class.
+
+    Attributes:
+        SAMPLING: The measurement distribution of the circuit, keyed by
+            LSB-first bit tuples.
+        EXPECTATION_VALUE: ``⟨ket|operator|ket⟩``.
+        OVERLAP: ``⟨bra|ket⟩``.
+        TRANSITION_AMPLITUDE: ``⟨bra|operator|ket⟩``.
+    """
+
+    SAMPLING = 0
+    EXPECTATION_VALUE = 1
+    OVERLAP = 2
+    TRANSITION_AMPLITUDE = 3
+
+    def __str__(self):
+        return self.name
 
 
 class Consumes(Enum):

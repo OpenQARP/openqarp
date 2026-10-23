@@ -154,8 +154,8 @@ class RotosolveOptimizer(Optimizer):
             print("Rotosolve")
             print(f"Number of parameters: {num_params}")
             print("    Iter\tMicroIter\tEnergy\t\tDifference")
-        for num_it in range(self.maxiter):
-            lr_t = self.schedule(num_it)
+        for it in range(self.maxiter):
+            lr_t = self.schedule(it)
             for d in range(num_params):
                 phi = x[d]
                 x_temp = np.copy(x)
@@ -164,7 +164,7 @@ class RotosolveOptimizer(Optimizer):
                 if prev_val is None:
                     prev_val = m_phi
                 if self.verbose:
-                    print(f"{num_it:6}\t\t{d:6}\t\t{m_phi:.6f}\t")
+                    print(f"{it:6}\t\t{d:6}\t\t{m_phi:.6f}\t")
                 x_temp[d] = phi + self.PI_ANGLE / 2
                 m_phi1 = f(x_temp)
                 x_temp[d] = phi - self.PI_ANGLE / 2
@@ -186,7 +186,7 @@ class RotosolveOptimizer(Optimizer):
                 )
 
             new_val = f(x)
-            results.nit = num_it
+            results.nit = it + 1
             if best_val is None or new_val < best_val:
                 best_val = new_val
                 best_x = np.copy(x)
@@ -195,7 +195,7 @@ class RotosolveOptimizer(Optimizer):
                 callback(x)
             if prev_val is not None:
                 if self.verbose:
-                    print(f"{num_it:6}\t      \t\t{new_val:.6f}\t\t{abs(new_val - prev_val):.6f}")
+                    print(f"{it:6}\t      \t\t{new_val:.6f}\t\t{abs(new_val - prev_val):.6f}")
                 if abs(new_val - prev_val) < self.tol:
                     if restarts < self.max_restarts:
                         # Possible coordinate-wise saddle — kick the best point

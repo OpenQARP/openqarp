@@ -64,7 +64,7 @@ class UPCCDBlock(CompositeBlockBase):
         if np.sum(self.onv_odd[0 : self.num_electron_pairs]) != self.num_electron_pairs:
             raise ValueError("Aufbau principle violated")
 
-        self.symbols: list[Symbol] = []
+        self.symbols = []
         self.symbol_parameter_map: dict[Symbol, float] = {}
 
     def build_vanilla(self) -> None:

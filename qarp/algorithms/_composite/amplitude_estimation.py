@@ -1,5 +1,6 @@
 """Canonical quantum amplitude estimation."""
 
+from collections.abc import Mapping
 from copy import deepcopy
 from math import pi, sin
 from typing import Optional, Self, cast
@@ -58,7 +59,7 @@ class AmplitudeEstimation(CompositeAlgorithm):
 
         self.state_preparation = deepcopy(state_preparation)
         self.oracle = deepcopy(oracle)
-        self.block: Optional[AnyBlock] = None
+        self.block: Optional[AmplitudeEstimationBlock] = None
         self.distribution: Optional[SamplingDictionary] = None
         self.folded_distribution: Optional[dict[int, float]] = None
         self.phase_bin: Optional[int] = None
@@ -91,7 +92,7 @@ class AmplitudeEstimation(CompositeAlgorithm):
             raise ValueError("Circuit not built. Call build() before run().")
 
         result = self.engine.run()[0]
-        if not isinstance(result, dict):
+        if not isinstance(result, Mapping):
             raise TypeError("AmplitudeEstimation requires a sampling primitive")
         self.distribution = cast(SamplingDictionary, result)
 

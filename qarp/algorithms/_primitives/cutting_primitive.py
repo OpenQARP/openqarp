@@ -12,7 +12,7 @@ approximate (but unbiased) result at reduced cost.
 """
 
 from math import ceil
-from typing import Optional, Self
+from typing import Optional
 
 import numpy as np
 
@@ -86,12 +86,14 @@ class CuttingPrimitive(PrimitiveAlgorithm):
         self.experiment_fraction = experiment_fraction
         self.rng_seed = rng_seed
 
-    def build(self) -> Self:
+    def circuits(self) -> list:
         """Partition the circuit and build all measurement sub-blocks.
 
-        Uses streaming experiment generation and QWC grouping so that
-        sub_blocks contains n_experiments × n_subcircuits × n_qwc_groups
-        blocks (instead of × n_obs_terms).
+        The cut reads the ket's gate stream, so the ket is built here, one
+        of two primitives (with ``PauliShadow``) whose circuits cannot be
+        derived from an unbuilt input.  Uses streaming experiment generation and QWC grouping so
+        that the circuits number n_experiments × n_subcircuits ×
+        n_qwc_groups (instead of × n_obs_terms).
         """
         if self.ket is None:
             raise RuntimeError("ket must be set before calling build().")
@@ -134,8 +136,8 @@ class CuttingPrimitive(PrimitiveAlgorithm):
         # Split observable and compute QWC groups (does NOT materialise experiments)
         self._qpd._split_observable()
         # Build blocks streaming: yields one experiment at a time, builds QWC groups
-        self.sub_blocks, self._metadata = self._qpd.build_experiment_blocks_streaming()
-        return self
+        circuits, self._metadata = self._qpd.build_experiment_blocks_streaming()
+        return circuits
 
     def run(self, results: list) -> float:
         """Reconstruct the expectation value from engine sampling results.

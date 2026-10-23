@@ -95,3 +95,12 @@ def test_rotosolve_keeps_its_class_docstring():
     assert RotosolveOptimizer.__doc__ is not None
     assert "Rotosolve" in RotosolveOptimizer.__doc__
     assert RotosolveOptimizer.supports_bounds is False
+
+
+@pytest.mark.parametrize("maxiter", [1, 3])
+def test_nit_counts_the_iterations_run(maxiter):
+    # The callback runs once per iteration, early stop included.
+    calls: list = []
+    opt = RotosolveOptimizer(maxiter=maxiter)
+    res = opt.minimize(_periodic([0.5, -1.0]), np.zeros(2), callback=calls.append)
+    assert res.nit == len(calls) >= 1

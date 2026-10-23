@@ -65,6 +65,7 @@ def test_lih_as_adapt_vqd(lih):
     adaptvqd.terminate_if_coeff_zero = True
     adaptvqd.build()
     s1_en, _ = adaptvqd.run()
+    assert isinstance(s1_en, float)  # run() documents a float energy
     spectrum = eigenspectrum(qop)
     assert any(np.isclose(s1_en, item, 1e-4) for item in spectrum)
 

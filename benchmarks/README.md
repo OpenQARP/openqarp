@@ -54,8 +54,8 @@ pennylane, pytket, qulacs, and cirq.  Generated tables:
   table to within 5 %, gives every competitor's tuned setting, and lists the
   conditions under which the ranking would change.
 - **Published numbers come from two hosts** — macOS arm64 (laptop-class) and
-  the azalea node (node-class, plus single-GPU rows) — and state host, date,
-  and package versions in the table header.  Numbers from other machines are
+  a many-core Linux server (node-class, plus single-GPU rows) — and state
+  host, date, and package versions in the table header.  Numbers from other machines are
   for local sanity only.
 - **Ladders are sized for iteration, not for records.**  A track must finish
   well under an hour per host; the large sizes live behind `--headroom` and

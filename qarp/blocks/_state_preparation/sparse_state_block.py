@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple, TypeVar
 
 import numpy as np
 
@@ -6,6 +6,9 @@ from qarp.blocks._block import SimpleBlock
 from qarp.blocks._prepares_known_state import prepares_known_state
 
 from ._multi_controlled import _apply_mc_phase, _apply_mc_ry
+
+# A bound key type lets a dict whose keys type as fixed-length tuples through.
+_Address = TypeVar("_Address", bound=Tuple[int, ...])
 
 
 def _prepare_sparse_circuit(block, amplitudes: Dict[Tuple[int, ...], complex]) -> None:
@@ -59,7 +62,7 @@ class SparseStateBlock(SimpleBlock):
     def __init__(
         self,
         n_qubits: int,
-        amplitudes: Dict[Tuple[int, ...], complex],
+        amplitudes: Mapping[_Address, complex],
         target_qubits: Optional[List[int]] = None,
         name: str = "SparseState",
     ):

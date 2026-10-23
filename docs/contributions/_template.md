@@ -4,12 +4,15 @@
 
 # <Topic — one-line imperative summary>
 
-**Status:** Draft
+**Status:** Planned
 **Author:** <contributor> (+ <AI assistant, if used>)
-**Reviewer:** <named reviewer — their green-light on this plan in the Draft PR is the design approval>
 **Date:** <YYYY-MM-DD>
 **Tier:** <Standard | Structural>
 **Branch:** <type/name-of-branch>
+**Green-lit:** <empty until the reviewer's `Green-lit at <sha>` comment; then
+`<YYYY-MM-DD>, plan blob <blob>` with the blob from
+`git rev-parse <sha>:docs/contributions/<topic>_plan.md`, in the commit that
+sets Status to In progress>
 **Scope:** <explicit list of files/dirs to be added or edited — the
 conformance review checks the PR touches nothing outside it without a
 declared deviation>
