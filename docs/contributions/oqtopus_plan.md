@@ -34,6 +34,7 @@ Phase 2 — the engine:
 - `docs/source/engines.rst`, `docs/source/installation.rst`
 - `docs/contracts/qarp_conventions.md` (§11, §14, §15 — see Design)
 - `.github/workflows/nightly.yml` (install the `oqtopus` extra in the notebooks job; run the transport suite un-skipped there)
+- `.github/workflows/ci.yml` (install the `oqtopus` extra in the pytest/coverage job, so the SDK-oracle transport rows count toward the patch gate)
 
 Phase 3 — live tier:
 - `tests/test_engines/test_oqtopus_live.py` (new; gated, `slow`)
@@ -379,7 +380,8 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
    the counts come back as integers summing to `shots` (the simulator has
    no readout calibration to invert); `test_oqtopus_live.py` asserts it.
    Hardware remains unverified, so the docs still say integer counts are
-   expected back.
+   expected back; a fractional payload is refused at fetch, naming
+   mitigation, never truncated.
 5. **`oqtopus-client` floor.**  Every SDK surface the transport uses was
    verified against 1.3.0 only, hence the `>=1.3` pin; relax if an older
    release is shown to carry them.
@@ -411,12 +413,16 @@ block) appear only as *additional* rows.
 | `Sampler(GHZ₃)` on `OqtopusEngine(local)`: `{000: ½, 111: ½}` within 5σ at 4000 shots, no other key | analytic | `test_oqtopus_engine.py::test_sampler_ghz` |
 | `PauliAveraging(Z₀)` on `Ry(θ)|0⟩`: `cos θ` within 5σ for θ ∈ {0.3, 1.1, 2.5} | analytic | `…::test_expectation_cos` |
 | Routed: line topology `0–1–2`, ket `X(0)·CX(0,2)` → single key `101` (logical order) | analytic + §14 reindex rule | `…::test_routed_counts_logical_order` |
+| SWAP-forcing route (`X(1)·CX(0,1)·CX(1,2)·CX(0,2)` on the line, `initial ≠ final` asserted) → single key `011`; reading the initial map would give `101` | analytic; mutation-checked (`final → initial` fails this row alone) | `…::test_swap_forcing_route_lays_measures_on_the_final_wires` |
+| Explicit `measure(2, 0)` on the routed `X(0)·CX(0,2)` → single key `101`; an identity cbit→logical wiring would read `110` | analytic; mutation-checked | `…::test_explicit_measure_into_a_permuted_cbit_is_wired_back` |
+| A symbolic circuit run with no parameters raises `ValueError` naming the symbol before any `submit` (`transport.log` empty) | contract | `…::test_unbound_symbols_are_refused_before_any_submit` |
 | Engine lays the measurement layer: a measurement-free block submits `bit[n] c;` and `c[i] = measure q[i]` for every *logical* qubit; a block measuring one qubit explicitly still measures the rest (uniform H⊗3 within 5σ) | §12.1 emission table; analytic | `…::test_measure_all_appended`, `…::test_partially_measured_block_still_reports_every_qubit` |
 | Transport whose `cancel` raises → the original `TimeoutError` still propagates; circuits compiled by another engine reused with `rebuild=False` are recompiled here (stamp mismatch), measurement layer included | contract; analytic `sin²(θ/2)` | `…::test_failed_cancel_does_not_mask_the_timeout`, `…::test_foreign_compiled_circuits_are_recompiled` |
 | `RemoteOqtopusTransport()` with `OQTOPUS_URL` set and no config file resolves the env; `cancel` swallows transport errors | contract | `test_oqtopus_transport.py` |
+| `RemoteOqtopusTransport` refuses a fractional count at fetch with `ValueError` naming mitigation; an integral float is accepted as `int` | contract (open item 4) | `…::test_remote_transport_rejects_fractional_counts`, `…::test_remote_transport_accepts_integral_float_counts` |
 | `batch_run` over 3 parameter sets: `len(transport.log["submit"]) == 3 × n_circuits`, one `wait_all`; per-set values equal `run()` at the same params within 5σ | structural + analytic (`cos θ` rows) | `…::test_sweep_submits_all_then_waits` |
 | Parameter-shift VQE, 1 qubit, `H = Z`, ansatz `Ry(θ)`: converges to `θ ≈ π`, energy `−1 ± 5σ` | analytic minimum | `…::test_vqe_one_qubit_parameter_shift` |
-| `slow`: VQE H₂ (STO-3G, JW) on the local transport reaches `−1.137 ± 0.01` Ha at 8000 shots | published FCI energy (Szabo–Ostlund; the value already pinned in `tests/pccd_reference_energies.py`) | `…::test_vqe_h2_slow` |
+| `slow`: VQE H₂ (STO-3G, JW) on the local transport, started at the Hartree–Fock point (0.02 Ha above), reaches `−1.137 ± 0.01` Ha at 8000 shots | published FCI energy (Szabo–Ostlund; the value already pinned in `tests/pccd_reference_energies.py`) | `…::test_vqe_h2_slow` |
 | `StateVector`, `n_shots=qarp.EXACT`, `initial_state=`, a mid-circuit `Measure` + conditional, and `gradient="adjoint"` each raise `CapabilityError` | §14 contract | `…::test_capability_refusals` |
 | `OqtopusEngine(..., n_shots=qarp.EXACT)` raises `CapabilityError` at construction | §14 contract | `…::test_exact_rejected_at_construction` |
 | Transport returning `status="failed"` → `RemoteJobError` with `job_id` and `message`; returning `"cancelled"` likewise | contract | `…::test_remote_job_error` |
@@ -527,3 +533,12 @@ Declared during implementation and folded into the sections above:
   engine or against another topology are recompiled under `rebuild=False`
   rather than refused.  No structured programs are planned: `_plan_unbuilt`
   and `_plan_built` keep their defaults, every circuit runs as a gate stream.
+- **Review round before the Draft PR** (three independent conformance
+  reviews).  Unbound symbols are refused in the engine before any submit
+  (`ValueError` naming them), not left to the service; the remote transport
+  refuses fractional counts at fetch instead of truncating; three test rows
+  were made discriminating (a SWAP-forcing route, an explicit measure into
+  a permuted cbit, H₂ started at Hartree–Fock) after mutation checks showed
+  the original rows passed with the final map replaced by the initial one;
+  `ci.yml`'s pytest job installs the `oqtopus` extra so the transport rows
+  count toward the 80 % patch gate.

@@ -215,6 +215,23 @@ class OqtopusEngine(Engine):
         """Submit every job, then wait once.  Anything that interrupts the
         wait (timeout, Ctrl-C, a transport error) cancels every job of this
         call before propagating, so no orphan keeps consuming the device."""
+        free = sorted(
+            {
+                sym
+                for _, cmds, _ in jobs
+                for c in cmds
+                if c.is_parametric()
+                for p in c.params
+                for sym in p.free_symbols()
+            }
+        )
+        if free:
+            # Checked before any submit: the service cannot bind an ``input``
+            # declaration, and a QPU job that cannot succeed would still queue.
+            raise ValueError(
+                f"OqtopusEngine: circuits still carry free symbols {free}; pass their "
+                "values to run(params) / batch_run(param_sets)."
+            )
         job_ids: list[str] = []
         try:
             for name, cmds, shots in jobs:

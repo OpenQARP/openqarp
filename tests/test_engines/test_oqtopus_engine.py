@@ -123,6 +123,51 @@ def test_routed_counts_logical_order():
     }
 
 
+def test_swap_forcing_route_lays_measures_on_the_final_wires():
+    """A triangle of CXs on a line needs a SWAP, so the initial and final maps
+    differ; the counts are right only if measures follow the final map
+    (analytic: x(1)·cx(0,1)·cx(1,2)·cx(0,2) |000⟩ = |011⟩ in logical order,
+    and the swapped pair holds different bits, so the initial map reads |101⟩)."""
+    from qarp.devices import device_from_oqtopus
+
+    b = SimpleBlock(3, name="triangle")
+    b.x(1).cx(0, 1).cx(1, 2).cx(0, 2)
+    b.build()
+    routed = qx.compile_for_device(b.flatten(), 3, device_from_oqtopus(_line_info()))
+    assert list(routed.initial_logical_to_physical) != list(routed.final_logical_to_physical)
+    transport = LocalOqtopusTransport(device_info=_line_info(), seed=1)
+    eng = OqtopusEngine("line", transport=transport, n_shots=200)
+    eng.build([Sampler(ket=b)])
+    assert eng.run()[0] == {(0, 1, 1): 1.0}
+
+
+def test_explicit_measure_into_a_permuted_cbit_is_wired_back():
+    """``measure(2, 0)`` on a routed circuit: ``c[0]`` reports logical qubit 2,
+    the engine-added bits report 0 and 1 (analytic: x(0)·cx(0,2) |000⟩ = |101⟩).
+    An identity cbit→logical wiring would read ``(1, 1, 0)``."""
+    transport = LocalOqtopusTransport(device_info=_line_info(), seed=1)
+    eng = OqtopusEngine("line", transport=transport, n_shots=200)
+    b = SimpleBlock(3, name="permuted_cbit")
+    b.x(0).cx(0, 2).measure(2, 0)
+    b.build()
+    eng.build([Sampler(ket=b)])
+    assert eng.run()[0] == {(1, 0, 1): 1.0}
+
+
+def test_unbound_symbols_are_refused_before_any_submit():
+    """A symbolic circuit with no parameters bound never reaches the service:
+    the remote transport cannot evaluate ``input float`` declarations, and a
+    QPU job that cannot succeed would still be queued."""
+    transport = LocalOqtopusTransport(n_qubits=1, seed=1)
+    eng = OqtopusEngine("local", transport=transport, n_shots=10)
+    eng.build([Sampler(ket=_ry_symbolic())])
+    with pytest.raises(ValueError, match="theta"):
+        eng.run()
+    with pytest.raises(ValueError, match="theta"):
+        eng.batch_run([Sampler(ket=_ry_symbolic())], [{}])
+    assert _submits(transport) == []
+
+
 def test_measure_all_appended():
     transport = LocalOqtopusTransport(n_qubits=3, seed=1)
     eng = OqtopusEngine("local", transport=transport, n_shots=10)
@@ -232,7 +277,7 @@ def test_vqe_h2_slow():
     from qarp.operators import JordanWigner
     from qarp.optimizers import ScipyOptimizer
     from tests.molecular_assets import fermion_operator, reference_onv
-    from tests.pccd_reference_energies import E_PCCD_H2_STO3G, T2_PCCD_H2_STO3G
+    from tests.pccd_reference_energies import E_PCCD_H2_STO3G
 
     onv = reference_onv("h2_0.735_sto3g")
     qham = JordanWigner().encode_operator(fermion_operator("h2_0.735_sto3g"))
@@ -240,14 +285,15 @@ def test_vqe_h2_slow():
     ref_state = list(onv)
     ref_state[1::2] = [0] * (len(onv) // 2)
     ansatz = CompositeBlock([ComputationalBasisStateBlock(ref_state), upcc], len(onv)).build()
-    t2 = float(np.ravel(T2_PCCD_H2_STO3G)[0])
     vqe = VQE(
         operator=qham,
         ket=ansatz,
         primitive=PauliAveraging(),
         engine=_engine(len(onv), n_shots=8000),
         optimizer=ScipyOptimizer("COBYLA"),
-        initial_parameters=np.full(len(ansatz.symbols), 0.5 * t2),
+        # From the Hartree–Fock point, 0.02 Ha above the reference: the 0.01 band
+        # is reached only if the optimiser moves.
+        initial_parameters=np.zeros(len(ansatz.symbols)),
     )
     vqe.build()
     energy, _ = vqe.run()

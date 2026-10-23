@@ -247,6 +247,50 @@ def test_remote_transport_wait_times_out(monkeypatch):
         t.wait_all(["a"], timeout=0.05)
 
 
+def _succeeded_client(monkeypatch, t, counts):
+    oc = __import__("oqtopus_client")
+
+    class _Job:
+        job_id = "a"
+        status = oc.rest.models.JobsJobStatus.SUCCEEDED
+        message = None
+        sampling = {"counts": counts}
+
+    monkeypatch.setattr(t._client, "status", lambda jid: oc.rest.models.JobsJobStatus.SUCCEEDED)
+    monkeypatch.setattr(t._client, "get_job", lambda jid: _Job())
+
+
+def test_remote_transport_rejects_fractional_counts(monkeypatch):
+    """Plan open item 4: readout mitigation can return real-valued counts; they
+    are refused at fetch, naming the cause, never truncated into a shot-sum error."""
+    import pytest
+
+    oc = pytest.importorskip("oqtopus_client")
+    from qarp.engines import RemoteOqtopusTransport
+
+    t = RemoteOqtopusTransport(
+        oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"), poll_interval=0.0
+    )
+    _succeeded_client(monkeypatch, t, {"00": 2.5, "11": 2.5})
+    with pytest.raises(ValueError, match="mitigation"):
+        t.wait_all(["a"], timeout=1.0)
+
+
+def test_remote_transport_accepts_integral_float_counts(monkeypatch):
+    import pytest
+
+    oc = pytest.importorskip("oqtopus_client")
+    from qarp.engines import RemoteOqtopusTransport
+
+    t = RemoteOqtopusTransport(
+        oc.OqtopusConfig(url="http://127.0.0.1:1", api_token="t"), poll_interval=0.0
+    )
+    _succeeded_client(monkeypatch, t, {"00": 3.0, "11": 2})
+    (out,) = t.wait_all(["a"], timeout=1.0)
+    assert out["counts"] == {"00": 3, "11": 2}
+    assert all(type(v) is int for v in out["counts"].values())
+
+
 def test_importing_qarp_engines_does_not_import_the_sdk():
     import subprocess
     import sys

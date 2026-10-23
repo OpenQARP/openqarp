@@ -268,7 +268,17 @@ class RemoteOqtopusTransport:
             # A succeeded job without a payload is reported with counts=None;
             # the engine turns that into RemoteJobError.
             if raw is not None:
-                counts = {str(k): int(v) for k, v in dict(raw).items()}
+                counts = {}
+                for k, v in dict(raw).items():
+                    if isinstance(v, float) and not v.is_integer():
+                        # Never truncated: a fractional payload is what readout
+                        # mitigation returns, and shots cannot be made of it.
+                        raise ValueError(
+                            f"RemoteOqtopusTransport: job {job_id!r} returned a non-integral "
+                            f"count {v!r} for {k!r}; readout mitigation can return real-valued "
+                            "counts, which qarp cannot turn into shots"
+                        )
+                    counts[str(k)] = int(v)
         return {
             "job_id": job_id,
             "status": status,

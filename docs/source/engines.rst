@@ -262,4 +262,7 @@ of that call before the error propagates.  There is no ``seed`` — hardware
 randomness is not seedable — and no ``device=``: the device is fetched, never
 passed.  ``mitigation_info=`` is forwarded verbatim on every job for the
 service's readout mitigation; the engine still expects integer counts summing
-to the shot count back (mitigated real-valued counts are not yet handled).
+to the shot count back, and a real-valued payload is refused with
+``ValueError`` at fetch rather than truncated.  A circuit whose symbols are
+not bound by ``run(params)`` is refused the same way before any job is
+submitted.

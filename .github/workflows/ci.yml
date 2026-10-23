@@ -150,7 +150,9 @@ jobs:
         with:
           name: wheel
           path: dist
-      - run: python -m pip install "$(ls dist/*.whl)[full-dev]"
+      # [oqtopus] here too: the SDK-oracle transport rows count toward the
+      # patch gate, and they only run with the client installed.
+      - run: python -m pip install "$(ls dist/*.whl)[full-dev,oqtopus]"
       # No --cov-fail-under here: this job answers "did the tests pass"; the
       # coverage job reads the artefacts and answers "did coverage regress".
       - run: pytest tests/ --cov --cov-report=term --cov-report=xml:coverage.xml
