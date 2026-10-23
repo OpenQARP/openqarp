@@ -26,9 +26,8 @@ the same window.
   `lambda_norm`; `QSVTBlock` is the one caller and `QubitizationBlock` sets
   an attribute of the same name.  Drop it in the release or keep it for
   good.
-- **Plan text on the plan-only branches.**  `pauli_engine_plan.md` and
-  `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
-  `prepare_structured_qpe`; the counter is 15 and the hook is gone.  Fix when each branch rebases.
+- **Plan text on the plan-only branch.**  `pauli_engine_plan.md` names an
+  ABI bump 8 → 9; the counter is 16.  Fix when the branch rebases.
 
 ## Breaking changes waiting for a minor release
 
@@ -74,6 +73,23 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
 
 ## Additive, no window needed
 
+- **`OqtopusEngine` checks the device basis at construction.**  The
+  transport's `get_device` serves the topology JSON only and
+  `device_from_oqtopus` assumes `x, sx, rz, cx`, so a device with another
+  basis fails the job at the gateway, after queuing.  The SDK's device
+  record carries `basis_gates` beside the topology.  Widen `get_device` to
+  carry it, have `LocalOqtopusTransport` serve the `sx_rz` set by default,
+  and raise `CapabilityError` when the four are not all present.  Wait for
+  the first QPU record (`oqtopus_plan.md`, Phase 3b) to confirm the field's
+  spelling.  Start at `qarp/engines/_oqtopus/_transport.py` and
+  `qarp/devices/_oqtopus.py`.
+- **Refuse readers of the per-shot register on a counts-only engine.**
+  `CuttingPrimitive` and the QPD path read `cbit_history`, which
+  `OqtopusEngine` leaves empty, and raise `RuntimeError` at `run`, after the
+  job has run.  Add `requires_cbit_history` on the two primitives and
+  `provides_cbit_history` on engines, checked in `Engine.build` next to the
+  `requires_noiseless` check in `qarp/engines/_engine.py`; the engines
+  package cannot name the primitives (`test_layering.py`).
 - **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
   and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
   at 12 threads is slow on its own.  Repeat the Threads measurements of

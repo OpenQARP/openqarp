@@ -144,6 +144,39 @@ def test_local_requires_a_width():
         LocalOqtopusTransport()
 
 
+def _wide(body, n=64, n_cbits=2):
+    return f'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[{n}] q;\nbit[{n_cbits}] c;\n{body}'
+
+
+def test_local_simulates_only_the_wires_a_program_touches():
+    # A 64-wide register cannot be allocated; only the two touched wires are.
+    t = _local(n=64)
+    bell = _wide("h q[0];\ncx q[0], q[63];\nc[0] = measure q[0];\nc[1] = measure q[63];\n")
+    jid = t.submit(program=bell, shots=4000, device_id="local", name="bell-64")
+    (out,) = t.wait_all([jid], timeout=1.0)
+    counts = out["counts"]
+    assert set(counts) <= {"00", "11"}
+    assert sum(counts.values()) == 4000
+    assert abs(counts.get("00", 0) - 2000) < 5 * (4000 * 0.25) ** 0.5
+
+
+def test_local_keeps_the_cbit_wiring_under_compaction():
+    t = _local(n=64)
+    prog = _wide("x q[63];\nc[0] = measure q[63];\nc[1] = measure q[0];\n")
+    jid = t.submit(program=prog, shots=50, device_id="local", name="x63")
+    (out,) = t.wait_all([jid], timeout=1.0)
+    assert out["counts"] == {"01": 50}  # c[0] rightmost, fed by q[63]
+
+
+def test_local_refuses_a_wire_beyond_the_declared_register():
+    import pytest
+
+    t = _local(n=3)
+    prog = _wide("x q[5];\nc[0] = measure q[5];\n", n=3, n_cbits=1)
+    with pytest.raises(ValueError, match="register"):
+        t.submit(program=prog, shots=10, device_id="local", name="x5")
+
+
 # ── RemoteOqtopusTransport ───────────────────────────────────────────────
 
 

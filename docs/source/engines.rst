@@ -231,8 +231,10 @@ The engine talks to the service through a four-method transport.
 :class:`~qarp.engines.RemoteOqtopusTransport` is the default and needs the
 ``[oqtopus]`` extra (see `Installation <installation.html>`_); credentials are
 resolved by the SDK.  :class:`~qarp.engines.LocalOqtopusTransport` runs the
-same programs on the local simulator, with no extra and no credential — the
-dry run to develop against, and what the example notebook uses:
+same programs on the local simulator, with no extra and no credential, and
+simulates only the wires a program touches, so the real device's ``device_info``
+is a dry-run target whatever its width — the dry run to develop against, and
+what the example notebook uses:
 
 .. code-block:: python
 
@@ -265,4 +267,7 @@ service's readout mitigation; the engine still expects integer counts summing
 to the shot count back, and a real-valued payload is refused with
 ``ValueError`` at fetch rather than truncated.  A circuit whose symbols are
 not bound by ``run(params)`` is refused the same way before any job is
-submitted.
+submitted.  Two limits are not checked up front: the engine assumes the
+``x, sx, rz, cx`` basis, so a device publishing another one fails the job at
+the gateway; and a counts payload carries no per-shot register, so primitives
+that read ``cbit_history``, circuit cutting among them, fail at ``run``.

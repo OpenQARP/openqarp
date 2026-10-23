@@ -388,6 +388,18 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
 5. **`oqtopus-client` floor.**  Every SDK surface the transport uses was
    verified against 1.3.0 only, hence the `>=1.3` pin; relax if an older
    release is shown to carry them.
+6. **Basis check at construction.**  Deferred to Phase 3b.  The transport
+   serves the topology JSON only; the SDK's device record carries
+   `basis_gates` beside it, unverified on a QPU record.  Until the first
+   hardware record shows the field, the engine assumes `x, sx, rz, cx` and a
+   device with another basis fails the job at the gateway (`RemoteJobError`).
+   Tracked in `to_do.md`.
+7. **Primitives that read the per-shot register.**  `CuttingPrimitive` and
+   the QPD path read `cbit_history`, which a counts payload leaves empty, and
+   raise `RuntimeError` at `run`, after the job.  Refusing them at `build` is
+   an Engine-template change (`requires_cbit_history` /
+   `provides_cbit_history`, the `requires_noiseless` pattern) and its own
+   small PR.  Tracked in `to_do.md`.
 
 ## Test plan
 
@@ -409,6 +421,7 @@ block) appear only as *additional* rows.
 | `device_from_oqtopus` rejects a coupling naming an unknown qubit | contract | `test_oqtopus_device.py` |
 | `counts_to_sampling_result({"00": 506, "11": 494}, n_qubits=2, n_shots=1000).counts == {0: 506, 3: 494}`; `{"01": 7}` → `{1: 7}` | the OQTOPUS user-API spec example payload and the device-gateway `_remap_counts` docstring ("bit index 0 rightmost") | `test_oqtopus_transport.py::test_counts_bit_order` |
 | `LocalOqtopusTransport` on the spec's Bell program returns keys ⊆ `{"00", "11"}` at ≈ ½ each; on `x q[0];` returns `{"01": shots}` | OQTOPUS spec example; analytic | `test_oqtopus_transport.py::test_local_payload_shape` |
+| `LocalOqtopusTransport` on a 64-qubit register: a Bell pair on `q[0]`, `q[63]` returns keys ⊆ `{"00", "11"}` at ≈ ½; `x q[63]` measured into `c[0]` returns `{"01": shots}`; a wire beyond the declared register raises `ValueError` | analytic; a 64-wide statevector cannot be allocated, so the rows fail without the relabel | `test_oqtopus_transport.py::test_local_simulates_only_the_wires_a_program_touches`, `…::test_local_keeps_the_cbit_wiring_under_compaction`, `…::test_local_refuses_a_wire_beyond_the_declared_register` |
 | `LocalOqtopusTransport` status values ∈ the spec enum; `cancel` on an unknown id is a no-op; `log` records every call | the `jobs.JobStatus` enum from the spec | `test_oqtopus_transport.py` |
 | `RemoteOqtopusTransport.submit` builds a spec with `job_type == "sampling"` and `transpiler_info == {"transpiler_lib": None}` (client monkeypatched at `submit_job`) | `oqtopus_client.OqtopusJobSpec.to_model()` — the SDK as oracle | `test_oqtopus_transport.py` (`importorskip("oqtopus_client")`) |
 | Constructing `RemoteOqtopusTransport` without the SDK raises `ImportError` naming `pip install "openqarp[oqtopus]"` | contract (module blocked via `sys.modules`) | `test_oqtopus_transport.py` |
@@ -562,3 +575,11 @@ Declared during implementation and folded into the sections above:
   `_reject_true_mcm`, shared with `QarpEngine`.  `_compile_stamp` compares the
   device record by identity, so every engine instance recompiles under
   `rebuild=False`, two on the same device id included.
+- **Decisions on the review round's design questions.**
+  `LocalOqtopusTransport` simulates only the wires a program touches (dense
+  relabel before `QarpSimulator`; counts are keyed by cbit, so they do not
+  change), so a dry run against a real topology costs the circuit's width,
+  and a wire outside the declared register is refused.  The basis check at
+  construction and the refusal of per-shot-register readers at `build` are
+  deferred (open items 6 and 7, `to_do.md`).  `_compile_stamp` stays by
+  identity.  The plan lands with Phase 3b open and Status In progress.

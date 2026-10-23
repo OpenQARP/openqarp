@@ -79,9 +79,11 @@ class LocalOqtopusTransport:
     """Credential-free dry run: executes each QASM 3 program on ``QarpSimulator``.
 
     ``device_info`` is served verbatim by ``get_device``; without one,
-    ``n_qubits`` builds an all-to-all device of that width.  ``seed`` makes
-    the sampled counts reproducible (job ``k`` draws from ``seed + k``).
-    Every call is appended to ``log`` for structural assertions.
+    ``n_qubits`` builds an all-to-all device of that width.  Only the wires a
+    program touches are simulated, so a dry run against a real topology costs
+    the circuit's width, not the device's.  ``seed`` makes the sampled counts
+    reproducible (job ``k`` draws from ``seed + k``).  Every call is appended
+    to ``log`` for structural assertions.
     """
 
     def __init__(
@@ -135,8 +137,9 @@ class LocalOqtopusTransport:
             raise ValueError(
                 f"LocalOqtopusTransport: program {name!r} still carries free symbols {symbols}"
             )
+        cmds, width = _compact(cmds, n_qubits, name)
         seed = None if self._seed is None else (self._seed + k) % 2**32
-        sr = qx.QarpSimulator().run(cmds, n_qubits, shots, seed)
+        sr = qx.QarpSimulator().run(cmds, width, shots, seed)
         self._outcomes[job_id] = {
             "job_id": job_id,
             "status": "succeeded",
@@ -154,6 +157,24 @@ class LocalOqtopusTransport:
 
     def cancel(self, job_ids: Sequence[str]) -> None:
         self._log.append({"call": "cancel", "job_ids": list(job_ids)})
+
+
+def _compact(cmds: list, n_qubits: int, name: str) -> tuple[list, int]:
+    """Relabel the wires a program touches onto a dense range.
+
+    The register is declared at the device width, which a statevector cannot
+    hold for a real topology; counts are keyed by cbit, so the relabel does
+    not change them.  A wire outside the declared register is refused.
+    """
+    used = sorted({q for c in cmds for q in c.qubits})
+    if used and used[-1] >= n_qubits:
+        raise ValueError(
+            f"LocalOqtopusTransport: program {name!r} touches qubit {used[-1]} "
+            f"outside its register of {n_qubits}"
+        )
+    dense = {q: i for i, q in enumerate(used)}
+    mapping = [dense.get(q, 0) for q in range(n_qubits)]
+    return [c.remap_qubits(mapping) for c in cmds], len(used)
 
 
 def _bitstring_counts(sr: qx.SamplingResult, n_cbits: int) -> dict[str, int]:
