@@ -180,7 +180,8 @@ def test_measure_all_appended():
     assert program.count("measure") == 3
 
 
-def test_explicit_measurement_is_left_alone():
+def test_explicit_measurement_is_kept_once():
+    """A block that already measures every qubit gets no second measurement."""
     transport = LocalOqtopusTransport(n_qubits=1, seed=1)
     eng = OqtopusEngine("local", transport=transport, n_shots=10)
     eng.build([PauliAveraging(operator=QubitOperator("Z0", 1.0), ket=_ry_ket(0.4))])

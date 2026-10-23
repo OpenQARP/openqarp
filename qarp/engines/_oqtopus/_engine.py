@@ -100,8 +100,8 @@ class OqtopusEngine(Engine):
         return True
 
     def _compile_stamp(self) -> tuple:
-        # The device record itself: circuits compiled against another
-        # service's topology, or by another engine class, are recompiled.
+        # The device record by identity: every engine instance recompiles under
+        # rebuild=False, two on the same device id included.  Safe, never stale.
         return (type(self), self._device)
 
     # ── compile ────────────────────────────────────────────────────────────

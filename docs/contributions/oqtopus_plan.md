@@ -1,19 +1,20 @@
 # OQTOPUS integration — `OqtopusEngine` over `oqtopus-client`, `sx_rz` rebase target
 
-**Status:** 🚧 In progress — Phases 0–3a done (3a on the oqtopus-cli local stack); Phase 3b (QPU) open
-**Author:** Stefano Scali (+ Claude)
-**Reviewer:** <named reviewer — their green-light on this plan in the Draft PR is the design approval>
+**Status:** In progress — Phases 0–3a done (3a on the oqtopus-cli local stack); Phase 3b (QPU) open
+**Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-09-22
 **Tier:** Structural (new engine; deliberate edits to §11, §14, §15)
 **Branch:** `feature/oqtopus-integration`
+**Green-lit:** <pending the Draft PR's `Green-lit at <sha>` comment>
 **Scope:**
 
 Phase 0 — compiled backend (ABI bump):
 - `cpp/libqarpx/include/qarpx/transpiler/gateset.h`, `cpp/libqarpx/src/transpiler/gateset.cpp` (`sx_rz_gateset()`)
 - `cpp/libqarpx/include/qarpx/transpiler/decompositions.h`, `cpp/libqarpx/src/transpiler/decompositions.cpp` (`sx_rz_decompositions()`, rule tag `"sx_rz"`)
 - `cpp/libqarpx/src/block/controlled_block.cpp` (`decompose_h_phase_correct` moves to the shared table; the file keeps calling it)
-- `cpp/libqarpx/python/bindings.cpp` (`sx_rz_gateset` binding, `SamplingResult` constructor, `QARPX_ABI_VERSION` 8 → 9)
-- `qarp/_abi.py` (`EXPECTED_QARPX_ABI` 8 → 9)
+- `cpp/libqarpx/python/bindings.cpp` (`sx_rz_gateset` binding, `SamplingResult` constructor, `QARPX_ABI_VERSION` 15 → 16)
+- `qarp/_abi.py` (`EXPECTED_QARPX_ABI` 15 → 16)
+- `cpp/libqarpx/python/qarpx.pyi` (regenerated stub for the two bindings)
 - `cpp/libqarpx/tests/cpp/test_decomposition_table.cpp` (rule-set closure and phase-exactness)
 - `tests/test_transpiler/test_target_rules.py` (Python-side `sx_rz` oracle rows)
 - `tests/test_engines/test_sampling_result.py` (new — the constructor)
@@ -31,7 +32,8 @@ Phase 2 — the engine:
 - `qarp/engines/_oqtopus/_engine.py` (new), `qarp/engines/__init__.py` (export)
 - `tests/test_engines/test_oqtopus_engine.py` (new)
 - `examples/engines/mwe_oqtopus.ipynb` (new)
-- `docs/source/engines.rst`, `docs/source/installation.rst`
+- `docs/source/engines.rst`, `docs/source/installation.rst`, `docs/source/errors.rst` (`RemoteJobError` paragraph)
+- `tests/test_engines/test_layering.py` (walks the new subpackage)
 - `docs/contracts/qarp_conventions.md` (§11, §14, §15 — see Design)
 - `.github/workflows/nightly.yml` (install the `oqtopus` extra in the notebooks job; run the transport suite un-skipped there)
 - `.github/workflows/ci.yml` (install the `oqtopus` extra in the pytest/coverage job, so the SDK-oracle transport rows count toward the patch gate)
@@ -83,8 +85,9 @@ integration cannot land without them:
   `device_info` (directed coupling map + the `sx_rz` gate set), runs
   `qx.compile_for_device` (check_fits → rebase → route → rebase, §14), and
   submits with `transpiler_info = {"transpiler_lib": None}` so the server
-  transpiler is skipped.  Counts are reindexed by the final logical→physical
-  map exactly as `QarpEngine` does.  Consequence: `multi_manual` (server-side
+  transpiler is skipped.  Counts come back keyed by logical qubit, because
+  the engine lays the measurement layer on the final physical wires itself
+  (*How it fits*); nothing is reindexed.  Consequence: `multi_manual` (server-side
   packing of several programs into one wide circuit) is not used — it conflicts
   with physical-qubit routing — and `_sweep` submits one job per circuit.
 - **Transport: `oqtopus-client`, lazily.**  A new `[oqtopus]` extra; the SDK is
@@ -105,8 +108,8 @@ integration cannot land without them:
 
 - `provides_amplitudes = False` (static), `supports_initial_state = False`,
   `gradient_methods = {"default", "parameter-shift", "finite-diff", "spsa"}`,
-  `_host_statevector_simulator()` returns `None`, `prepare_structured_qpe()`
-  returns `None`.  These declarations alone make the base template refuse
+  `_host_statevector_simulator()` returns `None`, `_plan_unbuilt` /
+  `_plan_built` keep their defaults (no structured programs).  These declarations alone make the base template refuse
   `StateVector`, `n_shots=qarp.EXACT`, `initial_state` and the adjoint gradient
   with typed `CapabilityError`s — no per-call guards in the engine.
 - `_routed()` is `True`; `_compile_one` runs `compile_for_device` and then
@@ -119,14 +122,14 @@ integration cannot land without them:
   classical-register keys, whose bit order is the *cbit* order, so an
   explicitly measured circuit (`PauliAveraging` measures qubit `i` into
   `c[i]`) comes back in logical order already and a final-map reindex would
-  be wrong.  `_n_qubits_list` entries are the block width — the width the
-  primitives read.
+  be wrong.  `CompiledCircuit.n_qubits` is the block width — the width the
+  primitives read, since the counts are already in logical order.
 - `_post_compile_check` calls the shared `_reject_true_mcm` — OQTOPUS exposes no
   feed-forward — and rejects `initial_state` through the base guards.
 - `_dispatch_one` and `_sweep` are the only remote code: emit each substituted
   circuit with `qx.QASM3Emitter` (the `GPhase` a rebase leaves behind has been
   dropped by the target already, so the program uses `stdgates.inc` names only),
-  submit every job, wait once, convert, reindex, hand `prim.run(results)`.
+  submit every job, wait once, convert, hand `prim.run(results)`.
   `_sweep` submits `len(param_sets) × Σ circuits` jobs up front and assembles
   `results[set_idx][prim_idx]`, which is what makes `evaluate_stencils`
   (parameter-shift) one round trip per gradient.
@@ -140,8 +143,8 @@ integration cannot land without them:
   `mitigation_info: Mapping[str, Any] | None` and every `submit` forwards it
   verbatim; qarp neither reads nor validates its keys, they belong to the
   service.  Readout mitigation returns counts in the submitted register
-  layout, so the reindex step is unaffected.  `transpiler_info` is *not*
-  exposed: a server that routes would invalidate the logical-order reindexing.
+  layout, so the wiring is unaffected.  `transpiler_info` is *not*
+  exposed: a server that routes would invalidate the wiring.
 - **Result contract.**  Counts → `qx.SamplingResult(n_qubits, counts, n_shots)`
   via the new constructor, keyed by logical qubit through the circuit's
   `_Wiring`; nothing is reindexed afterwards.  Bit order: OQTOPUS keys are
@@ -400,7 +403,7 @@ block) appear only as *additional* rows.
 | `Transpiler(sx_rz_gateset()).transpile()` of a native-gateset sweep circuit yields only allowed gates and a unitary equal **up to global phase** to the input; `GPhase` absent from output | analytic (input built from the §2 matrices) | `test_target_rules.py::test_sx_rz_target_closure` |
 | `Device(gate_set=sx_rz_gateset(), architecture=line)` through `compile_for_device`: `P_final⁻¹·U_routed·P_initial` equals the unrouted unitary up to phase | the §14 routing oracle | `test_target_rules.py::test_sx_rz_routed_device` |
 | `decompositions_for` with an unknown tag still throws and the message lists `"sx_rz"` | contract | `test_decomposition_table.cpp` |
-| `qx.SamplingResult(2, {0: 5, 3: 5}, 10)` exposes the fields; `sum ≠ n_shots` and `key ≥ 2ⁿ` raise `ValueError`; `cbit_history` empty | contract | `test_sampling_result.py` |
+| `qx.SamplingResult(2, {0: 5, 3: 5}, 10)` exposes the fields; `sum ≠ n_shots`, `key ≥ 2ⁿ`, a negative count and `n_qubits` outside `[0, 63]` raise `ValueError`; `cbit_history` empty | contract | `test_sampling_result.py` |
 | `reindex_sampling_result(SamplingResult(2, {1: 10}, 10), [1, 0]) == {2: 10}` | analytic bit permutation | `test_sampling_result.py::test_reindex_constructed` |
 | `device_from_oqtopus` on the device-gateway example topology: `n_qubits`, edge list, `directedness`, gate-set name | the published device-gateway `device_topology.json` example (transcribed verbatim, with its source URL, into `tests/oqtopus_device_topology.py`) | `test_oqtopus_device.py` |
 | `device_from_oqtopus` rejects a coupling naming an unknown qubit | contract | `test_oqtopus_device.py` |
@@ -427,7 +430,7 @@ block) appear only as *additional* rows.
 | `OqtopusEngine(..., n_shots=qarp.EXACT)` raises `CapabilityError` at construction | §14 contract | `…::test_exact_rejected_at_construction` |
 | Transport returning `status="failed"` → `RemoteJobError` with `job_id` and `message`; returning `"cancelled"` likewise | contract | `…::test_remote_job_error` |
 | Transport raising `TimeoutError` from `wait_all` → every submitted id passed to `cancel`, then the error propagates | contract (`transport.log`) | `…::test_timeout_cancels_outstanding` |
-| `import qarp.engines` does not import `oqtopus_client` (checked in `sys.modules`) | §15 laziness | `…::test_lazy_sdk_import` |
+| `import qarp.engines` does not import `oqtopus_client` (checked in `sys.modules`) | §15 laziness | `test_oqtopus_transport.py::test_importing_qarp_engines_does_not_import_the_sdk` |
 | Engine layering: `qarp/engines/_oqtopus/*` imports nothing from `qarp.algorithms` | existing `test_layering.py` lint (extended to the subpackage) | `test_layering.py` |
 | Additional (round-trip): `Sampler` on a random 4-qubit Clifford circuit, local transport vs. `QarpEngine`, total-variation distance < 0.05 at 4000 shots | not an oracle — agreement only | `…::test_agrees_with_qarp_engine` |
 | Live, local stack (Phase 3a, gated on `OQTOPUS_URL`, `OQTOPUS_API_TOKEN`, `QARP_OQTOPUS_DEVICE=qulacs`; `slow`): `device_from_oqtopus(get_device("qulacs"))` builds; the `sx_rz` Bell program submitted with `transpiler_lib: None` ends `succeeded` and the same program with a raw `h` ends `failed`; `x q[0];` returns the single key `"01"`; the engine's Bell counts within 5σ of ½ each, with and without readout mitigation | analytic; the bit-order and pass-through claims checked on the running gateway rather than its source | `test_oqtopus_live.py` |
@@ -441,36 +444,36 @@ the rest (an IBM-style rebase target and a constructible result).
 
 ### Phase 0 — compiled backend: `sx_rz` target, `SamplingResult` constructor
 
-- [ ] `sx_rz_gateset()` + `sx_rz_decompositions()`; `decompose_h_phase_correct`
-      moved into the shared table, `controlled_block.cpp` re-uses it
-- [ ] `decompositions_for` knows `"sx_rz"`; error message lists it
-- [ ] `SamplingResult` constructor binding with validation
-- [ ] `QARPX_ABI_VERSION` / `EXPECTED_QARPX_ABI` → 9, same commit
-- [ ] C++ + Python oracle rows above
-- [ ] §11 edit
+- [x] `sx_rz_gateset()` + `sx_rz_decompositions()`; `decompose_h_phase_correct`
+      moved into the shared table, `controlled_block.cpp` re-uses it (2026-10-16)
+- [x] `decompositions_for` knows `"sx_rz"`; error message lists it (2026-10-16)
+- [x] `SamplingResult` constructor binding with validation (2026-10-16)
+- [x] `QARPX_ABI_VERSION` / `EXPECTED_QARPX_ABI` bumped, same commit (2026-10-16; 16 after the develop merge, 2026-10-23)
+- [x] C++ + Python oracle rows above (2026-10-16)
+- [x] §11 edit (2026-10-16)
 
 ### Phase 1 — plumbing, offline
 
-- [ ] `OqtopusTransport` protocol, `LocalOqtopusTransport`, `RemoteOqtopusTransport`
-- [ ] `device_from_oqtopus` + `tests/oqtopus_device_topology.py`
-- [ ] `counts_to_sampling_result`
-- [ ] `RemoteJobError`; `[oqtopus]` extra
-- [ ] Transport / device / result oracle rows above
+- [x] `OqtopusTransport` protocol, `LocalOqtopusTransport`, `RemoteOqtopusTransport` (2026-10-16; renamed 2026-10-20)
+- [x] `device_from_oqtopus` + `tests/oqtopus_device_topology.py` (2026-10-16)
+- [x] `counts_to_sampling_result` (2026-10-16)
+- [x] `RemoteJobError`; `[oqtopus]` extra (2026-10-16)
+- [x] Transport / device / result oracle rows above (2026-10-16)
 
 ### Phase 2 — the engine
 
-- [ ] `OqtopusEngine` per the API sketch, `mitigation_info` included; exports
-- [ ] Engine oracle rows above (incl. the `slow` H₂ row and the layering lint)
-- [ ] `docs/source/engines.rst` section "OqtopusEngine — remote execution";
-      `installation.rst` paragraph for the extra
-- [ ] `examples/engines/mwe_oqtopus.ipynb` on `LocalOqtopusTransport`
+- [x] `OqtopusEngine` per the API sketch, `mitigation_info` included; exports (2026-10-16; ported to the `CompiledCircuit` template 2026-10-23)
+- [x] Engine oracle rows above (incl. the `slow` H₂ row and the layering lint) (2026-10-16; discriminating rows added 2026-10-23)
+- [x] `docs/source/engines.rst` section "OqtopusEngine — remote execution";
+      `installation.rst` paragraph for the extra (2026-10-16)
+- [x] `examples/engines/mwe_oqtopus.ipynb` on `LocalOqtopusTransport` (2026-10-16)
       (an inline copy of the example topology — `examples/` never imports
       `tests/`, §15 — GHZ sampling, one VQE step, and the
       `RemoteOqtopusTransport` construction shown but not executed)
-- [ ] `nightly.yml`: install `[…,oqtopus]` in the notebooks job; run
-      `tests/test_engines/test_oqtopus_transport.py` un-skipped there
-- [ ] §14 and §15 edits
-- [ ] Index row → 🚧 at green-light, ✅ at merge
+- [x] `nightly.yml`: install `[…,oqtopus]` in the notebooks job; run
+      `tests/test_engines/test_oqtopus_transport.py` un-skipped there (2026-10-16)
+- [x] §14 and §15 edits (2026-10-16)
+- [x] Index row added (2026-10-16; the index carries no status column, this header does)
 
 ### Phase 3 — live tier (gated + `slow`, never in CI)
 
@@ -478,9 +481,9 @@ the rest (an IBM-style rebase target and a constructible result).
 
 - [x] `test_oqtopus_live.py` against the oqtopus-cli stack, device `qulacs`
       (cloud v1.8.0, engine v2.2.1, gateway v1.1.16): 6 passed, QPU probe
-      skipped
+      skipped (2026-10-19; re-run green after the merge, 2026-10-23)
 - [x] Open item 2 closed for the Qulacs gateway; open item 3's empty token
-      accepted; open item 4 settled for the simulator only
+      accepted; open item 4 settled for the simulator only (2026-10-19)
 
 3b, QPU (blocked on credentials; open item 1):
 
@@ -542,3 +545,20 @@ Declared during implementation and folded into the sections above:
   the original rows passed with the final map replaced by the initial one;
   `ci.yml`'s pytest job installs the `oqtopus` extra so the transport rows
   count toward the 80 % patch gate.
+- **Bookkeeping after the review round.**  Three files outside the
+  green-lit Scope are now listed there: `docs/source/errors.rst` (the
+  `RemoteJobError` paragraph), `cpp/libqarpx/python/qarpx.pyi` (the stub
+  `develop` now ships, regenerated for the two bindings) and
+  `tests/test_engines/test_layering.py`.  The ABI bump is 15 → 16 after the
+  `develop` merge.  The `oqtopus-client` floor is `>=1.3` (open item 5).
+  The `SamplingResult` constructor also rejects a negative count and
+  `n_qubits` outside `[0, 63]`, now in its test row.  `CompiledCircuit.n_qubits`
+  is the block width, not the device width the base comment describes,
+  because the counts are already in logical order.  The notebook's device is a
+  hand-written three-qubit line, not the device-gateway example; its "VQE
+  step" is one energy and one gradient.  Phase 3b's rows switch on
+  `QARP_OQTOPUS_QPU=1` rather than on the device id alone.  The capability row
+  exercises measure-then-reuse; the conditional case is the base
+  `_reject_true_mcm`, shared with `QarpEngine`.  `_compile_stamp` compares the
+  device record by identity, so every engine instance recompiles under
+  `rebuild=False`, two on the same device id included.

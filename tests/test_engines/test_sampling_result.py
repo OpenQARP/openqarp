@@ -44,3 +44,13 @@ def test_reindex_constructed():
     logical = qx.reindex_sampling_result(physical, [1, 0])
     assert dict(logical.counts) == {2: 10}
     assert logical.n_shots == 10
+
+
+def test_constructor_rejects_negative_count():
+    with pytest.raises(ValueError, match="negative"):
+        qx.SamplingResult(2, {0: -1, 3: 11}, 10)
+
+
+def test_constructor_rejects_width_outside_the_register_limit():
+    with pytest.raises(ValueError, match="63"):
+        qx.SamplingResult(64, {0: 10}, 10)
