@@ -2805,6 +2805,131 @@ and overlap matrices.
     primitive used by the :code:`QSE` object to evaluate the elements of :math:`\mathbf{S}`.
 
 
+.. _qsci-section:
+
+Quantum-Selected Configuration Interaction (QSCI)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+QSCI samples one or more prepared states in the computational basis, keeps the
+most frequently observed configurations, and diagonalizes the Hamiltonian
+classically in the subspace :math:`\{|x_i\rangle\}` they span,
+
+.. math::
+
+   H_{ij} = \langle x_i|H|x_j\rangle,
+
+following Kanno et al., `Quantum-Selected Configuration Interaction
+<https://arxiv.org/abs/2302.11320>`_. Unlike QSE, the quantum device only
+samples: shot noise affects *which* configurations are selected, never the
+matrix elements, which are computed exactly.
+
+**Samples.** Exactly one of two arguments supplies them:
+
+- ``ket``: a block, or a sequence of blocks of equal width, sampled with a
+  ``Sampler`` (``Sampler()`` by default; it must measure every qubit in
+  register order). Every block runs the same shot count and the results are
+  pooled as their plain mean. A sequence of Trotterized time-evolution blocks
+  is the time-averaged TE-QSCI of Mikkelsen and Nakagawa, `QSCI with
+  time-evolved state <https://arxiv.org/abs/2412.13839>`_; equal weight per
+  block is the time average only for equally spaced times.
+- ``distribution``: a ``{bits: probability}`` mapping produced elsewhere, such
+  as a hardware job, another sampler, or an earlier run's ``qsci.distribution``.
+  Keys are LSB-first bit tuples (qubit ``q`` at position ``q``); weights must
+  sum to one within ``1e-10`` and are never renormalized.
+
+**Hamiltonian and sector.** ``hamiltonian`` is a ``QubitOperator`` or a
+``FermionOperator``, which is Jordan-Wigner-transformed. ``n_electrons =
+(n_alpha, n_beta)`` declares the sector, with alpha spin orbitals on even
+qubits and beta on odd (abab). It is required for a ``FermionOperator``; for a
+``QubitOperator`` it is optional and asserts a Jordan-Wigner occupation basis.
+Jordan-Wigner is a precondition QSCI cannot check: the sector filter and the
+reading of bitstrings as occupations both assume the sampled states were
+prepared under it.
+
+**Selection** runs in a fixed order: pool the samples, filter to the sector,
+apply ``prob_threshold`` (an inclusive floor on in-sector probability), then
+keep at most ``max_subspace_dim`` configurations, most frequent first, with
+ties broken by ascending LSB label. Out-of-sector samples raise a
+``UserWarning``, are excluded, and are kept on ``qsci.rejected``;
+``qsci.in_sector_mass`` reports the in-sector share.
+
+**Solve.** The subspace Hamiltonian is built by walking Pauli terms, so no
+:math:`2^n` object is formed. Up to 2000 configurations it is diagonalized
+densely with ``scipy.linalg.eigh``, and above that with ARPACK's ``eigsh``, for
+the ``n_roots`` lowest eigenpairs. ``run()`` returns ``(energies,
+coefficients)``, as ``QSE`` does, and sets ``energies``, ``coefficients`` (row
+``i`` is the amplitude on ``configurations[i]``), ``configurations``,
+``distribution`` (the pooled samples before any filter or cut, normalized to
+unit total mass so they can be passed straight back as ``distribution=``),
+``in_sector_mass`` and ``rejected``.
+
+As an example, we reuse the :math:`H_4` chain from the QSE example and sample
+Hartree-Fock evolved under Trotterized :math:`e^{-iHt}` at four times. Run the
+snippet from the repository root:
+
+.. code-block:: python
+
+    from pathlib import Path
+    import numpy as np
+
+    from qarp.algorithms import QSCI, Sampler
+    from qarp.blocks import CompositeBlock, MappedONVStateBlock, TrotterBlock
+    from qarp.engines import QarpEngine
+    from qarp.operators import JordanWigner
+    from qarp.operators.integrals import restricted_integrals_to_fermion_operator
+    from qarp.operators.onv import onv_from_spatial_occupations
+
+    asset = Path("tests/assets/molecules/h4_1.000_sto3g.npz")
+    with np.load(asset) as data:
+        fermion_hamiltonian = restricted_integrals_to_fermion_operator(
+            float(data["constant"]), data["one_electron"], data["two_electron"]
+        )
+    hf = onv_from_spatial_occupations([2, 2, 0, 0])
+    qubit_hamiltonian = JordanWigner().encode_operator(fermion_hamiltonian)
+
+    blocks = [
+        CompositeBlock(
+            [
+                MappedONVStateBlock(hf, JordanWigner()),
+                TrotterBlock(len(hf), qubit_hamiltonian, steps=2, time=t),
+            ]
+        )
+        for t in (0.5, 1.0, 1.5, 2.0)
+    ]
+    qsci = QSCI(
+        fermion_hamiltonian,
+        ket=blocks,
+        primitive=Sampler(n_shots=2000),
+        engine=QarpEngine(seed=7),
+        n_electrons=(2, 2),
+    ).build()
+    energies, coefficients = qsci.run()
+
+Re-selecting from the same samples costs no circuits, which is how an
+energy-versus-subspace-size curve is drawn:
+
+.. code-block:: python
+
+    capped = QSCI(
+        fermion_hamiltonian,
+        distribution=qsci.distribution,
+        n_electrons=(2, 2),
+        max_subspace_dim=10,
+    ).build()
+    capped_energies, _ = capped.run()
+
+.. Note::
+    Two limits of the method are worth knowing. Only particle number and
+    :math:`S_z` are filtered, not :math:`S^2`, and a determinant subspace need
+    not be closed under spin; where spin states of the same spatial symmetry
+    are nearly degenerate, as near bond dissociation, the eigenvectors can be
+    spin-contaminated. And sampling frequency is only a proxy for importance:
+    time-evolved states started from a Hartree-Fock determinant with small
+    ground-state overlap rank the important configurations poorly, so
+    diagonalizing the whole sampled pool is far more reliable than capping it
+    aggressively.
+
+
 Quantum Imaginary-Time Evolution (QITE)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
