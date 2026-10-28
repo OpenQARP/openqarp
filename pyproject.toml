@@ -194,7 +194,7 @@ full-dev = [
 
 [project.urls]
 Homepage = "https://github.com/OpenQARP/openqarp"
-Documentation = "https://openqarp.github.io/openqarp/"
+Documentation = "https://docs.openqarp.com/"
 Repository = "https://github.com/OpenQARP/openqarp"
 Issues = "https://github.com/OpenQARP/openqarp/issues"
 Changelog = "https://github.com/OpenQARP/openqarp/blob/main/CHANGELOG.md"

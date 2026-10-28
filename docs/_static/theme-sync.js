@@ -13,3 +13,20 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   });
 });
+
+// The burger beside the wordmark: click toggles, Escape or a click elsewhere closes.
+document.addEventListener("DOMContentLoaded", function () {
+  var btn = document.getElementById("menu-toggle"), menu = document.getElementById("site-menu");
+  if (!btn || !menu) return;
+  function setMenu(open) {
+    menu.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    btn.classList.toggle("open", open);
+  }
+  btn.addEventListener("click", function () { setMenu(menu.hidden); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !menu.hidden) { setMenu(false); btn.focus(); } });
+  document.addEventListener("click", function (e) {
+    if (!menu.hidden && !e.target.closest("#site-menu") && !e.target.closest("#menu-toggle")) setMenu(false);
+  });
+});
