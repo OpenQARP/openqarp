@@ -52,7 +52,7 @@ OpenQARP runs every algorithm on two engines, both local simulators
 hardware: the emit adapters hand a circuit to another SDK and stop there, so a
 user who wants a VQE energy from a QPU leaves qarp at the first shot.
 
-[OQTOPUS](https://github.com/oqtopus-team/oqtopus-cloud) (Osaka / Fujitsu,
+[OQTOPUS](https://github.com/oqtopus-team/oqtopus-cloud) (the oqtopus-team,
 Apache-2.0) is an open quantum-cloud stack with a documented user API: one
 OpenQASM 3 program per job, a `device_id`, a shot count, counts back as
 bitstrings.  Its official SDK, `oqtopus-client` (PyPI, 1.2.0), has no quantum
