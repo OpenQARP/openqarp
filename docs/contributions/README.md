@@ -148,3 +148,4 @@ something else, parked until they are picked up.
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` |
 | [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels |
+| [`symbols_always_tuple_plan.md`](symbols_always_tuple_plan.md) | `.symbols` is a tuple on every block that has a registry and a `RuntimeError` before |
