@@ -137,7 +137,7 @@ def test_mitigated_counts_are_integers(transport, device_id):
         transport=transport,
         n_shots=1000,
         timeout=600.0,
-        mitigation_info={"readout": "pseudo_inverse"},
+        mitigation_info={"ro_error_mitigation": "pseudo_inverse"},
     )
     b = SimpleBlock(2, name="bell")
     b.h(0).cx(0, 1)

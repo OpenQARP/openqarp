@@ -375,16 +375,19 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
    couplings) shortly after it starts; a device built from the seed is
    edgeless and the router refuses every CX.  Query the device only once
    the gateway reports `active`.
-4. **Mitigated counts.**  With `mitigation_info` set, are the returned counts
-   still integers summing to `shots`?  Readout mitigation can yield real,
-   even negative, values; `counts_to_sampling_result` would reject those with
-   a shot-sum `ValueError` after a paid job.  On the local stack
-   `mitigation_info={"readout": "pseudo_inverse"}` is echoed on the job and
-   the counts come back as integers summing to `shots` (the simulator has
-   no readout calibration to invert); `test_oqtopus_live.py` asserts it.
-   Hardware remains unverified, so the docs still say integer counts are
-   expected back; a fractional payload is refused at fetch, naming
-   mitigation, never truncated.
+4. **Mitigated counts.**  Settled from the oqtopus-engine source and its
+   sampling-mitigation docs.  Mitigation runs only under
+   `mitigation_info={"ro_error_mitigation": "pseudo_inverse"}`; the mitigator
+   projects the corrected quasi-distribution onto a probability distribution
+   and floors `p·shots` per key, so counts are non-negative integers summing
+   to at most `shots`.  On the local stack the same Bell program at 1000
+   shots returns 1000 counts without mitigation or under the ignored key
+   `readout`, and 999 under `ro_error_mitigation`; the live row fails without
+   the fix.  With `mitigation_info` set, `counts_to_sampling_result`
+   takes the returned total as the shot count (`mitigated=True`); without it
+   the sum must equal `shots`.  A fractional payload, which the user API's
+   unsigned-integer counts rule out, is still refused at fetch, never
+   truncated.
 5. **`oqtopus-client` floor.**  Every SDK surface the transport uses was
    verified against 1.3.0 only, hence the `>=1.3` pin; relax if an older
    release is shown to carry them.
@@ -435,6 +438,7 @@ block) appear only as *additional* rows.
 | Engine lays the measurement layer: a measurement-free block submits `bit[n] c;` and `c[i] = measure q[i]` for every *logical* qubit; a block measuring one qubit explicitly still measures the rest (uniform H⊗3 within 5σ) | §12.1 emission table; analytic | `…::test_measure_all_appended`, `…::test_partially_measured_block_still_reports_every_qubit` |
 | Transport whose `cancel` raises → the original `TimeoutError` still propagates; circuits compiled by another engine reused with `rebuild=False` are recompiled here (stamp mismatch), measurement layer included | contract; analytic `sin²(θ/2)` | `…::test_failed_cancel_does_not_mask_the_timeout`, `…::test_foreign_compiled_circuits_are_recompiled` |
 | `RemoteOqtopusTransport()` with `OQTOPUS_URL` set and no config file resolves the env; `cancel` swallows transport errors | contract | `test_oqtopus_transport.py` |
+| `counts_to_sampling_result(..., mitigated=True)` on `{"00": 499, "11": 498}` at 1000 shots keeps both counts and reports 997 shots; a total above `n_shots` still raises; the engine with `mitigation_info` set normalises a one-short payload over the returned total, and without it refuses the same payload | the oqtopus-engine mitigator's `int(p·shots)` per key; analytic; mutation-checked | `test_oqtopus_transport.py::test_mitigated_counts_take_the_returned_total_as_shots`, `…::test_mitigated_counts_above_the_shot_count_are_refused`, `test_oqtopus_engine.py::test_mitigated_shortfall_is_normalised_over_the_returned_total`, `…::test_unmitigated_shortfall_is_refused` |
 | `RemoteOqtopusTransport` refuses a fractional count at fetch with `ValueError` naming mitigation; an integral float is accepted as `int` | contract (open item 4) | `…::test_remote_transport_rejects_fractional_counts`, `…::test_remote_transport_accepts_integral_float_counts` |
 | `batch_run` over 3 parameter sets: `len(transport.log["submit"]) == 3 × n_circuits`, one `wait_all`; per-set values equal `run()` at the same params within 5σ | structural + analytic (`cos θ` rows) | `…::test_sweep_submits_all_then_waits` |
 | Parameter-shift VQE, 1 qubit, `H = Z`, ansatz `Ry(θ)`: converges to `θ ≈ π`, energy `−1 ± 5σ` | analytic minimum | `…::test_vqe_one_qubit_parameter_shift` |
@@ -583,3 +587,9 @@ Declared during implementation and folded into the sections above:
   construction and the refusal of per-shot-register readers at `build` are
   deferred (open items 6 and 7, `to_do.md`).  `_compile_stamp` stays by
   identity.  The plan lands with Phase 3b open and Status In progress.
+- **Mitigated shot count.**  The mitigation key is `ro_error_mitigation`; the
+  tests and the live row passed `readout`, which the service ignores, so the
+  live row never ran mitigation.  Mitigated counts are floored per key and
+  can sum below `shots`, so `counts_to_sampling_result` gained `mitigated=`
+  and the engine sets it whenever `mitigation_info` is passed, without
+  reading its keys (open item 4).

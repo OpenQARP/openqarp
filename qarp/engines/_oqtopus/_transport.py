@@ -292,12 +292,11 @@ class RemoteOqtopusTransport:
                 counts = {}
                 for k, v in dict(raw).items():
                     if isinstance(v, float) and not v.is_integer():
-                        # Never truncated: a fractional payload is what readout
-                        # mitigation returns, and shots cannot be made of it.
+                        # Never truncated: shots cannot be made of a quasi-probability.
                         raise ValueError(
                             f"RemoteOqtopusTransport: job {job_id!r} returned a non-integral "
-                            f"count {v!r} for {k!r}; readout mitigation can return real-valued "
-                            "counts, which qarp cannot turn into shots"
+                            f"count {v!r} for {k!r}; quasi-probabilities from readout mitigation "
+                            "cannot be turned into shots"
                         )
                     counts[str(k)] = int(v)
         return {

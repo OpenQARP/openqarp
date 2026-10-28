@@ -11,6 +11,7 @@ def counts_to_sampling_result(
     n_qubits: int,
     n_shots: int,
     wiring: Optional[Sequence[Optional[int]]] = None,
+    mitigated: bool = False,
 ) -> qx.SamplingResult:
     """Wrap service counts in the §14 result type, keyed by logical qubit.
 
@@ -21,10 +22,14 @@ def counts_to_sampling_result(
     is already qarp's LSB integer key (§1).  Spaces (multi-register
     spellings) are ignored.
 
+    ``mitigated=True`` accepts counts summing to less than ``n_shots`` and
+    reports their total as the shot count: the service's readout mitigation
+    floors each corrected count to an integer.
+
     Raises:
         ValueError: a key whose width is not the register width, a wiring
             naming a qubit outside ``range(n_qubits)``, or counts that do not
-            sum to ``n_shots``.
+            sum to ``n_shots`` (exceed it, when ``mitigated``).
     """
     if wiring is None:
         wiring = list(range(n_qubits))
@@ -48,6 +53,6 @@ def counts_to_sampling_result(
                 k |= 1 << q
         out[k] = out.get(k, 0) + int(n)
     total = sum(out.values())
-    if total != n_shots:
+    if total > n_shots or (total != n_shots and not mitigated):
         raise ValueError(f"counts_to_sampling_result: counts sum to {total} but n_shots={n_shots}")
-    return qx.SamplingResult(n_qubits, out, n_shots)
+    return qx.SamplingResult(n_qubits, out, total)

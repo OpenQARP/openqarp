@@ -263,9 +263,12 @@ service message; a timed-out or interrupted wait cancels every outstanding job
 of that call before the error propagates.  There is no ``seed`` — hardware
 randomness is not seedable — and no ``device=``: the device is fetched, never
 passed.  ``mitigation_info=`` is forwarded verbatim on every job for the
-service's readout mitigation; the engine still expects integer counts summing
-to the shot count back, and a real-valued payload is refused with
-``ValueError`` at fetch rather than truncated.  A circuit whose symbols are
+service's readout mitigation (``{"ro_error_mitigation": "pseudo_inverse"}``).
+The service floors each mitigated count to an integer, so the counts can sum
+to slightly less than ``n_shots``; with ``mitigation_info`` set, a result's
+shot count is the total returned.  Without it, counts must sum to ``n_shots``
+exactly.  A real-valued payload is refused with ``ValueError`` at fetch rather
+than truncated.  A circuit whose symbols are
 not bound by ``run(params)`` is refused the same way before any job is
 submitted.  Two limits are not checked up front: the engine assumes the
 ``x, sx, rz, cx`` basis, so a device publishing another one fails the job at

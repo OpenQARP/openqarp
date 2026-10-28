@@ -202,7 +202,7 @@ def test_job_names_carry_prefix_primitive_and_index():
 
 def test_mitigation_info_forwarded():
     transport = LocalOqtopusTransport(n_qubits=1, seed=1)
-    m = {"readout": "pseudo_inverse"}
+    m = {"ro_error_mitigation": "pseudo_inverse"}
     eng = OqtopusEngine("local", transport=transport, n_shots=10, mitigation_info=m)
     eng.build(
         [
@@ -215,6 +215,40 @@ def test_mitigation_info_forwarded():
     submits = _submits(transport)
     assert len(submits) >= 2
     assert all(e["mitigation_info"] == m for e in submits)
+
+
+class _FlooringTransport(LocalOqtopusTransport):
+    """Drops one count from every payload, as the service's mitigator can."""
+
+    def wait_all(self, job_ids, *, timeout):
+        outs = super().wait_all(job_ids, timeout=timeout)
+        for o in outs:
+            top = max(o["counts"], key=o["counts"].get)
+            o["counts"][top] -= 1
+        return outs
+
+
+def _x1():
+    b = SimpleBlock(1, name="x")
+    b.x(0)
+    b.build()
+    return b
+
+
+def test_mitigated_shortfall_is_normalised_over_the_returned_total():
+    m = {"ro_error_mitigation": "pseudo_inverse"}
+    eng = OqtopusEngine(
+        "local", transport=_FlooringTransport(n_qubits=1, seed=1), n_shots=10, mitigation_info=m
+    )
+    eng.build([Sampler(ket=_x1())])
+    assert eng.run()[0] == {(1,): 1.0}
+
+
+def test_unmitigated_shortfall_is_refused():
+    eng = OqtopusEngine("local", transport=_FlooringTransport(n_qubits=1, seed=1), n_shots=10)
+    eng.build([Sampler(ket=_x1())])
+    with pytest.raises(ValueError, match="n_shots"):
+        eng.run()
 
 
 # ── sweeps and gradients ─────────────────────────────────────────────────

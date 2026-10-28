@@ -48,6 +48,21 @@ def test_counts_rejects_shot_mismatch():
         counts_to_sampling_result({"00": 5}, n_qubits=2, n_shots=6)
 
 
+def test_mitigated_counts_take_the_returned_total_as_shots():
+    # The service's mitigator floors p·shots per key, so a Bell pair at
+    # 1000 shots can come back as 499 + 498.
+    r = counts_to_sampling_result({"00": 499, "11": 498}, n_qubits=2, n_shots=1000, mitigated=True)
+    assert dict(r.counts) == {0: 499, 3: 498}
+    assert r.n_shots == 997
+
+
+def test_mitigated_counts_above_the_shot_count_are_refused():
+    import pytest
+
+    with pytest.raises(ValueError, match="n_shots"):
+        counts_to_sampling_result({"00": 7}, n_qubits=2, n_shots=6, mitigated=True)
+
+
 # ── LocalOqtopusTransport ────────────────────────────────────────────────
 
 BELL = """OPENQASM 3.0;
@@ -214,7 +229,7 @@ def test_remote_transport_submit_builds_a_sampling_spec(monkeypatch):
         shots=123,
         device_id="qulacs",
         name="qarp:Sampler:0",
-        mitigation_info={"readout": "pseudo_inverse"},
+        mitigation_info={"ro_error_mitigation": "pseudo_inverse"},
     )
     assert jid == "job-42"
     model = seen["spec"].to_model()
@@ -223,7 +238,7 @@ def test_remote_transport_submit_builds_a_sampling_spec(monkeypatch):
     assert model.shots == 123
     assert model.name == "qarp:Sampler:0"
     assert dict(model.transpiler_info) == {"transpiler_lib": None}
-    assert dict(model.mitigation_info) == {"readout": "pseudo_inverse"}
+    assert dict(model.mitigation_info) == {"ro_error_mitigation": "pseudo_inverse"}
 
 
 def test_remote_transport_wait_polls_then_fetches_once(monkeypatch):

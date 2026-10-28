@@ -49,7 +49,10 @@ class OqtopusEngine(Engine):
         timeout: Seconds one ``run`` / ``batch_run`` call waits for its jobs
             before cancelling them and raising ``TimeoutError``.
         job_name: Prefix of the submitted job names (``"<prefix>:<Primitive>:<k>"``).
-        mitigation_info: Forwarded verbatim on every job; keys are the service's.
+        mitigation_info: Forwarded verbatim on every job; keys are the service's
+            (``{"ro_error_mitigation": "pseudo_inverse"}``).  When set, a
+            result's shot count is the total the service returns, which
+            mitigation can leave below ``n_shots``.
     """
 
     supports_initial_state = False
@@ -254,8 +257,7 @@ class OqtopusEngine(Engine):
                     pass  # best effort by contract; the original error propagates
             raise
 
-    @staticmethod
-    def _to_result(outcome: JobOutcome, compiled: CompiledCircuit, shots: int):
+    def _to_result(self, outcome: JobOutcome, compiled: CompiledCircuit, shots: int):
         if outcome["status"] != "succeeded" or outcome["counts"] is None:
             raise RemoteJobError(outcome["job_id"], outcome["status"], outcome["message"])
         # Every circuit this engine compiles carries a _Wiring; a true
@@ -266,4 +268,5 @@ class OqtopusEngine(Engine):
             n_qubits=compiled.n_qubits,
             n_shots=shots,
             wiring=wiring.cbit_to_logical,
+            mitigated=self._mitigation_info is not None,
         )
