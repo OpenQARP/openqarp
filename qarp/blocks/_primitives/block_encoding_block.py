@@ -95,10 +95,6 @@ class BlockEncodingBlock(CompositeBlockBase):
             name=name,
         )
 
-    def lambda_factor(self) -> float:
-        """Compatibility shim: returns ``self.lambda_norm``."""
-        return self.lambda_norm
-
     def build_vanilla(self) -> None:
         n_anc = self.num_controls
         N_anc = 2**n_anc
