@@ -60,6 +60,18 @@ def n_batches_for(delta: float, n_observables: int = 1) -> int:
     return max(1, math.ceil(2.0 * math.log(2.0 * n_observables / delta)))
 
 
+def achieved_delta(n_batches: int) -> float:
+    """Failure probability a median over ``n_batches`` means achieves.
+
+    The inverse of :func:`n_batches_for` at ``M = 1``: ``2 e^{-K/2}``.  Capped
+    at 1, since a single batch is the plain mean and carries no median-of-means
+    bound at all.
+    """
+    if n_batches < 1:
+        raise ValueError(f"n_batches must be >= 1, got {n_batches}")
+    return min(1.0, 2.0 * math.exp(-n_batches / 2.0))
+
+
 def median_of_means(values: np.ndarray, n_batches: int) -> tuple[float, float]:
     """Median-of-means point estimate and the HKP Theorem-1 accuracy half-width.
 

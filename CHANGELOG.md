@@ -128,6 +128,12 @@ All notable changes to OpenQARP are recorded here. The format follows
   `follow_imports = skip` and `follow_imports_for_stubs = True` for `qarpx`.
 - The `qarpx` ABI is 15.  An editable checkout reinstalls after pulling,
   or `import qarp` refuses the old build.
+- `ShadowEstimate.delta` is the failure probability the estimate's
+  `n_batches` achieves, `min(1, 2 e^{-K/2})`, instead of the `delta` that
+  was requested: an explicit `n_batches`, or a family estimated with
+  `expval_many`, changed the count without changing the field, and at
+  `n_batches=1` the stored request implied a bound above 1, now reported
+  as 1.  An exact constant reports 0.
 
 ### Removed
 

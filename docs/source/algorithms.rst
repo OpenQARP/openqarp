@@ -562,8 +562,8 @@ The estimator uses median-of-means; each :code:`expval` returns a
 :code:`ShadowEstimate` carrying the value and :code:`error`, the accuracy
 half-width :math:`\varepsilon = \sqrt{34\,\hat{V}/N}` of Huang–Kueng–Preskill
 Theorem 1 — the :math:`\varepsilon` for which
-:math:`\Pr[\,|\text{value} - \text{true}| \ge \varepsilon\,] \le \delta` at the
-:code:`delta` that fixed the batch count, with :math:`\hat{V}` the empirical
+:math:`\Pr[\,|\text{value} - \text{true}| \ge \varepsilon\,] \le \delta`, where
+:code:`delta` is the failure probability its batch count achieves, :math:`\hat{V}` the empirical
 single-setting variance and :math:`N` the per-batch size.  It is a worst-case
 bound carrying the paper's own deliberately loose constant 34, so it typically
 sits several times above the scatter you observe between repeats: read it as a
