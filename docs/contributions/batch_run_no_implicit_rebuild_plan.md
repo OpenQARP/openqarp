@@ -1,11 +1,11 @@
 # Make `Engine.batch_run` reuse the prior build by default
 
-**Status:** Planned
+**Status:** In progress
 **Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-10-23
 **Tier:** Standard
 **Branch:** improvement/batch-run-no-implicit-rebuild
-**Green-lit:**
+**Green-lit:** 2026-10-28, plan blob 54cb794b9c27f56e88543ae2856efebfe55cad62
 **Scope:**
 - `qarp/engines/_engine.py`: `batch_run` and `_batch_setup`
 - `tests/test_engines/test_compiled_circuits.py`: the new tests
@@ -48,12 +48,15 @@ flip rides it.
 - **Default.** `rebuild: bool = False`.
 - **Nothing built is an error, not a compile.** With `rebuild=False`,
   `_batch_setup` raises `RuntimeError` before anything runs when a primitive
-  has no compiled circuits (`prim.compiled` empty), naming
-  `engine.build(primitives)` and `rebuild=True` as the two ways out.  A sweep
-  that compiled on first use would hide the cost the default flip exists to
-  expose, and would make a second sweep's behaviour depend on whether a first
-  one ran.  `run()` already evaluates only what the last `build()` compiled and
-  never compiles; `batch_run` joins it.
+  has circuits but none compiled, naming `engine.build(primitives)` and
+  `rebuild=True` as the two ways out.  An empty `prim.compiled` alone is not
+  the test: a built primitive over a constant operator holds no circuit, so
+  `_batch_setup` derives the circuits (`prim.build()`, which builds nothing)
+  and raises only when there are some.  A sweep that compiled on first use
+  would hide the cost the default flip exists to expose, and would make a
+  second sweep's behaviour depend on whether a first one ran.  `run()` already
+  evaluates only what the last `build()` compiled and never compiles;
+  `batch_run` joins it.
 - **Stale stamp.** A primitive built under other engine settings is recompiled
   by `build(rebuild=False)`, as §14 states; `batch_run` adds no second rule.
   A test pins the decision.
@@ -64,7 +67,7 @@ flip rides it.
 **§14 edit, deliberate.** After "`build(rebuild=False)` reuses a primitive's
 circuits only under an equal stamp" the paragraph gains: "`batch_run` reuses
 them by default and raises `RuntimeError` naming `engine.build` for a primitive
-with no compiled circuits; `rebuild=True` compiles afresh."  The tier table
+that has circuits but none compiled; `rebuild=True` compiles afresh."  The tier table
 puts conventions edits in the structural tier; the reviewer decides at the
 green-light whether one sentence that restates a docstring needs the sit-down.
 
@@ -89,14 +92,18 @@ class Engine:
         """...
         rebuild: False (the default) reuses the circuits a prior ``build()``
             compiled under this engine's settings and raises ``RuntimeError``
-            for a primitive that has none; True compiles every primitive
-            afresh.
+            for a primitive that has circuits but none compiled; True compiles
+            every primitive afresh.
         """
 
     def _batch_setup(self, primitives, param_sets, n_shots, rebuild):
         self._pre_run()
         if not rebuild:
-            unbuilt = [type(p).__name__ for p in primitives if not p.compiled]
+            # A built primitive may hold no circuit (a constant operator), so
+            # unbuilt means derived circuits with none compiled.
+            unbuilt = [
+                type(p).__name__ for p in primitives if not p.compiled and p.build().sub_blocks
+            ]
             if unbuilt:
                 raise RuntimeError(
                     f"batch_run(rebuild=False) needs built primitives, but "
@@ -118,6 +125,7 @@ class Engine:
 | The reused sweep is right: `⟨Z⟩` of `Ry(θ)|0⟩` at θ ∈ {0, π/2, π} is cos θ | analytic | same |
 | `rebuild=True` after a build compiles afresh: new `CompiledCircuit` objects, the same analytic values | identity and the analytic value | same |
 | Built, engine settings changed, default sweep: recompiled (new objects), the analytic values hold | identity and the analytic value | same, beside `test_rebuild_false_under_other_settings_compiles_afresh` |
+| A built primitive over a constant operator (`compiled == []`) sweeps by default and returns the constant per set | the constant, 1.5 | same |
 | `MMQCELS` passes its suite unchanged | the suite's existing oracles | `tests/test_algorithms/test_composite/test_mmqcels.py` |
 | The tutorial snippet and tutorial 03 build before they sweep | docs lint (`tests/test_docs`); nightly `--nbmake` | `docs/source/tutorial.rst`, `examples/tutorial_03_engines.ipynb` |
 
@@ -125,22 +133,31 @@ class Engine:
 
 ### Phase 1 — Code and tests
 
-- [ ] `batch_run` default and the `_batch_setup` check
-- [ ] The five new tests in `test_compiled_circuits.py`
-- [ ] The twenty test call sites that sweep a primitive they never built build
-      it first (`rebuild=True` only where the test is about rebuilding)
-- [ ] `ruff`, `mypy`, `pytest` green
+- [x] `batch_run` default and the `_batch_setup` check
+- [x] The six new tests in `test_compiled_circuits.py`
+- [x] The test call sites that sweep a primitive they never built build it
+      first (`rebuild=True` only where the test is about rebuilding)
+- [x] `ruff`, `mypy`, `pytest` green
 
 ### Phase 2 — Docs and records
 
-- [ ] `tutorial.rst` and tutorial 03: `engine.build([...])` before `batch_run`,
+- [x] `tutorial.rst` and tutorial 03: `engine.build([...])` before `batch_run`,
       and the text "evaluates every set of a built primitive as `run` would"
-- [ ] §14 sentence
-- [ ] `CHANGELOG.md`: Changed, with the two migrations
-- [ ] `to_do.md`: the entry leaves
+- [x] §14 sentence
+- [x] `CHANGELOG.md`: Changed, with the two migrations
+- [x] `to_do.md`: the entry leaves
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+- **Unbuilt is "circuits but none compiled", not an empty `prim.compiled`.**
+  A built `PauliAveraging` over a constant operator compiles no circuit, so
+  the green-lit test would have refused a legitimately built primitive with
+  advice that cannot help.  `_batch_setup` derives the circuits first and
+  raises only when there are some; a sixth test pins the constant sweep, and
+  the §14 sentence, the docstring and the Design section say "has circuits
+  but none compiled".
+- **Fourteen test sites changed, not twenty.**  The grep behind the count
+  included `test_dos_qpe.py`, `test_qpe.py` and the second sweep in
+  `test_seed_decorrelation.py`, whose engine had already built the primitive
+  (`QPE.build()` and `DOSQPE.build()` call `engine.build`); they reuse under
+  the new default and are unchanged.

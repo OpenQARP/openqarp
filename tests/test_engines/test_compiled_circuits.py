@@ -10,7 +10,7 @@ import pytest
 import qarp
 import qarpx as qx
 from qarp import SamplingDistribution, _program
-from qarp.algorithms import PauliAveraging, Sampler
+from qarp.algorithms import PauliAveraging, Sampler, StateVector
 from qarp.blocks import CompositeBlock, ControlledBlock, SimpleBlock
 from qarp.devices import Device, get_nearest_neighbour_architecture
 from qarp.engines import QarpEngine
@@ -135,6 +135,77 @@ def test_rebuild_false_never_runs_a_routed_stream_without_its_layout():
     assert s.compiled[0].layout is None
 
 
+def _z_expval() -> StateVector:
+    ket = SimpleBlock(1)
+    ket.ry(0, qx.Param.symbol("a"))
+    return StateVector(operator=QubitOperator("Z0"), ket=ket)
+
+
+_ANGLES = (0.0, math.pi / 2, math.pi)
+
+
+def _sets() -> list[dict]:
+    return [{"a": a} for a in _ANGLES]
+
+
+def _assert_cos(results) -> None:
+    # <Z> of Ry(a)|0> is cos a.
+    for a, (got,) in zip(_ANGLES, results, strict=True):
+        assert got == pytest.approx(math.cos(a), abs=1e-12)
+
+
+def test_a_sweep_over_a_primitive_never_built_raises_naming_build():
+    s = _z_expval()
+    with pytest.raises(RuntimeError, match=r"engine\.build\(primitives\) first"):
+        QarpEngine().batch_run([s], _sets())
+    assert s.compiled == []
+
+
+def test_a_sweep_after_build_reuses_the_compiled_circuits(plan_calls):
+    s = _z_expval()
+    eng = QarpEngine()
+    eng.build([s])
+    before = list(s.compiled)
+    plan_calls.clear()
+    results = eng.batch_run([s], _sets())
+    assert [c is d for c, d in zip(s.compiled, before, strict=True)] == [True]
+    assert plan_calls == []
+    _assert_cos(results)
+
+
+def test_a_sweep_with_rebuild_compiles_afresh():
+    s = _z_expval()
+    eng = QarpEngine()
+    eng.build([s])
+    before = list(s.compiled)
+    results = eng.batch_run([s], _sets(), rebuild=True)
+    assert [c is d for c, d in zip(s.compiled, before, strict=True)] == [False]
+    _assert_cos(results)
+
+
+def test_a_sweep_under_other_engine_settings_compiles_afresh():
+    s = _z_expval()
+    QarpEngine().build([s])
+    before = list(s.compiled)
+    gates = QarpEngine(structured=False)
+    results = gates.batch_run([s], _sets())
+    assert [c is d for c, d in zip(s.compiled, before, strict=True)] == [False]
+    assert gates.kernels(s) == [["gates"]]
+    _assert_cos(results)
+
+
+def test_a_sweep_over_a_built_constant_primitive_returns_the_constant():
+    # A constant operator compiles no circuit, so an empty ``compiled`` is a
+    # built state here, not a missing build.
+    ket = SimpleBlock(1)
+    ket.x(0)
+    constant = PauliAveraging(ket=ket, operator=QubitOperator("", 1.5))
+    eng = QarpEngine(n_shots=qarp.EXACT)
+    eng.build([constant])
+    assert constant.compiled == []
+    assert [r[0] for r in eng.batch_run([constant], [{}, {}])] == pytest.approx([1.5, 1.5])
+
+
 def _ry_sampler(n_shots) -> Sampler:
     ket = SimpleBlock(2)
     ket.ry(0, qx.Param.symbol("a"))
@@ -149,6 +220,7 @@ def test_a_gate_stream_sweep_draws_what_sim_run_draws():
     shots, seed = 4000, 7
     s = _ry_sampler(shots)
     eng = QarpEngine(seed=seed)
+    eng.build([s])
     sets = [{"a": 0.0}, {"a": math.pi}, {"a": 1.1}]
     results = [r[0] for r in eng.batch_run([s], sets)]
     record = s.compiled[0]
@@ -167,7 +239,9 @@ def test_a_gate_stream_sweep_draws_what_sim_run_draws():
 
 def test_an_exact_gate_stream_sweep_is_the_born_distribution():
     s = _ry_sampler(qarp.EXACT)
-    results = QarpEngine().batch_run([s], [{"a": a} for a in (0.3, 2.0)])
+    eng = QarpEngine()
+    eng.build([s])
+    results = eng.batch_run([s], [{"a": a} for a in (0.3, 2.0)])
     for a, (got,) in zip((0.3, 2.0), results, strict=True):
         p11 = math.sin(a / 2) ** 2
         _assert_same_distribution(got, {(0, 0): 1 - p11, (1, 1): p11})
@@ -181,7 +255,9 @@ def test_a_mid_circuit_stream_runs_by_trajectory():
     ket.reset(0)
     ket.x(0)
     s = Sampler(ket=ket, n_shots=500)
-    results = QarpEngine(seed=3).batch_run([s], [{"a": a} for a in (0.0, 1.0, np.pi)])
+    eng = QarpEngine(seed=3)
+    eng.build([s])
+    results = eng.batch_run([s], [{"a": a} for a in (0.0, 1.0, np.pi)])
     assert s.compiled[0].mid_circuit
     assert [dict(r[0]) for r in results] == [{(1,): 1.0}] * 3
 

@@ -50,6 +50,11 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ### Changed
 
+- `Engine.batch_run` reuses the circuits a prior `build()` compiled, with
+  `rebuild=False` the default, and raises `RuntimeError` for a primitive that
+  has circuits but none compiled: build first, or pass `rebuild=True`, which
+  compiles every primitive afresh.  A sweep after `build()` on an unchanged
+  engine no longer recompiles.
 - `Sampler` and `PostSelection.apply` return a `SamplingDistribution`
   instead of a `dict`, and `SamplingDictionary` is a read-only `Mapping`
   alias.  `isinstance(result, dict)` and mutating a result no longer work;

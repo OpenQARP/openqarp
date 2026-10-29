@@ -563,6 +563,7 @@ def test_a_lowered_circuit_sweeps_from_an_initial_state():
     block = QPEBlock(ComputationalBasisStateBlock([1]), _phase_u(), 3, 1)
     sampler = Sampler(block, n_shots=64, initial_state=psi)
     engine = QarpEngine(seed=3)
+    engine.build([sampler])
     (per_set,) = engine.batch_run([sampler], [{}])
     assert not block.is_built
     assert dict(per_set[0]) == {(0, 0, 0, 0): 1.0}

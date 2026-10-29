@@ -35,10 +35,6 @@ the same window.
 Each changes a default, a width, a return value or a class shape, so it rides
 a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
 
-- **`Engine.batch_run` without an implicit rebuild.**  `rebuild=True` is the
-  default, so every sweep transpiles its primitives again.  Default
-  `rebuild=False`, reusing the prior `build()`, and a `RuntimeError` naming
-  `engine.build` when nothing is built.  Tutorial 03 builds first.
 - **Optimisation stages inside `compile_for_device`.**  The binding takes
   `commands, n_qubits, device, router` and routes the rebased circuit as is.
   Intended pipeline: rebase to the routable set, optimise, route, lower

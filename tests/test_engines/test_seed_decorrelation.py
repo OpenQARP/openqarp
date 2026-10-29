@@ -27,6 +27,7 @@ def test_identical_circuits_draw_distinct_tapes_in_one_run():
 def test_batch_run_decorrelates_across_circuits():
     s1, s2 = _hadamard_sampler(), _hadamard_sampler()
     eng = QarpEngine(seed=11)
+    eng.build([s1, s2])
     (per_set,) = eng.batch_run([s1, s2], [{}])
     d1, d2 = per_set
     assert dict(d1) != dict(d2)

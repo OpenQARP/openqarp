@@ -269,6 +269,7 @@ def test_batch_run_exact_readout_uses_the_programs():
     engine = QarpEngine(structured=True)
     sampler = Sampler(_bound_ket(theta), n_shots=qarp.EXACT)
     angles = [0.3, 1.2]
+    engine.build([sampler])
     swept = engine.batch_run([sampler], [{theta: a} for a in angles])
     assert "permutation" in engine.kernels(sampler)[0]
     for angle, results in zip(angles, swept, strict=True):

@@ -237,7 +237,7 @@ class Engine(ABC):
         primitives: list[Runnable],
         param_sets: Sequence[Mapping],
         n_shots: Optional[Union[int, Shots]] = None,
-        rebuild: bool = True,
+        rebuild: bool = False,
     ) -> list[list[PrimitiveResult]]:
         """Sweep one set of primitives over multiple parameter dicts.
 
@@ -247,8 +247,10 @@ class Engine(ABC):
             primitives:  Primitive instances to evaluate.
             param_sets:  One dict per evaluation point.
             n_shots:     Override engine-default shot count for this sweep.
-            rebuild:     If False, reuse a primitive's circuits when a prior
-                ``build()`` compiled them under this engine's settings.
+            rebuild:     False (the default) reuses the circuits a prior
+                ``build()`` compiled under this engine's settings and raises
+                ``RuntimeError`` for a primitive that has circuits but none
+                compiled; True compiles every primitive afresh.
 
         Returns:
             ``results_by_set[set_idx][prim_idx] = scalar``.
@@ -578,6 +580,19 @@ class Engine(ABC):
         """Shared ``batch_run`` head: sync, coerce, (re)build, and re-validate
         against a sweep-wide shot override.  Returns (override, param_sets)."""
         self._pre_run()
+        if not rebuild:
+            # A built primitive may hold no circuit (a constant operator), so
+            # unbuilt means derived circuits with none compiled.  A sweep never
+            # compiles on first use: the cost stays in build().
+            unbuilt = [
+                type(p).__name__ for p in primitives if not p.compiled and p.build().sub_blocks
+            ]
+            if unbuilt:
+                raise RuntimeError(
+                    "batch_run(rebuild=False) needs built primitives, but "
+                    f"{', '.join(unbuilt)} has no compiled circuits: call "
+                    "engine.build(primitives) first, or pass rebuild=True."
+                )
         override = n_shots
         param_sets = [_coerce_params(ps) for ps in param_sets]
         self.build(primitives, rebuild=rebuild)
