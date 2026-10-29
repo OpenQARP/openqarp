@@ -190,8 +190,8 @@ def test_symbols_mutation_is_sealed():
 # `optimize()` and the container-materialisation helper populate a block from
 # a command stream instead of running the build lifecycle.  The invariant is
 # stated over *any* built block, so these owe the registry too — skipping it
-# leaves `.symbols is None`, which makes `refresh_symbols` / `parameter_map`
-# raise "build the block first" on a block that is already built.
+# leaves the registry unpublished, so `.symbols`, `refresh_symbols` and
+# `parameter_map` raise "build it first" on a block that is already built.
 
 
 @pytest.mark.parametrize("name", sorted(set(FACTORIES) - UNWRAPPABLE))
@@ -208,12 +208,60 @@ def test_symbols_canonical_after_optimize(name):
 
 
 def test_optimized_block_still_renames():
-    """`.symbols is None` made this raise "build the block first" on a block
-    that `optimize()` had just marked built."""
+    """An unpublished registry made this raise "build the block first" on a
+    block that `optimize()` had just marked built."""
     block = FACTORIES["UCCBlock"]()
     block.build()
     renamed = block.optimize(level=0).refresh_symbols("_opt")
     assert [str(s) for s in renamed.symbols] == [f"{s}_opt" for s in block.symbols]
+
+
+# ── Before the registry exists ───────────────────────────────────────────
+# A block publishes its registry at build(), or declares it in the constructor.
+# Until then a read raises: `None` would let an unbuilt parametric block pass a
+# truthiness probe as concrete, and `()` would make it a parameter-free one.
+
+
+def test_symbols_before_build_raises_and_is_empty_after():
+    block = SimpleBlock(2)
+    with pytest.raises(RuntimeError, match="build it first"):
+        _ = block.symbols
+    with pytest.raises(RuntimeError, match="build it first"):
+        block.parameter_map([])
+    block.build()
+    assert block.symbols == ()
+    assert block.parameter_map([]) == {}
+
+
+def test_constructor_declared_symbols_read_before_build_in_canonical_order():
+    ucc = FACTORIES["UCCBlock"]()
+    declared = [s for s, _ in ucc.symbol_qop_pairs]
+    assert ucc.symbols == tuple(sorted(declared, key=str))
+    for name in ("UCCBlock", "HEABlock"):
+        block = FACTORIES[name]()
+        before = block.symbols
+        assert not block.is_built and len(before) > 0, name
+        block.build()
+        # The declaration is the stream's free-symbol set, in canonical order.
+        assert [str(s) for s in before] == sorted(block.free_symbols()), name
+
+
+def test_set_symbols_and_replace_symbols_queue_on_an_unbuilt_block():
+    theta = 0.3
+    block = SimpleBlock(1)
+    block.rz(0, qx.Param.symbol("t"))
+    bound = block.set_symbols({"t": theta})
+    renamed = block.replace_symbols({"t": "u"})
+    bound.build()
+    renamed.build()
+    assert bound.symbols == ()
+    assert renamed.symbols == (Symbol("u"),)
+    # Rz(θ) = diag(e^{-iθ/2}, e^{iθ/2}) (§2.3), the analytic unitary at the bound value.
+    np.testing.assert_allclose(
+        bound.unitary_matrix(),
+        np.diag([np.exp(-0.5j * theta), np.exp(0.5j * theta)]),
+        atol=1e-12,
+    )
 
 
 # ── Compound parameters: one param, two symbols ──────────────────────────

@@ -74,9 +74,9 @@ class SSVQE(CompositeAlgorithm):
 
         if not ansatz_block.symbols:
             raise ValueError(
-                "Cannot build SSVQE: ansatz_block has no parameters to optimize "
-                "(symbols is None or empty). Pass a parameterized ansatz "
-                "(e.g. UCCBlock), not a bare state-preparation block."
+                "Cannot build SSVQE: ansatz_block has no parameters to optimize. "
+                "Pass a parameterized ansatz (e.g. UCCBlock), not a bare "
+                "state-preparation block."
             )
         if initial_parameters is None:
             self.initial_parameters = np.random.uniform(0, 2 * np.pi, len(ansatz_block.symbols))
@@ -139,7 +139,6 @@ class SSVQE(CompositeAlgorithm):
 
     def _parameter_map(self, x) -> Dict[Symbol, float]:
         symbols = self.ansatz_block.symbols
-        assert symbols is not None  # checked non-empty at construction
         return dict(zip(symbols, x, strict=True))
 
     def objective(self, x):

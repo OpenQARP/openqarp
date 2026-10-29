@@ -1,22 +1,24 @@
 # Make `.symbols` a tuple on every block that has a registry, and an error before
 
-**Status:** Planned
+**Status:** In progress
 **Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-10-23
 **Tier:** Standard
 **Branch:** improvement/symbols-always-tuple
-**Green-lit:**
+**Green-lit:** 2026-10-28, plan blob 7594a513dd769952af9cfc8396accdbb5aa6a4d0
 **Scope:**
 - `qarp/blocks/_block.py`: the `symbols` property and setter, the reset in
   `_init_python_state`, and the probes in `parameter_map`, `_publish_symbols`,
   `set_symbols`, `replace_symbols`, `refresh_symbols`
 - `qarp/blocks/_composite_block.py` (the reset at construction),
-  `qarp/blocks/_primitives/ucc_block.py`, `trotter_block.py` (one probe each)
+  `qarp/blocks/_primitives/ucc_block.py` (one probe), `trotter_block.py` (two)
 - `qarp/algorithms/_composite/vqa.py`, `vff.py`, `ssvqe.py`, `pce.py`, `vqd.py`
-  (error text), `adapt_vqe.py`, `projected_vqe.py` (one `assert` each)
+  (error text and the `assert symbols is not None` narrowings), `adapt_vqe.py`,
+  `projected_vqe.py` (one `assert` each)
 - `tests/test_blocks/test_block.py`, `test_block_refactor.py`,
   `test_symbols_contract.py`, `tests/test_blocks/test_primitives/test_a_gate_block.py`,
-  `tests/test_engines/test_threading.py`
+  `tests/test_engines/test_threading.py`, `tests/test_stubs.py` (one snippet)
+- `docs/source/qarp_philosophy.rst`: one snippet drops its `or ()`
 - `docs/contracts/qarp_conventions.md`: one sentence in §17
 - `CHANGELOG.md`, `docs/contributions/to_do.md`
 
@@ -56,17 +58,19 @@ changes: canonical order, the setter as the sole write path, `()` for a built
 block with no free parameter (§17).
 
 - **Private probe.**  `_symbols is None` is the "unpublished" test inside the
-  block layer: `parameter_map`, `_publish_symbols`, `set_symbols` and
-  `replace_symbols` (both run on unbuilt blocks and today skip a `None`
-  registry), `refresh_symbols`, `UCCBlock.build_vanilla`,
-  `TrotterAnsatzBlock.build_vanilla`.  The setter keeps accepting `None`: the
-  reset in `_init_python_state` and `CompositeBlock.__init__` stays.
+  block layer: `_publish_symbols`, `set_symbols` and `replace_symbols` (both
+  run on unbuilt blocks and skip a `None` registry), `refresh_symbols`,
+  `UCCBlock.build_vanilla`, `TrotterAnsatzBlock.build_vanilla` and
+  `TrotterAnsatzBlock.replace_symbols`.  `parameter_map` keeps no probe of its
+  own: the property raises on the same condition.  The setter keeps accepting
+  `None`: the reset in `_init_python_state` and `CompositeBlock.__init__`
+  stays.
 - **A failed build publishes nothing**, so reading `symbols` afterwards raises
   rather than returning `None`; the incident test asserts the raise.
 - **Composites.**  The five "no parameters to optimize" probes read a ket they
   have just built, so `if not ket.symbols:` stays; the message drops "(symbols
-  is None or empty)".  The two `assert symbols is not None` narrowings in
-  `AdaptVQE` and `ProjectedVQE` go: mypy no longer needs them.
+  is None or empty)".  The seven `assert symbols is not None` narrowings in
+  the composites go: mypy no longer needs them.
 - **Alternatives, rejected.**  `()` before build collapses "unbuilt or failed"
   into "parameter-free", the incident.  Keeping `Optional` is the gap this plan
   closes.  Raising `AttributeError` would let `getattr(block, "symbols", None)`
@@ -126,21 +130,30 @@ def symbols(self, value: Optional[Iterable[Symbol]]) -> None:
 
 ### Phase 1 — Code and tests
 
-- [ ] `_block.py`: property, setter, the private probes
-- [ ] `ucc_block.py`, `trotter_block.py` probes; composite messages; the two
+- [x] `_block.py`: property, setter, the private probes
+- [x] `ucc_block.py`, `trotter_block.py` probes; composite messages; the
       `assert`s
-- [ ] The three new tests; the five existing `is None` / `is not None`
+- [x] The three new tests; the five existing `is None` / `is not None`
       assertions in `tests/` adapted
-- [ ] `ruff`, `mypy`, `pytest` green
+- [x] `ruff`, `mypy`, `pytest` green
 
 ### Phase 2 — Docs and records
 
-- [ ] §17 sentence
-- [ ] `CHANGELOG.md`: Changed, with the `is_built` migration
-- [ ] `to_do.md`: the `symbols` clause leaves the *typed for its users* entry
+- [x] §17 sentence
+- [x] `CHANGELOG.md`: Changed, with the `is_built` migration
+- [x] `to_do.md`: the `symbols` clause leaves the *typed for its users* entry
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+- **Seven dead narrowings, not two.**  `vqa.py`, `ssvqe.py`, `pce.py` (twice)
+  and `vqd.py` carry the same `assert symbols is not None` as `adapt_vqe.py`
+  and `projected_vqe.py`; all seven go.
+- **A second probe in `trotter_block.py`.**  `TrotterAnsatzBlock.replace_symbols`
+  truth-tests the copy's registry before renaming its pairs; it reads
+  `_symbols` with the other private probes.
+- **`parameter_map` reads the property.**  Its own `None` check raised on the
+  condition the property now raises on, so the duplicate went.
+- **One stub snippet builds first.**  `tests/test_stubs.py` ran
+  `SimpleBlock(1).h(0).symbols` to check that a builder returns its block;
+  the chain is `SimpleBlock(1).h(0).build().symbols` now, which checks the
+  same thing on a block that has a registry.

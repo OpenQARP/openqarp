@@ -263,7 +263,7 @@ _SNIPPETS = [
     ("VQE(op, CompositeBlock([raw]))", None, True),
     ("VQE(op, hb | hb)", None, True),
     # A builder returns the block it was called on.
-    ("SimpleBlock(1).h(0).symbols", None, True),
+    ("SimpleBlock(1).h(0).build().symbols", None, True),
     # A named list: an inline one is inferred from the parameter and passes a List too.
     ("VQD(op, kets, [])", None, True),
     ("TermwiseSWAPTest(kets, hb)", None, True),

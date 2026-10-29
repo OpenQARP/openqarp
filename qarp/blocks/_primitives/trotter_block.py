@@ -476,7 +476,7 @@ class TrotterAnsatzBlock(SimpleBlock):
         return self.set_symbols({self._time_symbol: time_value})
 
     def build_vanilla(self) -> None:
-        if self.symbols is None:
+        if self._symbols is None:
             raise ValueError("Symbols must be provided for TrotterAnsatzBlock")
 
         # Symbolic-time path: qx.Param is single-variable, so we cannot bake
@@ -613,7 +613,7 @@ class TrotterAnsatzBlock(SimpleBlock):
     def replace_symbols(self, new_parameters: Mapping[Symbol | str, Symbol | str]) -> Self:
         new_object = super().replace_symbols(new_parameters)
         renames = {_as_symbol(k): _as_symbol(v) for k, v in new_parameters.items()}
-        if new_object.symbols and hasattr(new_object, "symbol_qop_pairs"):
+        if new_object._symbols and hasattr(new_object, "symbol_qop_pairs"):
             new_object.symbol_qop_pairs = [
                 (renames.get(s, s), qop) for s, qop in new_object.symbol_qop_pairs
             ]

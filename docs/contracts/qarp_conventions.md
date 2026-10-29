@@ -930,7 +930,9 @@ publishes the identical order. Every positional parameter vector in the
 public API (`initial_parameters`, optimizer `res.x`) aligns to this order.
 The setter of the `symbols` property is the sole write path and
 canonicalizes on assignment; the tuple makes in-place corruption
-(`.append`, `.sort()`) raise immediately.
+(`.append`, `.sort()`) raise immediately.  Reading `symbols` on a block that
+has not published a registry raises `RuntimeError`; it is never `None`, and
+never `()` for a block that failed to build.
 
 Canonical order is sorted-by-string (not generation order) because it is
 derivable without shared state — independent processes must agree despite

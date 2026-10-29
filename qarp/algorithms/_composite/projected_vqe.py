@@ -371,7 +371,6 @@ class ProjectedVQE(VQE):
         # One extra evaluation at the optimum refreshes the primitive's cached
         # statevectors (the optimizer's last call is not necessarily at x_opt).
         symbols, primitive = self.ket.symbols, self.primitive
-        assert symbols is not None  # VQA checked them non-empty
         assert isinstance(primitive, _ProjectedStateVector)  # fixed at construction
         self.engine.run(dict(zip(symbols, np.asarray(parameters), strict=True)))
         projected = primitive.last_projected_statevector

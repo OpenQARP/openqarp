@@ -101,7 +101,8 @@ def test_composite_child_on_an_out_of_range_wire_raises_at_build_not_empty_symbo
     parent = CompositeBlock([child], n_qubits=2)
     with pytest.raises(IndexError, match=r"CX acts on qubit 3 .* only 2 entries"):
         parent.build()
-    assert parent.symbols is None  # never published as ()
+    with pytest.raises(RuntimeError, match="no symbols yet"):  # never published as ()
+        _ = parent.symbols
 
 
 def test_qaoa_block_sized_below_its_labels_raises_at_build():

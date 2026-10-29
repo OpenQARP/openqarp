@@ -56,9 +56,8 @@ class VFF(CompositeAlgorithm):
         self.n_qubits = self.ansatz_block.n_qubits
         if not self.ansatz_block.symbols:
             raise ValueError(
-                "Cannot build VFF: ansatz_block has no parameters to optimize "
-                "(symbols is None or empty). Pass a parameterized ansatz, "
-                "not a bare state-preparation block."
+                "Cannot build VFF: ansatz_block has no parameters to optimize. "
+                "Pass a parameterized ansatz, not a bare state-preparation block."
             )
         if self.n_qubits is None:
             raise RuntimeError("Number of qubits not defined")
