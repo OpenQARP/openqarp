@@ -143,6 +143,7 @@ something else, parked until they are picked up.
 | Plan | Theme |
 |---|---|
 | [`compiled_backend_stubs_plan.md`](compiled_backend_stubs_plan.md) | Ship type stubs for `qarpx` and type-check `qarp` against them |
+| [`ea_partitioning_objective_plan.md`](ea_partitioning_objective_plan.md) | Prepare connectivity per automatic cut and evaluate masks without repeated command reconstruction |
 | [`lazy_circuit_derivation_plan.md`](lazy_circuit_derivation_plan.md) | Primitives derive circuits lazily; declared structure planned inside `Engine.build`; `Target` below the engine layer |
 | [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` |

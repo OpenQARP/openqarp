@@ -1,7 +1,7 @@
 """Evolutionary-algorithm-based automatic circuit cut finder."""
 
 from itertools import permutations
-from typing import Optional
+from typing import Callable, Optional
 
 import networkx as nx
 import numpy as np
@@ -11,6 +11,38 @@ import qarpx as qx
 
 from ._auto_cut_finder import AutoCutFinder, CutterResult
 from ._reconstructer import Reconstructer
+
+
+def _prepare_objective_connectivity(
+    commands: list, variables: list, n_vars: int
+) -> Optional[tuple[tuple[tuple[int, int], ...], dict[tuple[int, int], int]]]:
+    """Prepare native pair multiplicities, or defer unsupported inputs to reconstruction."""
+    if type(commands) is not list or type(variables) is not list or type(n_vars) is not int:
+        return None
+    if len(variables) != n_vars:
+        return None
+    variable_keys = []
+    for pair in variables:
+        if type(pair) not in (tuple, list) or len(pair) != 2:
+            return None
+        if type(pair[0]) is not int or type(pair[1]) is not int:
+            return None
+        a, b = pair
+        variable_keys.append((a, b) if a <= b else (b, a))
+    pair_counts: dict[tuple[int, int], int] = {}
+    for cmd in commands:
+        if type(cmd) is not qx.Command:
+            return None
+        qubits = cmd.qubits
+        if len(qubits) > 2:
+            return None
+        if len(qubits) == 2:
+            if cmd.gate == qx.GateType.Measure:
+                return None
+            a, b = qubits
+            key = (a, b) if a <= b else (b, a)
+            pair_counts[key] = pair_counts.get(key, 0) + 1
+    return tuple(variable_keys), pair_counts
 
 
 def _register_unique_connectivities(commands: list) -> list:
@@ -112,6 +144,44 @@ class EAPartitioning(AutoCutFinder):
         self.reconstructer = Reconstructer(self.commands, n_qubits)
         self.n_cuts = 0
 
+    def _make_objective(self) -> Callable[[np.ndarray], float]:
+        """Prepare connectivity for one synchronous automatic search."""
+        prepared = _prepare_objective_connectivity(
+            self.reconstructer.commands, self.variables, self.n_vars
+        )
+
+        def objective(sol_float: np.ndarray) -> float:
+            sol = np.round(sol_float).astype(int)
+            if prepared is None:
+                variables_to_remove = [
+                    list(self.variables[i]) for i in range(self.n_vars) if sol[i] == 0
+                ]
+                new_cmds, n_cuts_performed = self.reconstructer.reconstruct_delete_gates(
+                    variables_to_remove
+                )
+                n_subcs, size_subcs, _ = _n_subcircuits(new_cmds, self.n_qubits)
+            else:
+                variable_keys, pair_counts = prepared
+                removed = {variable_keys[i] for i in range(self.n_vars) if sol[i] == 0}
+                n_cuts_performed = sum(pair_counts.get(key, 0) for key in removed)
+                graph = nx.Graph()
+                graph.add_nodes_from(range(self.n_qubits))
+                graph.add_edges_from(key for key in pair_counts if key not in removed)
+                size_subcs = [len(c) for c in nx.connected_components(graph)]
+                n_subcs = len(size_subcs)
+            valid, _ = find_valid_combination(size_subcs, self.max_size_subcircuits)
+            if valid:
+                return float(n_cuts_performed)
+            result = abs(self.n_subcircuits - n_subcs) * self.penalization_term
+            if result == 0.0:
+                diff_sizes = [
+                    max(0, size_subcs[i] - self.max_size_subcircuits[i]) for i in range(n_subcs)
+                ]
+                result = sum(diff_sizes) * self.penalization_term
+            return float(result)
+
+        return objective
+
     def cut(self, manual_setting: Optional[list] = None) -> CutterResult:
         """Partition the circuit, returning a CutterResult.
 
@@ -160,26 +230,7 @@ class EAPartitioning(AutoCutFinder):
                     "max_size_subcircuits must be set when manual_setting is not provided."
                 )
 
-            def f(sol_float):
-                sol = np.round(sol_float).astype(int)
-                variables_to_remove = [
-                    list(self.variables[i]) for i in range(self.n_vars) if sol[i] == 0
-                ]
-                new_cmds, n_cuts_performed = self.reconstructer.reconstruct_delete_gates(
-                    variables_to_remove
-                )
-                n_subcs, size_subcs, _ = _n_subcircuits(new_cmds, self.n_qubits)
-                valid, _ = find_valid_combination(size_subcs, self.max_size_subcircuits)
-                if valid:
-                    return float(n_cuts_performed)
-                result = abs(self.n_subcircuits - n_subcs) * self.penalization_term
-                if result == 0.0:
-                    diff_sizes = [
-                        max(0, size_subcs[i] - self.max_size_subcircuits[i]) for i in range(n_subcs)
-                    ]
-                    result = sum(diff_sizes) * self.penalization_term
-                return float(result)
-
+            f = self._make_objective()
             bounds = [(0, 1)] * self.n_vars
             result = differential_evolution(
                 f,
