@@ -76,13 +76,22 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
 - **`OqtopusEngine` checks the device basis at construction.**  The
   transport's `get_device` serves the topology JSON only and
   `device_from_oqtopus` assumes `x, sx, rz, cx`, so a device with another
-  basis fails the job at the gateway, after queuing.  The SDK's device
-  record carries `basis_gates` beside the topology.  Widen `get_device` to
-  carry it, have `LocalOqtopusTransport` serve the `sx_rz` set by default,
-  and raise `CapabilityError` when the four are not all present.  Wait for
-  the first QPU record (`oqtopus_plan.md`, Phase 3b) to confirm the field's
-  spelling.  Start at `qarp/engines/_oqtopus/_transport.py` and
-  `qarp/devices/_oqtopus.py`.
+  basis fails the job at the gateway, after queuing.  The cloud record's
+  `basis_gates` is maintained by hand and is not authoritative; the OQTOPUS
+  developers plan to have the gateway publish its supported gates.  Once it
+  does, widen `get_device` to carry that list, have `LocalOqtopusTransport`
+  serve the `sx_rz` set by default, and raise `CapabilityError` when the
+  four are not all present.  Start at `qarp/engines/_oqtopus/_transport.py`
+  and `qarp/devices/_oqtopus.py`.
+- **`OqtopusEngine` checks the device's shot limit before submitting.**
+  The gateway reports `max_shots` but nothing enforces it, and the cloud
+  device record does not carry it, so an `n_shots` above the device's limit
+  queues and may fail at runtime.  The OQTOPUS developers can add the field
+  and submit-time validation.  Once the record carries it, have
+  `get_device` pass it through and raise `CapabilityError` at `build` when a
+  primitive's resolved shots exceed it; no fixed cap, the limit varies by
+  device.  Start at `qarp/engines/_oqtopus/_transport.py` (`oqtopus_plan.md`
+  open item 8).
 - **Refuse readers of the per-shot register on a counts-only engine.**
   `CuttingPrimitive` and the QPD path read `cbit_history`, which
   `OqtopusEngine` leaves empty, and raise `RuntimeError` at `run`, after the

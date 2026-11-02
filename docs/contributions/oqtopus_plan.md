@@ -144,7 +144,9 @@ integration cannot land without them:
   verbatim; qarp neither reads nor validates its keys, they belong to the
   service.  Readout mitigation returns counts in the submitted register
   layout, so the wiring is unaffected.  `transpiler_info` is *not*
-  exposed: a server that routes would invalidate the wiring.
+  exposed: a server that routes would discard qarp's routing, and the jobs
+  of one sweep could land on different layouts.  Counts stay keyed by
+  classical bit either way, so the wiring itself would survive.
 - **Result contract.**  Counts → `qx.SamplingResult(n_qubits, counts, n_shots)`
   via the new constructor, keyed by logical qubit through the circuit's
   `_Wiring`; nothing is reindexed afterwards.  Bit order: OQTOPUS keys are
@@ -354,14 +356,21 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
    `id`, and `couplings` reference `id`.  Verified only against the Qulacs
    gateway source; a QPU gateway is UNVERIFIED.  Resolution: the QPU run of
    Phase 3 runs a one-CX-per-edge probe; until then the assumption is
-   documented on `device_from_oqtopus`.
+   documented on `device_from_oqtopus`.  The device-gateway Qubex plugin
+   binds QASM index `i` to the label of `qubits[i].physical_id`
+   (`physical_map` in `base_backend.py`), and the OQTOPUS developers confirm
+   that the gateway binds QASM indices to physical labels; the probe stays
+   as the hardware check.
 2. **`transpiler_lib: None` on a QPU device.**  Settled for the Qulacs
    gateway on the running local stack: the `sx_rz` Bell program runs
    verbatim, and the same program with a raw `h` ends `failed`
    (`Unsupported instruction: h` in the gateway log), which is the evidence
    that nothing is transpiled server-side.  `test_oqtopus_live.py` asserts
    both; a QPU gateway behaving differently fails those rows and is a
-   QPU-run finding, not a design change.
+   QPU-run finding, not a design change.  The OQTOPUS developers confirm
+   that under the default Core configuration `transpiler_lib: None` skips
+   Tranqu, and that the Qubex gateway compiles the program to pulses with
+   no further layout or routing pass.
 3. **Hardware credentials and device ids.**  None in hand.  The local stack
    from [oqtopus-cli](https://github.com/oqtopus-team/oqtopus-cli)
    (`cloud-local` + `backend` templates, default `qulacs` device, API on
@@ -391,18 +400,31 @@ Public surface (§15, `__all__`): `qarp.engines.OqtopusEngine`,
 5. **`oqtopus-client` floor.**  Every SDK surface the transport uses was
    verified against 1.3.0 only, hence the `>=1.3` pin; relax if an older
    release is shown to carry them.
-6. **Basis check at construction.**  Deferred to Phase 3b.  The transport
-   serves the topology JSON only; the SDK's device record carries
-   `basis_gates` beside it, unverified on a QPU record.  Until the first
-   hardware record shows the field, the engine assumes `x, sx, rz, cx` and a
-   device with another basis fails the job at the gateway (`RemoteJobError`).
-   Tracked in `to_do.md`.
+6. **Basis check at construction.**  Deferred until the gateway publishes
+   its gate set.  `basis_gates` in the cloud device record is maintained by
+   hand and is not authoritative; the OQTOPUS developers confirm this and
+   plan to have the gateway publish its supported gates.  The Qubex gateway
+   accepts `x, sx, rz, cx, measure, barrier, delay` within the device
+   topology, which `sx_rz` matches.  Until a published list exists the
+   engine assumes it, and a device with another basis fails the job at the
+   gateway (`RemoteJobError`).  Tracked in `to_do.md`.
 7. **Primitives that read the per-shot register.**  `CuttingPrimitive` and
    the QPD path read `cbit_history`, which a counts payload leaves empty, and
    raise `RuntimeError` at `run`, after the job.  Refusing them at `build` is
    an Engine-template change (`requires_cbit_history` /
    `provides_cbit_history`, the `requires_noiseless` pattern) and its own
    small PR.  Tracked in `to_do.md`.
+8. **Per-device shot limit.**  Not checked, and not available to check.
+   The gateway reports `max_shots` (10,000 in the Qubex and Qulacs
+   configurations) through `GetDeviceInfo` but does not enforce it; the
+   engine ignores it and the cloud applies only the general API limit of
+   10,000,000.  A request above the device's limit queues and may be refused
+   at runtime (`RemoteJobError`).  The OQTOPUS developers can expose and
+   enforce a per-device limit, which needs engine wiring, a cloud
+   device-record field and submit-time validation.  No fixed cap in qarp,
+   since the limit varies by device; once the record carries it,
+   `OqtopusEngine` refuses an `n_shots` above it before submitting.  Tracked
+   in `to_do.md`.
 
 ## Test plan
 

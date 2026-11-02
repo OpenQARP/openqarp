@@ -270,7 +270,9 @@ shot count is the total returned.  Without it, counts must sum to ``n_shots``
 exactly.  A real-valued payload is refused with ``ValueError`` at fetch rather
 than truncated.  A circuit whose symbols are
 not bound by ``run(params)`` is refused the same way before any job is
-submitted.  Two limits are not checked up front: the engine assumes the
+submitted.  Three limits are not checked up front: the engine assumes the
 ``x, sx, rz, cx`` basis, so a device publishing another one fails the job at
-the gateway; and a counts payload carries no per-shot register, so primitives
-that read ``cbit_history``, circuit cutting among them, fail at ``run``.
+the gateway; the service does not yet publish a device's shot limit, so an
+``n_shots`` above it is queued and may fail at runtime; and a counts payload
+carries no per-shot register, so primitives that read ``cbit_history``,
+circuit cutting among them, fail at ``run``.
