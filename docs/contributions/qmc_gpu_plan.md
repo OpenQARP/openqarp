@@ -48,7 +48,7 @@ implementation belongs to its own branch and PR.
 - `qarp/algorithms/__init__.py`
 - `qarp/algorithms/_composite/__init__.py`
 - `qarp/algorithms/_composite/montecarlo.py`
-- `qarp/algorithms/_composite/montecarlo_gpu.py`
+- `qarp/algorithms/_composite/aggregated_montecarlo.py`
 - `qarp/algorithms/_composite/_montecarlo_common.py`
 - `qarp/blocks/_primitives/trotter_block.py`
 - `qarp/engines/_engine.py`
@@ -69,8 +69,8 @@ implementation belongs to its own branch and PR.
 ## Why
 
 At the baseline, `MonteCarlo` evaluates semiclassical coefficients on the CPU
-and represents walkers individually. Add `MonteCarloGPU`, a separate composite
-with persistent batched exact GPU coefficients and device-resident signed
+and represents walkers individually. Add `AggregatedMonteCarlo`, a separate
+composite with persistent batched exact GPU coefficients and device-resident signed
 populations. Preserve existing CPU, quantum-sampling and multi-target behavior,
 while fitting the current lazy primitive lifecycle and typed native API.
 
@@ -101,8 +101,8 @@ the ownership paragraph immediately after "Engines own the pipeline", the
 build-gate paragraph after "CUDA-Q is build-gated", and the seed paragraph after
 "Per-circuit seeds are prime-stride derived".
 
-> **Stateful Monte Carlo ownership.** `MonteCarloGPU` obtains its simulator from
-> `CudaqEngine` through a resident-capability hook without a host
+> **Stateful Monte Carlo ownership.** `AggregatedMonteCarlo` obtains its
+> simulator from `CudaqEngine` through a resident-capability hook without a host
 > statevector-width cap. Batched transformed columns, CSR compaction and sector
 > gathering belong to the simulator layer. `qarpx::montecarlo` owns resident
 > walker evolution, transport and result records. The engine's simulator lends
@@ -125,7 +125,7 @@ build-gate paragraph after "CUDA-Q is build-gated", and the seed paragraph after
 > within one backend/configuration; CPU and GPU tapes need not match.
 > `seed=None` generates a fresh root seed recorded in diagnostics.
 
-**Ownership and native separation (§14).** `MonteCarloGPU` extends
+**Ownership and native separation (§14).** `AggregatedMonteCarlo` extends
 `CompositeAlgorithm`. `MonteCarlo` keeps its signature, defaults, validation and
 CPU/Quantum behavior. Extract only existing common H/U/reference-label checks
 into `_montecarlo_common.py`; additional GPU checks stay in the new class. Do
@@ -216,7 +216,7 @@ and `max_complete_row_imaginary`. Resident paths report zero executed
 measurement circuits and shots, separately from constructed circuit counts. The
 serialized `qarp.resources` schema is unchanged (§19).
 
-**Public Python integration (§§13, 17).** `MonteCarloGPU` accepts a finite
+**Public Python integration (§§13, 17).** `AggregatedMonteCarlo` accepts a finite
 Hermitian Pauli H, a bound unitary block, one computational-basis reference
 label and single-target exact evolution. H stays a Pauli operator throughout
 startup; never call CPU H densification or `generate_states_new_basis`. The GPU
@@ -280,14 +280,13 @@ execution, retained-state batching, a native cache-budget API and further
 reduction/RNG/metadata scaling redesign are separate contributions. This
 contribution does not add workload-specific behavior.
 
-**Gate 1 decisions and remaining discussion.** The revised proposal adopts P1–P7
-with the author's class name `MonteCarloGPU` in place of the review's
-`AggregatedMonteCarlo`. This naming choice needs reviewer confirmation: it names
-the required execution capability rather than the walker representation. The
-class docstring defines one signed integer population per basis label.
+**Gate 1 decisions and remaining discussion.** The revised proposal adopts P1–P7,
+including the proposed class name `AggregatedMonteCarlo`. The name describes
+walker aggregation: one signed integer population per basis label, as defined
+in the class docstring. Backend selection belongs to `CudaqEngine`.
 
 The structural discussion is still pending. Its agenda is the engine hook and
-simulator/evolution boundary, the new class/name and public API, the separate
+simulator/evolution boundary, the new class and public API, the separate
 measurement-layout contribution, and the declared memory guards. The reviewer
 accepted author-run GPU validation in P7; this is agreement on the validation
 arrangement, not the design green-light or Gate 2 approval. Scaling and native
@@ -328,13 +327,13 @@ remains unchanged.
 ## API sketch
 
 ```python
-from qarp.algorithms import MonteCarloGPU, ResidentEvolutionConfig
+from qarp.algorithms import AggregatedMonteCarlo, ResidentEvolutionConfig
 from qarp.engines import CudaqEngine
 from qarp.operators import ComputationalBasisSector
 
 sector = ComputationalBasisSector.spin_resolved(2, 1, 1)
 config = ResidentEvolutionConfig(sector=sector)
-mc = MonteCarloGPU(
+mc = AggregatedMonteCarlo(
     hamiltonian=H,
     approx_ground_state_energy=initial_energy,
     total_time=total_time,
@@ -350,7 +349,7 @@ mc = MonteCarloGPU(
 The new class's proposed constructor is:
 
 ```python
-class MonteCarloGPU(CompositeAlgorithm):
+class AggregatedMonteCarlo(CompositeAlgorithm):
     def __init__(
         self,
         hamiltonian: QubitOperator,
@@ -451,7 +450,7 @@ histories.
 
 ### Configuration and option matrix
 
-Every row below applies to `MonteCarloGPU` only, except the explicit CPU
+Every row below applies to `AggregatedMonteCarlo` only, except the explicit CPU
 regression row. Parameter names are constructor names above. Test all rows with
 CPU fakes in `test_montecarlo_aggregated.py`; keep CPU compatibility cases in
 `test_montecarlo_unit.py`. The new shared helper must introduce no CPU
@@ -507,7 +506,7 @@ Uniform proposals use a local NumPy Generator seeded by
 `SeedSequence([root_seed, trajectory, 0x50524F50])`. No process-wide RNG is
 reseeded. GPU/CPU seeded trajectories are not required to agree; same-GPU split
 advances use the same event keys.
-`MonteCarloGPU.seed` controls these streams. `CudaqEngine.seed` remains the
+`AggregatedMonteCarlo.seed` controls these streams. `CudaqEngine.seed` remains the
 seed for its circuit execution and does not override the walker root seed.
 
 A real coefficient on a Pauli string containing Y can produce an imaginary
@@ -618,8 +617,8 @@ and trajectory indices are uint64, initial_population is positive int64,
 shifts/energy/dt/damping/threshold are float64 (threshold integral and
 positive). `max_steps` and request attempts are positive uint64.
 
-`diagnostics` is a read-only `Mapping[str, object]` snapshot on `MonteCarloGPU`
-only. Top-level keys are provider, configuration_hash, root_seed,
+`diagnostics` is a read-only `Mapping[str, object]` snapshot on
+`AggregatedMonteCarlo` only. Top-level keys are provider, configuration_hash, root_seed,
 trajectory_index, proposal_seed_sequence, status, completed_steps,
 measurement_circuits_executed, actual_shots_executed, unique_templates,
 histories and trajectories; after build also python_coefficient_cache_entries,
@@ -848,7 +847,7 @@ ABI and regenerates the stub as required by §15.
 
 ### Phase 4 — Python MC integration
 
-- [ ] Add `MonteCarloGPU` and extract existing common checks without CPU
+- [ ] Add `AggregatedMonteCarlo` and extract existing common checks without CPU
   behavior changes; implement the GPU option matrix.
 - [ ] Add operator-sector certification and the public Trotter accessor.
 - [ ] Add bulk startup, bounded caches, seeds, estimators, diagnostics and

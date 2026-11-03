@@ -64,7 +64,7 @@ global phase, target/cbit mapping, live bra/ket defaults, explicit rebinding and
 suffice. Retain existing regression cases.
 
 This contribution adds no finite-shot Monte Carlo mode and does not change
-`MonteCarlo` or `MonteCarloGPU`. Any later integration beyond the existing
+`MonteCarlo` or `AggregatedMonteCarlo`. Any later integration beyond the existing
 accounting interface needs an explicit scope decision. Tapering and
 selected-pair work are outside this contribution.
 
