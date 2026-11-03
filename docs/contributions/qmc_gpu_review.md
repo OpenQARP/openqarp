@@ -4,7 +4,10 @@ Gate 1 review of `qmc_gpu_plan.md` at `9d8b8de` (plan blob `f64d3256`), checked
 against the code at `develop` `6c632b9`. No implementation exists yet, so this
 checks the plan's claims against the code and its design against what it will
 meet.
-Findings only; the green-light is the reviewer's call.
+Findings only; the green-light is the reviewer's call. The revision at
+`e9ee9d0` is reviewed against these findings in the second pass, and the
+Architecture section after it records the reviewer's positions on the design
+for the sit-down.
 
 ## Summary
 
@@ -481,3 +484,315 @@ in, or derive one from the other.
    edit and the phase split (S3).
 3. S5 and S6: how GPU-only numerics are evidenced and how the 80 % patch gate
    is met on a CPU-only CI. These decide what "tests pass" means at Gate 2.
+
+## Second pass at `e9ee9d0`
+
+Plan blob `d910c0c`, 729 lines, checked against `develop` `6c632b9` and the
+findings above. Three independent passes; every item only one pass raised was
+re-verified against the tree. Item numbers below refer to the sections above.
+
+### Disposition
+
+| Item | Disposition | Plan lines | Note |
+|---|---|---|---|
+| B1 | addressed | 79-81, 135-142, 148-151, 161-163 | Every "retain" is now "add"; CPU zero reference stated unchanged. Residual in R3. |
+| B2 | addressed | 448-601 | Dataclasses, record table, factory types, shapes, dtypes, `measurement_plan`, block keywords, diagnostics keys. |
+| B3 | partial | 367-426 | Matrix and selector semantics given. Rows 398-400 change CPU validation, R4. |
+| B4 | addressed | 605-634 | Every Location is a file; rows for certification, matrix, sector API, resume, orientation, diagnostics, exceptions, threshold order, seeds. |
+| B5 | partial | PR #22 | Body filled; author boxes unticked, one stale sentence, reviewer mismatch, R2. |
+| B6 | addressed | 83-102, 697 | Three §14 paragraphs. Placement beside existing bullets unstated, F5. |
+| S1 | addressed | 3-9 | Header fields and order match the template. |
+| S2 | not addressed | 239-241 | Decisions numbered, sit-down not held, R1. |
+| S3 | addressed | 687-725 | Six increments, binding surface in the first. |
+| S4 | open | 198-205, 252-255 | Kept by the author; reviewer decision D1. |
+| S5 | addressed | 247-251, 667-679 | Author-run profiles, PR attachment, required skip blocks Gate 2; D2. |
+| S6 | addressed | 652-658 | Fakes drive every new Python branch; `.cu` outside the gates. |
+| S7 | addressed | 636-650 | Literal X tape and binomial numbers check; one arithmetic error, F1. |
+| S8 | addressed | 98-102, 422-426 | Root seed, proposal stream, `seed=None`. Gap in F4. |
+| S9 | addressed | 432-437, 401 | Certificate defined; `_sequences_grouped` exists (`trotter_block.py:552`). Accessor is private; P5. |
+| S10 | addressed | 428-432 | Complex Hermitian H on the provider; real H on transport. |
+| S11 | addressed | 493-496, 626 | Name kept, orientation defined and tested. |
+| S12 | addressed | 589-601 | Each class mapped; no-progress is `RuntimeError`. |
+| S13 | partial | 406-414 | Budgets defined; no bound on the complete-row path, F3. |
+| S14 | addressed | 173-175, 632 | Densification and `generate_states_new_basis` bypassed and tested. |
+| S15 | addressed | 261-278 | Variables typed with discovery order; docs pages in Scope; umbrella header unchanged. Leftover at 228, F11. |
+| S16 | partial | 68-72 | Memory formula; no baseline or target, F12. |
+| S17 | addressed | 439-446, 633 | Cutoff order stated and tested. |
+| N1 | addressed | 58, 64, 208 | Stale words gone. |
+| N2 | addressed | 4 | Author line only. |
+| N3 | partial | 192, 413-414, 436, 599-601 | DSATUR, bound, canonical, no-progress defined. Leftovers in nits. |
+| N4 | addressed | 681-683 | `QARP_RUN_CUDAQ_GPU_TESTS=1`, new in the tree. |
+| N5 | partial | 402-403, 480 | Bound given twice, 63 and 64, F2. |
+| N6 | addressed | 355-357 | |
+| N7 | addressed | 729 | Template placeholder restored. |
+| N8 | addressed | 277-278, 48 | |
+| N9 | addressed | 271 | Conflicts with the install page, F8. |
+
+### Still blocking
+
+- **R1. The sit-down has not been held** (plan:240-241; PR body "Sit-down
+  held: No"). The tier table requires it before a Structural plan is
+  green-lit. The four decisions at plan:243-259 are the agenda.
+- **R2. PR #22 body.** All five author Gate 1 boxes are unticked. "The amended
+  plan is prepared locally and awaits the author's commit/push" is stale,
+  `e9ee9d0` is on the PR. The "Intended reviewer" line names one person and the
+  review request goes to another. The Summary says "Reuse the completed
+  implementation" (R3).
+- **R3. The Transfer strategy relies on code the reviewer cannot see.**
+  plan:76-81 "Reuse the completed implementation and regression cases by
+  exporting selected file contents"; plan:204 and 255 justify the grouping
+  scope as "the requested complete migration scope"; leftover "preserve",
+  "remain" and "adapt" wording at plan:145-146, 163-164, 181 and 208 refers
+  to the same source. A conformance diff measures against this plan, so the
+  paragraph adds nothing checkable; plan:79-81 already says all GPU behaviour
+  is new. Drop the paragraph, reword the listed lines as requirements, and
+  state that every transferred test asserts one of the plan's named oracles
+  (§18), not a recorded output.
+- **R4. Option-matrix rows change CPU validation.** plan:398-400 reject bool
+  or nonpositive trajectory, population and threshold values, nonfinite time,
+  damping and shift, and `total_time < time_step`, with no backend qualifier
+  and with their tests in `test_montecarlo_unit.py` (plan:379). The CPU
+  path validates none of these today (`_validate_inputs`,
+  `montecarlo.py:234-303`, checks mode, labels, H and qDRIFT only). That
+  contradicts plan:60 and row 385 "Existing behavior". Mark the rows GPU-only
+  or declare the CPU change.
+
+### Reviewer decisions
+
+The plan leaves these open by design. The Architecture section gives the
+reviewer's position on each: D1 is P4, D2 is P7, D3 is P1 to P3. The budget
+deferral (plan decision 4) stands.
+
+- **D1. Grouping, DSATUR and interferometric scope** (S4). plan:202-203
+  concedes the GPU path needs none of it; the stated reason for keeping it is
+  "requested" (plan:204, 255).
+- **D2. Author-only GPU evidence** (S5, plan:247-251, 667-679).
+- **D3. The §14 text as written** (decision 1).
+
+### Fix before the green-light
+
+- **F1.** plan:640-641 "Request weight 2 with one walker and q=1 ... numerator
+  -4": with the tape's `H=X` and `dt=1`, two spawned walkers of sign -1 give
+  numerator -2; -4 needs `|Hij|=2`. State H, dt and the weight formula.
+- **F2.** Register width `1 <= n_qubits < 63` (plan:402) against "requires
+  qubits below 64" (plan:480); `initial_population` is int64 (plan:527) while
+  "integer scalar metadata is ... uint64" (plan:504). One bound each.
+- **F3.** `cache_max_bytes` lives only on `ResidentEvolutionConfig`
+  (plan:472). The complete-row path (`resident_evolution=None`, plan:319) also
+  gets "a bounded scalar Hermitian cache" (plan:148) with no stated bound. Say
+  whether this bounds the existing `_hamiltonian_cache` (`montecarlo.py:223`)
+  or is a second cache.
+- **F4.** The §14 seed paragraph (plan:98-102) covers Philox streams only;
+  proposal destinations come from a host NumPy Generator (plan:423-424). Say
+  whether the convention covers that stream.
+- **F5.** plan:110-112 repeats "Deliberately extend conventions §14 ...;
+  retain its ... seed ... rules" after the full text at 83-102, which adds a
+  seed rule. Drop it, and say which existing §14 bullet each paragraph follows.
+- **F6.** plan:668-670 "Reuse the `_requires_gpu` skip-marker pattern in
+  `tests/test_engines/test_cudaq_engine.py`, extended to require MC
+  availability": copied into the new files, or edited? The file is not in
+  Scope.
+- **F7.** Rows 611 and 613 run the kernel yet sit in
+  `test_montecarlo_aggregated.py` with the fake-driven rows. List which rows
+  are GPU-required and skipped in CI; otherwise "a required skip blocks Gate 2"
+  (plan:249, 671) has no list.
+- **F8.** plan:270-271 documents `QARP_CUDAQ_MLIR_LIB_DIR` "for SDK mode" while
+  `installation.rst:297` says the SDK "cannot be used". The CMake branch exists
+  (`CMakeLists.txt:256-276`); the install page edit must reconcile the two.
+- **F9.** plan:12-13 names `qmc_gpu_review.md` in the Scope prose; it is on the
+  branch but not in the list. List it or exclude it explicitly.
+- **F10.** "walker snapshots" (plan:178, 389) names no argument
+  (`save_walker_history`, `montecarlo.py:74`); at plan:163 the same word means
+  per-trajectory failure snapshots.
+- **F11.** plan:228 "discover them from the executor's own environment"
+  survives beside the explicit order at 263-266; plan:229 is not actionable.
+- **F12.** Why (plan:68-72) still has no CPU baseline size or time and no
+  target.
+- **F13.** plan:398-399 use "trajectories, population, threshold, damping,
+  shift" where the arguments are `num_trajectories`, `initial_walker_count`,
+  `population_threshold`, `shift_damping`; each row is a test, so name them.
+- **F14.** No test row for "Evolution-only contexts allocate neither dense
+  statevectors nor a cuStateVec handle" (plan:108-109) or for CUDA-free public
+  headers (plan:109-110).
+- **F15.** plan:264-265 searches the wheel's `cuquantum/include`; the current
+  CMake uses `cuquantum/lib` only (`CMakeLists.txt:233-235`) and plan:268-270
+  admits runtime-only wheels ship no headers. Name the header source.
+
+### Nits
+
+- Process prose: the dated heading at plan:239, "reviewer agreement remains
+  pending" at 205, 240-241 and 677-679, "After the structural discussion and
+  recorded Gate 1 green-light" at 689-690, and 64-66, 81. The header and the
+  PR carry the status.
+- Reflow: forty prose lines exceed 80 columns (173, 175, 192, 208, 210, 324,
+  422, 461, 571 and every phase bullet); double blank line at 104.
+- N3 leftovers: "certified fixed-charge sector gathering" (118), "transport
+  records" (128), "request identity" (130), "compensated ratio-of-sums"
+  (161-162), "live bra/ket defaults", "copied-block ownership" (185-187),
+  "container gate guards" (190), "Leave target inference and derivation to
+  the public base lifecycle" (182-183).
+- plan:192-193 "deterministic ... unlike the existing greedy `FullyCommuting`"
+  reads as if `FullyCommuting` were nondeterministic; it is deterministic
+  through `canonical_term_order` (`_grouping.py:99`).
+- plan:435 reads the private `TrotterAnsatzBlock._sequences_grouped()` across
+  packages; `trotter_block.py` is outside Scope, so row 625 should name a case
+  that fails if the accessor's grouping changes.
+- `configuration_hash` (plan:545) has no algorithm; "orchestration counters may
+  be stored as floats" (plan:557) loosens the integer contract.
+- `ResidentEvolutionConfig` requires sector dimension > 1 (plan:482);
+  `semiclassical_sector` alone (plan:394) states no bound.
+
+### What checks out in the revision
+
+Scope: 29 existing paths and 9 new, all resolve; header order matches the
+template; index row at `README.md:148`; em-dashes only in phase headings and
+the Deviations placeholder; the only name is on the Author line; no company or
+platform names. Claims verified: `qx.Command` (`qarpx.pyi:561`);
+`CMAKE_CXX_STANDARD 20` (`CMakeLists.txt:4`); the composite base stores
+`engine`; `_requires_gpu` at `test_cudaq_engine.py:54-57` and the opt-in
+variable appears nowhere else; abab layout (`onv.py:3-5`); `CudaqConfig`
+defaults StateVector/FP64 with an empty target (`cudaq_simulator.h:43-48`);
+`capability_error` mapping (`bindings.cpp:270-289`); `test_montecarlo.py`,
+`test_abi_stamp.py` and `test_conventions_exports.py` exist and need no edit;
+`SeedSequence(seed).generate_state(1, dtype=np.uint64)` is valid API; two
+complex128 batches are `32 * batch * 2**n` bytes; the X tape gives populations
+[16, 32], reference [8, 16], numerators [-8, -16], energies [-1, -1];
+Binomial(512, 0.2) has mean 102.4 and variance 81.92, the 4096-trajectory mean
+bound is 16 standard errors (Chebyshev 1/256), the 60 % variance bound is about
+27 standard deviations of the sample variance, so the combined false-rejection
+bound is below 1 % as stated.
+
+### Gate call
+
+Not ready. R1 to R3 first, then the positions P1 to P7 below (P1 also
+resolves R4), which change the API sketch, the option matrix, the §14 text,
+Scope, the test plan and the phase list.
+The F items are fixes the author can make in the same revision.
+
+## Architecture
+
+The design is assessed against the three structures on `develop` it must
+join: the composite base and its one documented engine bypass
+(`composite_algorithm.py:111-131`, `_engine.py:423-430`), the CUDA-Q
+simulator and its GPU extra (`cudaq_simulator.h:106-121`), and the operator
+package that already encodes the particle-number sector (`onv.py:3-7`,
+`_postselection.py:99`, `algorithms/_utils.py:46-49`,
+`_composite/projected_vqe.py:94`).
+
+Verdict: the design fits OpenQARP with changes. It is not a detached piece
+of code. It attaches at the right level (a composite algorithm over a native
+context, typed records, LSB order, `CapabilityError` for missing
+capabilities, independent oracles). Two of its choices run against structure
+`develop` already has, and three more place code where nothing else can reach
+it. Each point below argues from the plan and `develop` only.
+
+### What fits
+
+- The resident path is a composite algorithm, not a primitive. A primitive
+  returns circuits for an engine to run (§14); this path runs none
+  (plan:168-169), so `CompositeAlgorithm` is the right base.
+- Opaque native types with CUDA-free public headers (plan:87, 109-110), CPU
+  stubs, an `available()` probe and a separate build gate (plan:91-95) follow
+  the CUDA-Q pattern already in the tree (`cudaq_simulator.h:61-63`,
+  `cudaq_simulator.cpp:366-395`).
+- Typed records, frozen configuration, event-keyed seeds and the exception
+  table (plan:589-601) match §14 and §19.
+- The test plan names independent oracles for every numerical row
+  (plan:605-634).
+
+### A1. A second CUDA-Q selector next to the engine route
+
+`develop` has one route for an algorithm to reach a simulator without
+running primitives: the composite base asks
+`engine._host_statevector_simulator(n)`, its docstring says every bypass
+goes "through here, never through a fresh `qx.QarpSimulator()`"
+(`composite_algorithm.py:115-121`), and `CudaqEngine` implements the hook
+naming "MonteCarlo's exact reference" as a user (`_cudaq_engine.py:206-211`).
+The plan adds `semiclassical_backend` plus a raw `qx.CudaqConfig`
+(plan:305-306), builds its own simulator, stores the supplied engine and
+never calls it (plan:369-376), needs sentinels to prove the non-call
+(plan:373-374), and writes a §14 sentence to allow it: "does not execute
+through an `Engine`" (plan:95-96). That is a convention exception written to
+fit the design rather than a design that fits the convention.
+
+### A2. One class, two state machines
+
+Of the twelve new keywords (plan:305-316), only `semiclassical_backend` and
+`track_transition_circuits` (plan:387) mean anything on the CPU path. The
+other ten exist for the GPU path, and row 386 rejects their nondefault values
+on CPU. The option matrix (plan:367-420)
+exists because two algorithms share one signature. The CPU class takes the
+patch-coverage exposure of GPU-only branches (S6). The plan's own selector
+names the algorithmic difference: `walker_evolution` is `"individual"` or
+`"aggregated"` (plan:309), and the Why says the same (plan:58-60). Two
+algorithms with different state, different inputs and different failure
+modes are two classes.
+
+### A3. A generic column evaluator filed under Monte Carlo
+
+Batched `U† H U` columns, CSR compaction and sector gathering (plan:114-118)
+are a simulator-layer capability: nothing in them depends on walkers, and the
+simulator hook they would sit beside already serves ADAPT pool scans and QSE
+(`_cudaq_engine.py:207-208`). The plan files them under `qarpx::montecarlo`
+(plan:85-86, 105) and binds them as `MonteCarloRowProvider` (plan:336), so
+nothing else can call them. "Upload gates ... once" (plan:116) does not say
+where the gate matrices come from, while the tree has canonical gate
+unitaries in `program.h:106` and
+`qarp_simulator.h:76`, and a Pauli-sum observable format already defined for
+the GPU extra `batch_expectation` (`cudaq_simulator.h:112-121`).
+
+### A4. Native host logic the CPU build cannot test
+
+Scope lists one `.cpp` among the Monte Carlo sources, `contexts.cpp`, beside
+`evolution.cu` and `rows.cu` (plan:23-25), and a build without CUDA can
+compile only the `.cpp`. Disabled builds expose host records only
+(plan:93-95). The test table sends payload validation,
+replay identity, stale rejection and transactional guards to
+`test_montecarlo_contexts.cpp` (plan:613, 617, 630) without saying which
+build runs them. If that host logic lives in a `.cu`, those rows run only on
+a GPU build, and CPU CI covers the host arithmetic through Python fakes alone
+(plan:652-656).
+
+### A5. Grouping, DSATUR and interferometric work in the same PR
+
+S4 and D1. The plan concedes the GPU path needs none of it (plan:202-203,
+254) and keeps it because it was requested (plan:204, 255). Circuit
+accounting is on by default (plan:316) on a path that executes no circuits
+(plan:168-169).
+
+### A6. The sector type in the algorithm package
+
+The plan exports `ComputationalBasisSector` from `qarp.algorithms`
+(plan:283). Its relatives live elsewhere: the abab layout and
+`is_alpha`/`is_beta` in `qarp.operators.onv` (`onv.py:3-7, 16-22`),
+`PostSelection.hamming_weight` (`_postselection.py:99`),
+`generate_states_new_basis(hamming_weight=...)`
+(`algorithms/_utils.py:46-49`) and `particle_number_matrix`
+(`_composite/projected_vqe.py:94`).
+Certification restricts U to one block type (plan:401, 434-437, S9) rather
+than asking the block (§13 declares block properties through overridable
+methods, `qarp_conventions.md:555-575`). §15 allows one public path per
+symbol (`qarp_conventions.md:787-795`); moving the export after release adds
+a second spelling to deprecate.
+
+### Reviewer positions
+
+The reviewer's positions for the sit-down (R1). Each changes the plan as
+stated.
+
+| | Position | Plan changes |
+|---|---|---|
+| P1 | The resident path is its own `CompositeAlgorithm` subclass. `MonteCarlo` is untouched. Shared H, U and reference-walker validation move to a helper both classes call; the helper adds no check to the CPU path (R4). The estimator options stay on the new class. Proposed name `AggregatedMonteCarlo`, after the plan's own `walker_evolution="aggregated"` (plan:309) and its Why (plan:59-60): algorithm classes on `develop` name the method (`MonteCarlo`, `QSE`, `QITE`, `ProjectedVQE`), engines name the backend (`CudaqEngine`), and "resident" names where the state lives, not what the method does. The class docstring defines aggregated as one signed integer population per basis label, so it is not read as aggregation across trajectories. | Why (plan:58-62), §14 text "driven by `MonteCarlo`" (plan:86), API sketch (plan:283-320, 302, 319-322), option matrix (plan:367-420) reduced to the new class's own arguments, diagnostics (plan:544-545), test Locations (plan:379, 620, 623), Scope, Phase 4 |
+| P2 | The simulator comes from `engine=CudaqEngine(...)` through a hook beside `_host_statevector_simulator` without the host-width cap. `semiclassical_backend` and `cudaq_config` are dropped. `engine=None` (which the base turns into `QarpEngine`, `composite_algorithm.py:40-41`) and any engine other than `CudaqEngine` raise `CapabilityError`; an engine whose simulator config is not StateVector, FP64 and default target raises `CapabilityError` (row 392). The lease is taken on the engine's simulator and serializes against its runs. | API sketch, matrix rows 385-392, prose plan:369-376, native config paragraph (plan:416-420), ownership (plan:105-108: the engine's simulator lends), decision 1 (plan:243-246), test rows 620 and 632 (sentinels allow the hook call, still forbid execution), §14 text (plan:85-96, 110-112): replace the sentence at plan:95-96 with "Native MC takes its simulator from `CudaqEngine` and runs no primitives on that path; any other engine raises `CapabilityError`" |
+| P3 | Batched columns, CSR compaction and sector gathering become a simulator-layer API on the canonical gate unitaries, with the `batch_expectation` observable format. `qarpx::montecarlo` keeps the evolution context, transport and result records only. | Scope (file list), Design (plan:105-118), §14 ownership paragraph (plan:85-89), flat exports and factory (plan:331-341, 485), test rows 609, 610, 616, 626 relocated to a simulator test, Phase 2 (plan:703) split; supersedes the name kept under S11 |
+| P4 | Grouping, DSATUR, general commuting bases, `basis_change`, `prepared_state`, layout caching and `measurement_plan` move to their own Standard plan and PR. Circuit accounting on the resident path is opt-in and counts through `circuits()`. | Scope (plan:42-43, 45, 49-51), API sketch (plan:284, 324-329; plan:316 default `False`), Design (plan:181-205), types (plan:531-542), decision 3 (plan:252-255), Phase 5 reduced to its documentation bullet (plan:719), test rows plan:618, 619, 629 removed |
+| P5 | `ComputationalBasisSector` and the charge certificate go in `qarp.operators`, with `spin_resolved` built on `onv`. The Trotter generator groups are read through a public, tested accessor on the block. | Scope (add `trotter_block.py`, its test and an operators test file for the sector), export path (plan:283), certificate paragraph (plan:432-437: drop "no new public accessor is needed", name the accessor), matrix row 401, test rows plan:624-625 relocated |
+| P6 | Validation, request identity, replay and capacity accounting live in a host `.cpp` built in every configuration. `evolution.cu` is split by concern (RNG, complete-row kernels, transport kernels). The Monte Carlo CPU stubs raise `CapabilityError` (plan:94-95, 589-590) while `CudaqSimulator`'s CPU stubs raise `RuntimeError` (`cudaq_simulator.cpp:65-70`). Either the CUDA-Q stubs, already in Scope (plan:26), change to `capability_error` with a test row, or the plan states that `CudaqEngine`'s pre-check (`_cudaq_engine.py:97-105`) is the Python contract and leaves them alone. The bindings release the GIL around advances, as the `QarpSimulator` bindings do around `run` and `statevector` (`bindings.cpp:1362`, `1383`). | Scope file list, test rows naming the CPU-run native tests, exception table (plan:360-365, 589-601), bindings paragraph (plan:331-341) |
+| P7 | The author's arrangement is accepted as written (plan:247-251, 667-679): both profiles are run by the author, the record is attached to the PR for the head sha marked ready for Gate 2, and any required GPU case reported as skipped blocks Gate 2. CI stays CPU-only. | Replace "reviewer acceptance remains pending at Gate 1" (plan:677-678) and the pending clauses at plan:205 and 240-241 with the acceptance |
+
+With P1 to P3 the user-facing call becomes
+`AggregatedMonteCarlo(hamiltonian=H, unitary_block=U, ...,
+engine=CudaqEngine(), resident_evolution=ResidentEvolutionConfig(sector=sector,
+...))`, the CPU `MonteCarlo` signature does not change, and the §14 edit keeps
+its build-gate and seed paragraphs while its ownership paragraph covers the
+evolution context only.
