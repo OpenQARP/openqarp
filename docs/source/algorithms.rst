@@ -562,12 +562,15 @@ The estimator uses median-of-means; each :code:`expval` returns a
 :code:`ShadowEstimate` carrying the value and :code:`error`, the accuracy
 half-width :math:`\varepsilon = \sqrt{34\,\hat{V}/N}` of Huang–Kueng–Preskill
 Theorem 1 — the :math:`\varepsilon` for which
-:math:`\Pr[\,|\text{value} - \text{true}| \ge \varepsilon\,] \le \delta`, where
-:code:`delta` is the failure probability its batch count achieves, :math:`\hat{V}` the empirical
-single-setting variance and :math:`N` the per-batch size.  It is a worst-case
-bound carrying the paper's own deliberately loose constant 34, so it typically
-sits several times above the scatter you observe between repeats: read it as a
-guarantee, not as a standard error.  Only the random-Pauli ensemble ships today;
+:math:`\Pr[\,|\text{value} - \text{true}| > \varepsilon\,] \le \delta`, where
+:code:`delta` is HKP's bound :math:`\min(1, 2e^{-K/2})` at the batch count :math:`K` used,
+:math:`\hat{V}` the empirical single-setting variance and :math:`N` the per-batch
+size.  It is a worst-case bound carrying the paper's own deliberately loose
+constant 34, so it typically sits several times above the scatter you observe
+between repeats: read it as a worst-case bar, not as a standard error.  The
+guarantee holds at the true variance; :math:`\hat{V}` stands in for it, so an
+observable driven by rare outcomes, whose :math:`\hat{V}` is often 0, can carry a
+bar far too narrow.  Only the random-Pauli ensemble ships today;
 matchgate and global-Clifford ensembles are planned as additional kernels.
 
 Composite Algorithms

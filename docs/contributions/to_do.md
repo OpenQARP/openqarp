@@ -69,6 +69,17 @@ a `0.x` minor with whatever else breaks then.
 
 ## Additive, no window needed
 
+- **Shadow error bar from a certified variance.**  `ShadowEstimate.error`
+  puts the empirical `V_hat` where HKP Theorem 1 needs the true variance.
+  On an observable driven by rare outcomes `V_hat` is usually 0, and so is
+  the bar: `X = 100` with probability `1e-4` over 200 settings misses at
+  `K = 8` 98 % of the time against a reported `delta` of 0.037.  Bound the
+  variance from above instead, by the shadow norm (state-independent) or a
+  confidence bound on `V_hat`.  The same change can report the tighter
+  failure bound the half-width already earns: Chebyshev gives each batch
+  mean `1/34`, so a median of `K` fails at most `P[Bin(K, 1/34) >=
+  ceil(K/2)]`, `2.9e-2` at `K = 1` and `4.8e-5` at `K = 8` against HKP's
+  1 and 0.037.  Both change the reported values; §18 oracles for each.
 - **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
   and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
   at 12 threads is slow on its own.  Repeat the Threads measurements of

@@ -16,7 +16,7 @@ import numpy as np
 from qarp.errors import CapabilityError
 from qarp.operators import QubitOperator
 
-from ._estimators import achieved_delta, median_of_means, n_batches_for
+from ._estimators import achieved_delta, check_delta, median_of_means, n_batches_for
 
 
 class ShadowEstimate(NamedTuple):
@@ -24,17 +24,18 @@ class ShadowEstimate(NamedTuple):
 
     ``error`` is the ``eps = sqrt(34 * V_hat / N)`` of arXiv:2002.08953 Theorem 1
     (``V_hat`` the empirical single-setting variance, ``N`` the per-batch size) —
-    the half-width for which ``Pr[|value - true| >= error] <= delta``, where
-    ``delta`` is the failure probability the ``n_batches`` used achieve,
-    ``min(1, 2 e^{-K/2})``, whatever count was requested.  That promise holds for the *true*
-    variance ``sigma^2``; ``V_hat`` is a plug-in for it, so the reported bar
-    inherits whatever error that estimate carries (and HKP's own Remark that the
-    constant 34 is a loose worst case).
+    the half-width for which ``Pr[|value - true| > error] <= delta``, where
+    ``delta`` is HKP's bound ``min(1, 2 e^{-K/2})`` at ``K = n_batches``, whether
+    ``K`` was passed or derived from a requested ``delta``.  An exact constant
+    takes no median: it reports ``delta = 0`` and ``n_batches = 1``.  That promise
+    holds for the *true* variance ``sigma^2``; ``V_hat`` is a plug-in for it, so
+    the reported bar inherits whatever error that estimate carries (and HKP's own
+    Remark that the constant 34 is a loose worst case).
     """
 
     value: float
-    error: float  # HKP Theorem-1 half-width sqrt(34 * V_hat / N) at confidence delta
-    delta: float  # failure probability achieved by n_batches, min(1, 2 e^{-K/2}); 0 when exact
+    error: float  # HKP Theorem-1 half-width sqrt(34 * V_hat / N) at failure probability delta
+    delta: float  # HKP failure bound at n_batches, min(1, 2 e^{-K/2}); 0 when exact
     n_batches: int
     ensemble_only: bool  # True on a shot-exact dataset (V_hat is ensemble spread only)
 
@@ -110,6 +111,9 @@ class ShadowEstimator:
     ) -> ShadowEstimate:
         """Median-of-means estimate of ``<observable>`` (sum-inside for a
         multi-term operator)."""
+        check_delta(delta)
+        if n_batches is not None and n_batches < 1:
+            raise ValueError(f"n_batches must be >= 1, got {n_batches}")
         constant, terms, coeffs = _decompose(observable)
         self._validate_fits(terms)
         nb = n_batches if n_batches is not None else n_batches_for(delta, 1)
@@ -134,9 +138,11 @@ class ShadowEstimator:
         supplied, so each ``error`` is the half-width for which *all* ``M``
         estimates lie within their band **jointly** with probability at least
         ``1 - delta``; each estimate's own ``delta`` field is its single-observable
-        failure probability at that count, at most ``delta / M``.
-        ``marginal=True`` opts out to a per-observable ``delta``
-        (``K = ~2 ln(2/delta)``, no union correction).
+        failure bound at that count, at most ``delta / M``.  ``marginal=True``
+        opts out to a per-observable ``delta`` (``K = ~2 ln(2/delta)``, no union
+        correction); each field is then at most ``delta`` and their sum may
+        exceed it.  In every mode the family's joint failure probability is at
+        most ``min(1, sum(r.delta for r in results))``, the union bound.
 
         Looping :meth:`expval` yourself does **not** give the joint guarantee —
         use this method for a family.  And choosing observables *after* seeing
@@ -144,8 +150,10 @@ class ShadowEstimator:
 
         An explicit ``n_batches`` overrides the derived count for every estimate
         (power-user knob; it then defeats the union bound this method exists to
-        apply, so the joint guarantee no longer holds at ``delta``).
+        apply, so the joint guarantee no longer holds at ``delta``; each field
+        reports that count's bound instead).
         """
+        check_delta(delta)
         m = len(observables)
         if n_batches is None:
             n_batches = n_batches_for(delta, 1 if marginal else max(1, m))
