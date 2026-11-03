@@ -13,7 +13,7 @@ from qarp import SamplingDistribution, _program
 from qarp.algorithms import PauliAveraging, Sampler, StateVector
 from qarp.blocks import CompositeBlock, ControlledBlock, SimpleBlock
 from qarp.devices import Device, get_nearest_neighbour_architecture
-from qarp.engines import QarpEngine
+from qarp.engines import QarpEngine, _gradients
 from qarp.engines._engine import CompiledCircuit
 from qarp.operators import QubitOperator
 
@@ -92,7 +92,7 @@ def test_rebuild_false_on_an_engine_with_equal_settings_reuses(plan_calls):
 
 def test_rebuild_false_under_other_settings_compiles_afresh():
     s = _lowered_sampler()
-    planned = QarpEngine(n_shots=qarp.EXACT)
+    planned = QarpEngine(n_shots=qarp.EXACT, structured=True)
     planned.build([s])
     gates = QarpEngine(n_shots=qarp.EXACT, structured=False)
     got = gates.batch_run([s], [{}], rebuild=False)[0][0]
@@ -135,10 +135,10 @@ def test_rebuild_false_never_runs_a_routed_stream_without_its_layout():
     assert s.compiled[0].layout is None
 
 
-def _z_expval() -> StateVector:
+def _z_expval(pauli: str = "Z0") -> StateVector:
     ket = SimpleBlock(1)
     ket.ry(0, qx.Param.symbol("a"))
-    return StateVector(operator=QubitOperator("Z0"), ket=ket)
+    return StateVector(operator=QubitOperator(pauli), ket=ket)
 
 
 _ANGLES = (0.0, math.pi / 2, math.pi)
@@ -185,7 +185,7 @@ def test_a_sweep_with_rebuild_compiles_afresh():
 
 def test_a_sweep_under_other_engine_settings_compiles_afresh():
     s = _z_expval()
-    QarpEngine().build([s])
+    QarpEngine(structured=True).build([s])
     before = list(s.compiled)
     gates = QarpEngine(structured=False)
     results = gates.batch_run([s], _sets())
@@ -204,6 +204,86 @@ def test_a_sweep_over_a_built_constant_primitive_returns_the_constant():
     eng.build([constant])
     assert constant.compiled == []
     assert [r[0] for r in eng.batch_run([constant], [{}, {}])] == pytest.approx([1.5, 1.5])
+
+
+def test_a_sweep_names_only_the_unbuilt_primitives():
+    built = _z_expval()
+    eng = QarpEngine()
+    eng.build([built])
+    before = list(built.compiled)
+    with pytest.raises(RuntimeError) as raised:
+        eng.batch_run([built, _z_expval(), _z_expval()], _sets())
+    message = str(raised.value)
+    assert "not compiled: primitives[1] (StateVector), primitives[2] (StateVector)." in message
+    assert "primitives[0]" not in message
+    assert [c is d for c, d in zip(built.compiled, before, strict=True)] == [True]
+
+
+def test_a_sweep_after_a_bound_build_compiles_the_symbol_free():
+    s = _z_expval()
+    eng = QarpEngine()
+    eng.build([s], params={"a": 0.0})
+    _assert_cos(eng.batch_run([s], _sets()))
+    assert s.compiled[0].parametric
+
+
+def test_rebuild_false_reuses_only_under_an_equal_binding():
+    s = _z_expval()
+    eng = QarpEngine()
+    eng.build([s], params={"a": 0.0})
+    before = list(s.compiled)
+    eng.build([s], params={"a": 0.0}, rebuild=False)
+    assert [c is d for c, d in zip(s.compiled, before, strict=True)] == [True]
+    eng.build([s], params={"a": math.pi}, rebuild=False)
+    assert eng.run()[0] == pytest.approx(-1.0, abs=1e-12)
+
+
+def test_run_and_run_gradient_refuse_a_bound_symbol():
+    s = _z_expval()
+    eng = QarpEngine()
+    eng.build([s], params={"a": 0.0})
+    with pytest.raises(ValueError, match="built with a bound"):
+        eng.run({"a": math.pi})
+    with pytest.raises(ValueError, match="built with a bound"):
+        eng.run_gradient({"a": math.pi})
+
+
+def test_a_sweep_leaves_the_built_set_to_run():
+    z, x = _z_expval("Z0"), _z_expval("X0")
+    eng = QarpEngine()
+    eng.build([z, x])
+    eng.batch_run([z], _sets())
+    # <Z>, <X> of Ry(a)|0> are cos a, sin a.
+    assert eng.run({"a": 0.4}) == pytest.approx([math.cos(0.4), math.sin(0.4)], abs=1e-12)
+
+
+def test_a_reusing_sweep_keeps_the_gradient_plans(monkeypatch):
+    plans = []
+    real = _gradients.ShiftPlan
+
+    def spy(*args, **kwargs):
+        plans.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_gradients, "ShiftPlan", spy)
+    z, x = _z_expval("Z0"), _z_expval("X0")
+    eng = QarpEngine()
+    eng.build([z, x])
+    point = {"a": 0.4}
+    # d/da of cos a and sin a.
+    expected = [-math.sin(0.4), math.cos(0.4)]
+
+    def grads():
+        return [g[0] for g in eng.run_gradient(point, method="parameter-shift")]
+
+    assert grads() == pytest.approx(expected, abs=1e-10)
+    planned = len(plans)
+    eng.batch_run([z], _sets())
+    assert grads() == pytest.approx(expected, abs=1e-10)
+    assert len(plans) == planned
+    eng.batch_run([z], _sets(), rebuild=True)
+    assert grads() == pytest.approx(expected, abs=1e-10)
+    assert len(plans) > planned
 
 
 def _ry_sampler(n_shots) -> Sampler:

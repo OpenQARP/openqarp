@@ -745,10 +745,12 @@ How circuits run.
   plans the built block as above.  Each circuit compiles to one `CompiledCircuit` on its
   primitive (`prim.compiled`): the gate stream, empty for a circuit lowered this way, its
   program, the simulator width and the routing layout, stamped with the engine settings it
-  was compiled under; `build(rebuild=False)` reuses a primitive's circuits only under an
-  equal stamp.  `batch_run` reuses them by default and raises `RuntimeError` naming
-  `engine.build` for a primitive that has circuits but none compiled; `rebuild=True`
-  compiles afresh.  `QarpEngine` runs a counts circuit through its program, or its gate stream
+  was compiled under, and the `build(params=)` binding baked into it; `build(rebuild=False)`
+  reuses a primitive's circuits only under an equal stamp and binding, and `run` or
+  `run_gradient` naming a bound symbol is a `ValueError`.  `batch_run` reuses them by default,
+  recompiles a bound build, and raises `RuntimeError` naming `engine.build` for a primitive
+  that has circuits but none compiled; `rebuild=True` compiles afresh.  A sweep leaves the
+  primitives `run` evaluates as the last `build` set them.  `QarpEngine` runs a counts circuit through its program, or its gate stream
   as one `Gates` kernel when the stream needs no trajectory (no noise, no mid-circuit
   operation), so `run`, `EXACT` readout and `batch_run` bind a parameter set in C++; a
   circuit with no free symbol is not substituted.  The engine knows
@@ -760,7 +762,7 @@ How circuits run.
   `CuttingPrimitive`, whose cut reads the gate stream, and `PauliShadow`, whose symbol
   check needs a built block.  Programs of the built path are cached on the engine by the
   stream's digest and the block tree's signature (the plan is read from both), so a rebuild
-  of the same circuit (every `batch_run`) never plans twice.
+  of the same circuit (a repeated `build()`, `batch_run(rebuild=True)`) never plans twice.
 
 ## 15. Project & repository conventions
 

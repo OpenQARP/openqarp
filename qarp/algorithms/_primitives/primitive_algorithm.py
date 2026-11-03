@@ -111,6 +111,7 @@ class PrimitiveAlgorithm(ABC):
         self.target = target
         self.sub_blocks: list = []
         self.compiled: list = []
+        self.built_empty = False
 
     @property
     def bra(self) -> Any:

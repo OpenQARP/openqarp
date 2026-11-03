@@ -175,6 +175,9 @@ class CompiledCircuit:
     program: "Optional[qx.Program]" = None
     # Free symbols, so a parameter set is substituted; None reads ``commands``.
     parametric: Optional[bool] = None
+    # The ``build(params=)`` binding as sorted (name, value) pairs: those
+    # symbols are gone from ``commands``, so a later value for one is dropped.
+    bound: tuple = ()
     # A true mid-circuit operation in ``commands``; always read from them.
     mid_circuit: bool = field(init=False)
 
@@ -248,9 +251,11 @@ class Engine(ABC):
             param_sets:  One dict per evaluation point.
             n_shots:     Override engine-default shot count for this sweep.
             rebuild:     False (the default) reuses the circuits a prior
-                ``build()`` compiled under this engine's settings and raises
-                ``RuntimeError`` for a primitive that has circuits but none
-                compiled; True compiles every primitive afresh.
+                ``build()`` compiled under this engine's settings, unless it
+                bound ``params``, and raises ``RuntimeError`` for a primitive
+                that has circuits but none compiled; True compiles every
+                primitive afresh.  Either way the primitives ``run()``
+                evaluates are those of the last ``build()``.
 
         Returns:
             ``results_by_set[set_idx][prim_idx] = scalar``.
@@ -489,36 +494,55 @@ class Engine(ABC):
         build → flatten → substitute → ``_validate_flat_commands`` →
         ``_warn_uninitialised_conditions`` → ``_compile_one`` →
         ``_post_compile_check`` → ``_plan_built``, into one
-        ``CompiledCircuit`` each on ``prim.compiled``.  ``rebuild=False``
-        reuses a primitive's circuits when all were compiled under this
-        engine's ``_compile_stamp()``, re-validating it — capability-relevant
-        state may have changed — and compiles it afresh otherwise.
+        ``CompiledCircuit`` each on ``prim.compiled``.  ``params`` are bound
+        into the circuits.  ``rebuild=False`` reuses a primitive's circuits
+        when all were compiled under this engine's ``_compile_stamp()`` and
+        the same ``params``, re-validating it — capability-relevant state may
+        have changed — and compiles it afresh otherwise.  The primitives
+        become the set ``run()`` and ``run_gradient()`` evaluate.
         """
-        params = _coerce_params(params)
         # Gradient plans are cached per build; a rebuilt (or re-validated)
         # primitive set starts a new generation so no stale plan is reused.
         self._build_generation = getattr(self, "_build_generation", 0) + 1
         self._primitives = list(primitives)
+        self._compile_primitives(self._primitives, _coerce_params(params), rebuild)
+
+    def _compile_primitives(
+        self, primitives: Sequence[Runnable], params: Mapping[str, float], rebuild: bool
+    ) -> bool:
+        """The per-primitive loop of ``build()``; True iff some primitive was
+        compiled afresh."""
         stamp = self._compile_stamp()
-        for prim in self._primitives:
-            if not rebuild and prim.compiled and all(c.stamp == stamp for c in prim.compiled):
+        bound = tuple(sorted(params.items()))
+        fresh = False
+        for prim in primitives:
+            if (
+                not rebuild
+                and prim.compiled
+                and all(c.stamp == stamp and c.bound == bound for c in prim.compiled)
+            ):
                 self._validate_primitive(prim)
                 continue
             # Validated with the circuits cleared: a rejected primitive keeps
             # no stale circuits for a later rebuild=False to reuse.
             prim.compiled = []
+            prim.built_empty = False
             prim.build()
             self._validate_primitive(prim)
             prim.compiled = [
                 self._compile_circuit(prim, blk, params, stamp) for blk in prim.sub_blocks
             ]
+            prim.built_empty = not prim.compiled
+            fresh = True
+        return fresh
 
     def _compile_circuit(self, prim: Runnable, blk, params, stamp: tuple) -> CompiledCircuit:
+        bound = tuple(sorted(params.items()))
         program = self._plan_unbuilt(prim, blk)
         if program is not None:
             # Lowered from its composition, no stream: plan_structure refuses a
             # parametric part, so the program has nothing to bind.
-            return CompiledCircuit([], blk.n_qubits, stamp, program=program)
+            return CompiledCircuit([], blk.n_qubits, stamp, program=program, bound=bound)
         blk.build()
         flat = blk.flatten()
         if params:
@@ -536,6 +560,7 @@ class Engine(ABC):
             # Read from flat: the program is planned from it, and optimisation
             # can cancel a symbol out of ``compiled`` alone.
             parametric=any(c.is_parametric() for c in flat),
+            bound=bound,
         )
 
     def kernels(self, primitive: Runnable) -> list[list[str]]:
@@ -563,9 +588,11 @@ class Engine(ABC):
         Template method: re-validates every primitive per call (noise toggles
         and ``initial_state`` mutations must not slip through), substitutes
         parameters, and defers the engine-specific simulation to
-        ``_dispatch_one``.
+        ``_dispatch_one``.  A parameter ``build(params=)`` bound is a
+        ``ValueError``.
         """
         params = _coerce_params(params)
+        self._reject_bound(params)
         self._pre_run()
         results: list[PrimitiveResult] = []
         ordinal = 0
@@ -576,26 +603,44 @@ class Engine(ABC):
             results.append(result)
         return results
 
+    def _reject_bound(self, names) -> None:
+        """``ValueError`` when a name was bound by ``build(params=)`` into a
+        circuit of the built primitives."""
+        for prim in self._primitives:
+            bound = {name for c in prim.compiled for name, _ in c.bound}
+            clash = sorted(bound.intersection(names))
+            if clash:
+                raise ValueError(
+                    f"{type(prim).__name__} was built with {', '.join(clash)} bound by "
+                    "engine.build(params=...), so a value for it would be dropped: "
+                    "build without binding it to vary it."
+                )
+
     def _batch_setup(self, primitives, param_sets, n_shots, rebuild):
         """Shared ``batch_run`` head: sync, coerce, (re)build, and re-validate
-        against a sweep-wide shot override.  Returns (override, param_sets)."""
+        against a sweep-wide shot override.  Leaves the primitives ``run()``
+        evaluates unchanged.  Returns (override, param_sets)."""
         self._pre_run()
         if not rebuild:
-            # A built primitive may hold no circuit (a constant operator), so
-            # unbuilt means derived circuits with none compiled.  A sweep never
-            # compiles on first use: the cost stays in build().
+            # A build over a constant operator compiles no circuit, so an empty
+            # ``compiled`` alone is not a missing build.
             unbuilt = [
-                type(p).__name__ for p in primitives if not p.compiled and p.build().sub_blocks
+                f"primitives[{i}] ({type(p).__name__})"
+                for i, p in enumerate(primitives)
+                if not p.compiled and not p.built_empty
             ]
             if unbuilt:
                 raise RuntimeError(
-                    "batch_run(rebuild=False) needs built primitives, but "
-                    f"{', '.join(unbuilt)} has no compiled circuits: call "
-                    "engine.build(primitives) first, or pass rebuild=True."
+                    "batch_run(rebuild=False) needs built primitives; not compiled: "
+                    f"{', '.join(unbuilt)}.  Call engine.build(primitives) first, "
+                    "or pass rebuild=True."
                 )
         override = n_shots
         param_sets = [_coerce_params(ps) for ps in param_sets]
-        self.build(primitives, rebuild=rebuild)
+        # The gradient shift plans are keyed by index into ``_primitives`` and
+        # read its circuits: a fresh compile may have replaced some.
+        if self._compile_primitives(primitives, {}, rebuild):
+            self._build_generation = getattr(self, "_build_generation", 0) + 1
         if override is not None:
             for prim in primitives:
                 self._validate_primitive(prim, shots_override=override)
