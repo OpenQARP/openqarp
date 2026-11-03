@@ -67,7 +67,9 @@ class QSCI(CompositeAlgorithm):
     Args:
         hamiltonian: A ``QubitOperator``, or a ``FermionOperator`` which is
             Jordan-Wigner-transformed.  Restricted and unrestricted molecular
-            integrals both arrive as the same abab spin-orbital operator.
+            integrals both arrive as the same abab spin-orbital operator.  It
+            must be Hermitian; only its projection onto the selected subspace
+            is checked.
         ket: A block, or a sequence of blocks of equal width, to sample.  A
             sequence is pooled with **equal weight per block**, which is the
             time average only for equally spaced time points; a nonuniform
@@ -80,6 +82,8 @@ class QSCI(CompositeAlgorithm):
         prob_threshold: Inclusive floor on a configuration's probability
             within the sector (a probability, not an amplitude).  ``None``: no
             floor.  Zero-probability configurations never enter the subspace.
+            The comparison is in floating point, so a weight equal to a
+            non-dyadic floor can round to either side of it.
         n_electrons: ``(n_alpha, n_beta)``: the sector, with alpha on even and
             beta on odd qubits (abab).  Required for a ``FermionOperator``.  For
             a ``QubitOperator`` it is optional and asserts a Jordan-Wigner
@@ -161,8 +165,8 @@ class QSCI(CompositeAlgorithm):
                 primitive = Sampler()
             elif not isinstance(primitive, Sampler):
                 raise ValueError(
-                    "QSCI samples its blocks, so primitive must be a Sampler "
-                    f"(Target.SAMPLING), got {type(primitive).__name__}"
+                    "QSCI samples its blocks, so primitive must be a Sampler, "
+                    f"got {type(primitive).__name__}"
                 )
             measured = primitive.measured_qubits
             if measured is not None and list(measured) != list(range(n_qubits)):
@@ -210,9 +214,13 @@ class QSCI(CompositeAlgorithm):
             else cast(QubitOperator, self.hamiltonian)
         )
         if self.blocks:
+            primitive = cast(Sampler, self.primitive)
             samplers: list[Runnable] = []
             for block in self.blocks:
-                sampler = cast(Sampler, copy.deepcopy(self.primitive))
+                # Shared seed state: a plain deepcopy holds K copies of 2**n amplitudes.
+                sampler = copy.deepcopy(
+                    primitive, {id(primitive.initial_state): primitive.initial_state}
+                )
                 sampler.ket = block
                 sampler.measured_qubits = list(range(self.n_qubits))
                 samplers.append(sampler)
@@ -224,26 +232,27 @@ class QSCI(CompositeAlgorithm):
         return self
 
     def run(self) -> tuple[NDArray[np.float64], NDArray]:
-        """Sample (for blocks), select the subspace, and diagonalise once."""
+        """Sample (for blocks), select the subspace, and diagonalise once.
+
+        ``distribution``, ``in_sector_mass`` and ``rejected`` are set before the
+        subspace checks, so a run that fails them keeps its samples; the solve
+        outputs stay ``None``.
+        """
         if self._qubit_hamiltonian is None:
             raise ValueError("Call build() before run().")
-        if self.blocks:
-            outputs = self.engine.run()
-            samples: list[SamplingDictionary] = []
-            for index, output in enumerate(outputs):
-                what = f"sampler result for block {index}"
-                if not isinstance(output, Mapping):
-                    raise ValueError(f"{what} is not a distribution")
-                if _validate_distribution(output, what, check_mass=False) != self.n_qubits:
-                    raise ValueError(f"{what} does not cover the full register")
-                samples.append(output)
-            pooled = _pool(samples)
-        else:
-            pooled = cast(SamplingDictionary, self.distribution)
-
+        self.energies = self.coefficients = self.configurations = None
+        self.in_sector_mass = None
+        self.rejected = None
+        self.distribution = self._sample()
         selection = _select(
-            pooled, self.n_qubits, self.n_electrons, self.max_subspace_dim, self.prob_threshold
+            self.distribution,
+            self.n_qubits,
+            self.n_electrons,
+            self.max_subspace_dim,
+            self.prob_threshold,
         )
+        self.in_sector_mass = selection.in_sector_mass
+        self.rejected = selection.rejected
         if selection.leaked_fraction > 0:
             warnings.warn(
                 f"QSCI: {selection.leaked_fraction:.3g} of the sampled probability lies "
@@ -252,29 +261,47 @@ class QSCI(CompositeAlgorithm):
                 UserWarning,
                 stacklevel=2,
             )
-        if not selection.configurations:
-            raise ValueError(
-                "QSCI selected an empty subspace: no in-sector configuration with "
-                "nonzero probability survived the sector filter and cuts"
-            )
-        if self.n_roots > len(selection.configurations):
-            raise ValueError(
-                f"n_roots={self.n_roots} exceeds the selected subspace dimension "
-                f"{len(selection.configurations)}"
-            )
-
-        energies, coefficients = self._solve(selection.configurations)
+        energies, coefficients = self._pass(selection.configurations)
         self.energies, self.coefficients = energies, coefficients
         self.configurations = selection.configurations
-        self.distribution = pooled
-        self.in_sector_mass = selection.in_sector_mass
-        self.rejected = selection.rejected
         if self.verbose:
             print(
                 f"QSCI: {len(selection.configurations)} configurations, in-sector mass "
                 f"{selection.in_sector_mass:.6f}, energies {energies}"
             )
         return energies, coefficients
+
+    def _sample(self) -> SamplingDictionary:
+        """The blocks' sampler outputs pooled, or the given distribution."""
+        if not self.blocks:
+            return cast(SamplingDictionary, self.distribution)
+        outputs = self.engine.run()
+        samples: list[SamplingDictionary] = []
+        for index, output in enumerate(outputs):
+            what = f"sampler result for block {index}"
+            if not isinstance(output, Mapping):
+                raise ValueError(f"{what} is not a distribution")
+            if _validate_distribution(output, what, check_mass=False) != self.n_qubits:
+                raise ValueError(f"{what} does not cover the full register")
+            samples.append(output)
+        return _pool(samples)
+
+    def _pass(
+        self, configurations: Sequence[tuple[int, ...]]
+    ) -> tuple[NDArray[np.float64], NDArray]:
+        """One pass over a configuration set: the subspace checks, then
+        ``_solve``.  Sets no attributes, so a later phase can loop over it."""
+        if not configurations:
+            raise ValueError(
+                "QSCI selected an empty subspace: no in-sector configuration with "
+                "nonzero probability survived the sector filter and cuts"
+            )
+        if self.n_roots > len(configurations):
+            raise ValueError(
+                f"n_roots={self.n_roots} exceeds the selected subspace dimension "
+                f"{len(configurations)}"
+            )
+        return self._solve(configurations)
 
     def _solve(
         self, configurations: Sequence[tuple[int, ...]]
@@ -389,10 +416,13 @@ def _pool(samples: Sequence[SamplingDictionary]) -> SamplingDictionary:
     Exact sampling prunes probabilities <= 1e-12, so a block can fall short of
     one; normalising after pooling makes the pool valid ``distribution=`` input.
     """
-    totals: dict[tuple[int, ...], float] = {}
+    parts: dict[tuple[int, ...], list[float]] = {}
     for sample in samples:
         for key, weight in sample.items():
-            totals[key] = totals.get(key, 0.0) + float(weight)
+            parts.setdefault(key, []).append(float(weight))
+    # fsum is exactly rounded, so equal pooled weights stay equal in any block
+    # order and the max_subspace_dim tie-break stays on the label.
+    totals = {key: math.fsum(weights) for key, weights in parts.items()}
     # The mean's 1/len(samples) cancels in the normalisation: one division.
     mass = math.fsum(totals.values())
     return {key: weight / mass for key, weight in totals.items()}
