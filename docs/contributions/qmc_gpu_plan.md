@@ -56,7 +56,6 @@ implementation belongs to its own branch and PR.
 - `qarp/operators/_computational_basis_sector.py`
 - `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`
 - `tests/test_algorithms/test_composite/test_montecarlo_gpu.py`
-- `tests/test_algorithms/test_composite/test_montecarlo_unit.py`
 - `tests/test_blocks/test_primitives/test_trotter_ansatz.py`
 - `tests/test_engines/test_cudaq_engine.py`
 - `tests/test_engines/test_transition_columns.py`
@@ -195,7 +194,13 @@ allowing a scalar global phase.
 rows into a persistent native cache and resumes on missing rows. Optional
 uniform-sector proposals sample walker destinations and acquire exact
 coefficients; they do not sample quantum measurements. Uniform proposals exclude
-the source and use q=1/(sector.dimension-1) per destination. Requests,
+the source and use q=1/(sector.dimension-1) per destination. The adapter calls
+the existing `sample_labels(rng, size)` in bounded chunks, retains every
+non-source draw and resamples source draws until the requested number of
+accepted destinations is obtained. Chunk size never exceeds
+`transition_batch_size`; acceptance is conditioning on a non-source label, so
+proposals remain uniform over the other D-1 states. Sector dimension must exceed
+one; no sampler API change or sector enumeration is required. Requests,
 coefficient batches and evolution results are the transport records; they retain
 uint64 labels/counts and signed int64 populations. Validate parallel arrays,
 proposal probabilities, multiplicities, request identity (request id,
@@ -232,43 +237,48 @@ cache mutation. Check bulk cache bounds before uploads or uploaded-support
 bookkeeping changes.
 
 **Estimators and diagnostics.** Add GPU instantaneous energy and ratio-of-sums
-estimation with compensated summation of numerator and denominator, burn-in,
-signed denominator handling and literal leave-one-block jackknife uncertainty.
-Histories and per-trajectory diagnostic snapshots are accessible after failure.
-These are scalar/history summaries, not the per-walker state snapshots requested
-by CPU `save_walker_history`. Diagnostics separate provider, cache,
-orchestration and evolution measurements; array-preparation time is included in
-orchestration time, rather than an additional disjoint interval. Include
-`transition_array_preparation_wall_seconds`, `python_coefficient_cache_entries`
-and `max_complete_row_imaginary`. Resident paths report zero executed
-measurement circuits and shots, separately from constructed circuit counts. The
-serialized `qarp.resources` schema is unchanged (§19).
+estimation with compensated numerator and exact integer denominator sums,
+burn-in, signed denominator handling and literal leave-one-block jackknife
+uncertainty. Histories and per-trajectory diagnostic snapshots are accessible
+after failure. These are scalar/history summaries, not the per-walker state
+snapshots requested by CPU `save_walker_history`. Diagnostics separate provider,
+cache, orchestration and evolution measurements; array-preparation time is
+included in orchestration time, rather than an additional disjoint interval.
+Include `transition_array_preparation_wall_seconds`,
+`python_coefficient_cache_entries` and `max_complete_row_imaginary`. Resident
+paths report zero executed measurement circuits and shots, separately from
+constructed circuit counts. The serialized `qarp.resources` schema is unchanged
+(§19).
 
 **Estimator option contract.** Keep instantaneous estimation as the final step's
 energy; nondefault burn-in/block options on that estimator raise `ValueError`.
 Ratio-of-sums uses the signed production numerator sum divided by the signed
 denominator sum after burn-in. A zero cumulative denominator produces NaN and
-increments its diagnostic counter.
+increments `aggregated_projected_estimator_zero_cumulative_denominator_steps`.
+Per-trajectory `reference_zero_samples` counts raw samples with zero reference
+population; it is distinct from a zero cumulative production denominator.
 
-`estimator_block_size=None` disables jackknife. An explicit positive block
-size enables the existing literal leave-one-block calculation for ratio-of-sums.
-This makes uncertainty computation opt-in and gives the caller control of the
-block size, without an implicit sizing rule. Retain the jackknife algorithm,
-incomplete-tail handling, signed-denominator safeguards and regression cases.
-The point estimate and raw histories do not depend on enabling jackknife.
+`estimator_block_size=None` disables within-trajectory block jackknife only. An
+explicit positive block size enables a literal leave-one-block calculation for
+ratio-of-sums. This makes uncertainty computation opt-in and gives the caller
+control of the block size, without an implicit sizing rule. Define the jackknife
+algorithm, the incomplete-tail rule and the signed-denominator safeguards as
+below; the literal tape oracles in this section define the regression cases. The
+point estimate and raw histories do not depend on enabling jackknife.
 
 For N production samples and explicit block size b, K=floor(N/b) contiguous
 complete blocks supply K leave-one-block ratios. The point estimate uses all N
-samples; jackknife uses only the first K*b and excludes the incomplete tail.
-A replica with zero remaining signed denominator is invalid. Report standard
-error `sqrt((K-1)/K * sum((replica-mean_replicas)**2))` only for K>=2 with all
+samples; jackknife uses only the first K*b and excludes the incomplete tail. A
+replica with zero remaining signed denominator is invalid. Report standard error
+`sqrt((K-1)/K * sum((replica-mean_replicas)**2))` only for K>=2 with all
 replicas valid; otherwise `jackknife_stderr=None`.
 
 When `estimator_block_size=None`, omit `block_size`, `block_count` and all
-`jackknife_*`/invalid-replica keys and perform no jackknife computation. With
-an explicit block size on ratio-of-sums, include those keys, the requested
-block size, sample counts and invalid-replica count, including when uncertainty
-is unavailable.
+`jackknife_*`/invalid-replica keys and perform no within-trajectory jackknife
+computation. Across-trajectory uncertainty is computed independently as
+specified below. With an explicit block size on ratio-of-sums, include those
+keys, the requested block size, sample counts and invalid-replica count,
+including when uncertainty is unavailable.
 
 Instantaneous estimation deliberately retains its final-step contract. Burn-in
 cannot change that endpoint, and deleting blocks from a tape to recompute an
@@ -277,16 +287,72 @@ uncertainty in an accumulated energy estimate. Therefore the proposal declines
 R7's suggestion to accept burn-in/blocking on both estimators. Nondefault
 burn-in/block options with `projected_energy_estimator="instantaneous"` raise
 `ValueError` with a message directing the caller to `"ratio_of_sums"` for
-production-sample burn-in and optional jackknife. This preserves the meaning
-of instantaneous energy and avoids silently interpreting it as a time average.
+production-sample burn-in and optional jackknife. This preserves the meaning of
+instantaneous energy and avoids silently interpreting it as a time average.
 
 A literal estimator oracle uses numerators [2,8,18,32] and denominators
-[1,2,3,4]. Ratio-of-sums gives 6 with jackknife disabled by default. Explicit
-block size 2 gives replicas 50/7 and 10/3 and standard error 40/21, with the
-same point estimate 6. Burn-in one gives 58/9 from the three remaining samples.
-Instantaneous returns 8, and its nondefault burn-in/block combinations reject.
-These references are computed from the supplied tapes, independently of
-estimator helpers.
+[1,2,3,4]. Ratio-of-sums gives 6 with within-trajectory jackknife disabled by
+default. Explicit block size 2 gives replicas 50/7 and 10/3 and standard error
+40/21, with the same point estimate 6. Burn-in one gives 58/9 from the three
+remaining samples. Instantaneous returns 8, and its nondefault burn-in/block
+combinations reject. These references are computed from the supplied tapes,
+independently of estimator helpers.
+
+**Combining independent trajectories.** `run()` executes `num_trajectories`
+independently keyed walks. For ratio-of-sums, trajectory r contributes A_r and
+B_r, its signed numerator and denominator sums after its own burn-in. For
+instantaneous estimation, A_r and B_r are the numerator and reference population
+of that trajectory's final completed step only. Thus instantaneous remains an
+endpoint estimator, without time averaging or burn-in. The final estimate in
+either mode is `E = sum(A_r) / sum(B_r)` over all completed trajectories. Use
+compensated numerator summation and exact integer denominator summation. Do not
+average trajectory ratios, drop trajectories with B_r=0, replace signed
+denominators by their absolute values, or use only the last trajectory. The CPU
+`MonteCarlo` result contract is unchanged.
+
+Across-trajectory uncertainty always uses leave-one-trajectory jackknife,
+independently of `estimator_block_size`. For R completed independent
+trajectories, form `E_without_r = (sum(A)-A_r)/(sum(B)-B_r)` for each whole
+trajectory. Use `sqrt((R-1)/R * sum((E_without_r-mean_replicas)**2))` only for
+R>=2, a finite central estimate, and all R replicas valid. A replica with zero
+remaining denominator is invalid and recorded as None; do not silently drop it
+and recompute the prefactor. Report invalid-replica count and
+`trajectory_jackknife_stderr=None` if any replica is invalid. R=1 still returns
+the trajectory's point estimate, with no replicas and no across-trajectory error
+bar; an optional within-trajectory block error stays available separately. Never
+combine the two error estimates as though independent observations.
+
+If the pooled denominator is zero, the combined estimate is NaN, combined status
+is `ZeroDenominator`, and across-trajectory standard error is None; retain the
+signed sums, replica results and invalid-replica count. Negative nonzero
+denominators are valid. Nonfinite contributed numerators are a runtime failure
+rather than an observation to omit.
+
+A failed trajectory aborts the run and raises `RuntimeError`; retain all
+completed and failing partial histories, original error/status and counts in
+diagnostics. Do not return a successful estimate from a reduced set of walks.
+The combined estimator has status `Incomplete`, estimate=None and
+trajectory_jackknife_stderr=None on failure. Any sums over previously completed
+trajectories are diagnostic partial sums only; failed partial steps never enter
+them. Successful runs require all requested trajectories to complete.
+
+A two-trajectory oracle uses production tapes (numerator, denominator):
+trajectory 0 [(2,1),(8,2)] and trajectory 1 [(18,3),(32,4)]. Ratio-of-sums
+contributions are (10,3) and (50,7), giving E=6, leave-one-trajectory replicas
+50/7 and 10/3, and standard error 40/21. With burn-in one applied separately to
+each tape, contributions are (8,2) and (32,4), giving E=20/3, replicas 8 and 4,
+and standard error 2. Instantaneous uses those same endpoint contributions and
+results, while still rejecting nondefault burn-in options. With block size None,
+each trajectory has no block-jackknife keys, yet the combined error above is
+present. Enabling valid local block sizes changes neither the combined point
+estimate nor the across-trajectory error.
+
+Additional literal edge oracles: (A,B) pairs [(1,0),(3,2)] give central E=2 with
+one invalid leave-one-trajectory replica and no final error bar; [(1,1),(3,-1)]
+give zero pooled denominator and NaN; [(2,-1),(4,-1)] give E=-3 and standard
+error 1. One pair (10,3) gives E=10/3 with no across-trajectory error bar. A
+scripted failure on the second walk retains the first walk's partial-sum
+diagnostics but returns no combined estimate.
 
 **Public Python integration (§§13, 17).** `AggregatedMonteCarlo` accepts a
 finite Hermitian Pauli H, a bound unitary block, one computational-basis
@@ -309,9 +375,9 @@ insertion, and pending child operations are materialized before embedding.
 per-pair circuit count once per run through the existing
 `GroupedTransitionHadamardTest.circuits()` interface, using representative
 unbuilt bra/ket input blocks and both real and imaginary quadratures. Counts
-depend on H, register width, grouping and quadratures, not the basis pair.
-Zero H gives C=0; I and X each give C=2; X+Z gives C=4. Never populate
-`sub_blocks` eagerly, compile or execute those circuits.
+depend on H, register width, grouping and quadratures, not the basis pair. Zero
+H gives C=0; I and X each give C=2; X+Z gives C=4. Never populate `sub_blocks`
+eagerly, compile or execute those circuits.
 
 Discard the representative circuit list after deriving C; retain only integer
 count metadata and the set of accounted pair labels for that run. No mutable
@@ -323,11 +389,11 @@ Start fresh accounting metadata on each new run or rebuild after H/U/config
 changes. With accounting disabled, do not call `circuits()` at all.
 
 `generated_circuits` counts the C representative circuits actually constructed
-once, while `measurement_settings` counts the C*P hypothetical settings.
-Both are zero when accounting is disabled. Executed measurement circuits and
-shots are always zero. This distinguishes construction work from hypothetical
-measurement totals without changing the resource schema. Accounting on/off
-must give identical evolution histories for the same seed and configuration.
+once, while `measurement_settings` counts the C*P hypothetical settings. Both
+are zero when accounting is disabled. Executed measurement circuits and shots
+are always zero. This distinguishes construction work from hypothetical
+measurement totals without changing the resource schema. Accounting on/off must
+give identical evolution histories for the same seed and configuration.
 
 No grouping or interferometric API changes are needed here. DSATUR, general
 commuting bases, `basis_change`, `prepared_state`, immutable layout caching and
@@ -460,7 +526,8 @@ Engines without resident capability raise `CapabilityError` through the hook.
 The register width is `unitary_block.n_qubits`; H acting on a qubit at or above
 it raises `ValueError`. Use the existing composite lifecycle: `build() -> Self`
 prepares contexts, `iterate() -> None` advances evolution, and `run() ->
-list[float]` returns the single-target estimate as a one-element list. Add
+list[float]` returns the combined estimate across all requested trajectories as
+a one-element list. Its error is exposed in combined estimator diagnostics. Add
 read-only diagnostics to the new class only.
 
 `ComputationalBasisSector` is exported only from `qarp.operators`; the frozen
@@ -527,8 +594,10 @@ histories.
 
 Every row below applies to `AggregatedMonteCarlo` only, except the explicit CPU
 regression row. Parameter names are constructor names above. Test all rows with
-CPU fakes in `test_montecarlo_aggregated.py`; keep CPU compatibility cases in
-`test_montecarlo_unit.py`. CPU validation and options are untouched.
+CPU fakes in `test_montecarlo_aggregated.py`. Run the existing
+`test_montecarlo.py` and `test_montecarlo_unit.py` unchanged as CPU regression
+coverage; neither file is implementation scope. CPU validation and options are
+untouched.
 
 | Combination | Contract / exception |
 |---|---|
@@ -545,7 +614,9 @@ CPU fakes in `test_montecarlo_aggregated.py`; keep CPU compatibility cases in
 | `verbose` not bool | `TypeError` |
 | Instantaneous estimator with nonzero `estimator_burn_in_steps` or supplied `estimator_block_size` | `ValueError`; its reported estimate is the final step's instantaneous energy |
 | Ratio-of-sums with burn-in | Drop the first `estimator_burn_in_steps` samples from reported estimation; retain raw histories |
-| Ratio-of-sums with `estimator_block_size=None` | Jackknife disabled; omit block/jackknife diagnostics and perform no replica calculations |
+| Multiple trajectories in either estimator mode | Pool signed per-trajectory contributions; across-trajectory jackknife is independent of local block-size selection |
+| Failed trajectory | Run raises RuntimeError with combined status Incomplete, no returned estimate and retained local histories |
+| Ratio-of-sums with `estimator_block_size=None` | Within-trajectory block jackknife disabled; omit its block/jackknife diagnostics; across-trajectory jackknife remains enabled |
 | Ratio-of-sums with positive explicit block size | Literal leave-one-block ratio-of-sums replicas; see diagnostics contract below |
 | CPU-only keywords (`mode`, `num_target_states`, `walker_basis`, `qdrift`, `ham_cache`, `save_walker_history`) | Absent from the new signature; ordinary unexpected-keyword `TypeError` |
 | Complete rows with no sector | Full-register columns; finite real transformed coefficients checked as acquired |
@@ -716,21 +787,45 @@ positive). `max_steps` and request attempts are positive uint64.
 root_seed, trajectory_index, proposal_seed_sequence, status, completed_steps,
 measurement_circuits_executed, actual_shots_executed, histories and
 trajectories; after build also python_coefficient_cache_entries,
-column_provider, evolution and estimator. `provider` is `"cudaq"`. Histories map
-names from EvolutionResult to immutable tuples; trajectories is a tuple of
-read-only mappings with trajectory_index, root_seed, configuration_hash, status,
-error (type/message pair or None), completed_steps, wall_time_seconds, histories
-and estimator. The configuration hash is SHA-256 of UTF-8 canonical JSON
-(`sort_keys=True`, compact separators, `allow_nan=False`) over the bound H
-terms, U command digest, register, engine configuration and all
-evolution/estimator settings, reference label and batch/cache/prefetch settings.
-Include the complete sector/configuration payload. Encode complex numbers as
-real/imaginary pairs, sort Pauli terms, and store the existing command-stream
-digest as a hexadecimal string. Exclude seed, trajectory index, timing data and
-circuit-accounting flag. Freeze this payload at build and compare it before use;
-no hash of Python object identity. Estimator keys are name, burn_in_steps,
-sample_count, numerator_sum, denominator_sum, estimate, reference_zero_samples,
-block_size, block_count, jackknife_samples, jackknife_stderr and
+column_provider, evolution and estimator. `provider` is `"cudaq"`. `root_seed`
+is the run's recorded root; trajectory/event keys distinguish the walks.
+`trajectory_index`, `proposal_seed_sequence` and `histories` describe the most
+recently attempted walk (index/sequence None before the first walk). Histories
+map names from EvolutionResult to immutable tuples. Top-level `completed_steps`
+sums completed steps across attempted walks, including partial progress before
+failure. Top-level `status` describes the run, not merely its last trajectory.
+
+`trajectories` is a tuple of read-only mappings with trajectory_index,
+root_seed, configuration_hash, status, error (type/message pair or None),
+completed_steps, wall_time_seconds, histories and estimator. Each trajectory's
+`estimator` has only its local point estimate and optional block uncertainty.
+The top-level `estimator` contains the combined estimate and the independent
+across-trajectory uncertainty. Its exact keys are name, burn_in_steps, status,
+requested_trajectories, attempted_trajectories, completed_trajectories,
+failed_trajectories, trajectory_indices, sample_count, numerator_sum,
+denominator_sum, estimate, uncertainty_method, trajectory_jackknife_estimates,
+trajectory_jackknife_stderr and invalid_trajectory_jackknife_replicates.
+`uncertainty_method` is `"leave_one_trajectory"`; replicas are immutable tuples
+of float/None in trajectory-index order. For one trajectory the tuple is empty.
+Counts are integers; estimate is float/None; status is Completed,
+ZeroDenominator or Incomplete. On a fresh build the summary is Incomplete with
+zero counts and no estimate. Per-trajectory block/jackknife keys never appear on
+the combined summary. `sample_count` counts contributed production steps for
+ratio-of-sums, or one endpoint per completed trajectory for instantaneous.
+`trajectory_indices` lists completed contributors, including those with B_r=0. A
+new run resets the summary and per-trajectory snapshots.
+
+The configuration hash is SHA-256 of UTF-8 canonical JSON (`sort_keys=True`,
+compact separators, `allow_nan=False`) over the bound H terms, U command digest,
+register, engine configuration and all evolution/estimator settings, reference
+label and batch/cache/prefetch settings. Include the complete
+sector/configuration payload. Encode complex numbers as real/imaginary pairs,
+sort Pauli terms, and store the existing command-stream digest as a hexadecimal
+string. Exclude seed, trajectory index, timing data and circuit-accounting flag.
+Freeze this payload at build and compare it before use; no hash of Python object
+identity. Per-trajectory estimator keys are name, burn_in_steps, sample_count,
+numerator_sum, denominator_sum, estimate, reference_zero_samples, block_size,
+block_count, jackknife_samples, jackknife_stderr and
 invalid_jackknife_replicates, with conditional presence as specified in the
 estimator option contract.
 
@@ -803,13 +898,17 @@ RuntimeError rather than adding another native status.
 | RNG and chunking | Independent binomial moments; split-advance equality is supplementary | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Request transport and replay | Combinatorial uniform proposal q, literal multiplicities and weights above one; exact-once counters plus changed/stale payload rejection | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | Failure histories | Constructed reference-zero, extinction, invalid-probability, integer-overflow and no-progress tapes; NaN and partial history expectations | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
-| Estimators | Literal signed numerator/denominator tapes, cancellation, burn-in, default-disabled jackknife versus explicit blocks with identical point estimates, absent disabled diagnostics, incomplete tails, invalid replicas and rejection of instantaneous-only option conflicts with an error directing users to ratio_of_sums | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Combined trajectories and final uncertainty | Literal two-trajectory production tapes give pooled ratio 6, whole-trajectory replicas 50/7 and 10/3 and stderr 40/21; per-walk burn-in and instantaneous endpoints give 20/3 and stderr 2; inner block jackknife on/off leaves both combined outputs unchanged | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Combined-estimator edge cases | Literal single trajectory, zero/negative denominators, B_r=0 contribution, invalid leave-one-trajectory replicas and scripted failure; assert exact sums/counts, None/NaN policies and retained diagnostics | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| CPU resident-hook implementation | Patched _require_cudaq returns a scripted simulator; construct real CudaqEngine on CPU and check self._sim.config, accepted/rejected configurations, default target and no host-width guard | `tests/test_engines/test_cudaq_engine.py` |
+| Uniform source exclusion | Script sampler draws including repeated source labels in a three-label weight-one sector; accepted non-source labels and multiplicities are literal, q=1/2; assert bounded chunks, resampling and no enumeration | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Estimators | Literal signed numerator/denominator tapes, cancellation, burn-in, default-disabled local block jackknife versus explicit blocks with identical point estimates, absent disabled diagnostics, incomplete tails, invalid replicas and rejection of instantaneous-only option conflicts with an error directing users to ratio_of_sums | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Bulk upload and cache reuse | Hand-derived CSR arrays, uint64 labels, empty support, strict cutoff/reference exceptions and upload counts across one/two trajectories | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `tests/test_algorithms/test_composite/test_montecarlo_gpu.py` |
 | Realness and transactional guards | Finite boundary/nonfinite injected coefficients; conflicting reference coefficients and cache-bound rejection before mutation | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | No execution or fallback | Resident-hook spy plus primitive-execution-forbidding sentinels and literal zero shots/circuits executed; existing analytic CPU MC cases remain | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `tests/test_algorithms/test_composite/test_montecarlo.py` |
 | ABI, stubs and exports | Matching checkout/source/ABI stamps; fresh generated-stub comparison, typed signatures, retained exports and wheel stub resolution outside checkout | `tests/test_stubs.py`, `tests/test_abi_stamp.py`, `tests/test_conventions_exports.py` |
 | Example | Small independent CPU matrix oracle runs by default; bounded GPU complete/request smokes require explicit opt-in | `examples/algorithms/composite/mwe_montecarlo_gpu.ipynb` |
-| Configuration matrix | One independently parametrized acceptance/rejection case for each option-matrix row, asserting exact exception and no allocation on invalid input; parametrize over plain specs and build qarpx-backed objects inside each test | `tests/test_algorithms/test_composite/test_montecarlo_unit.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Configuration matrix | One independently parametrized acceptance/rejection case for each option-matrix row, asserting exact exception and no allocation on invalid input; parametrize over plain specs and build qarpx-backed objects inside each test | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Sector API and config validation | Literal fixed-weight labels and product of binomial coefficients; invalid partitions, booleans, empty/one-state configs; sample with fixed Generator seed and forbid labels() enumeration; literal JSON payload | `tests/test_operators/test_computational_basis_sector.py`, `tests/test_blocks/test_primitives/test_trotter_ansatz.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Charge and realness certificates | XX+YY accepted with FullyCommuting and rejected under NoGrouping/QWC; nonconserving single X; odd-Y H and even-Y non-scalar generator counterexamples; wrong block and remapping rejected | `tests/test_operators/test_computational_basis_sector.py`, `tests/test_blocks/test_primitives/test_trotter_ansatz.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Column orientation | Analytic Rz conjugation gives lower-left exp(-i theta), upper-right exp(+i theta); assert provider output and conjugated consumer separately | `tests/test_engines/test_transition_columns.py`, `cpp/libqarpx/tests/cpp/test_transition_columns.cpp` |
@@ -840,14 +939,14 @@ gives two negative walkers at 1, absolute population 3 and projected numerator
 `H01*n1 = 2*(-2) = -4` (reference population 1).
 
 The class-level request fixture uses two qubits, weight-one sector {1,2},
-H=XX+YY, and a canonical Trotter ansatz with an identity-only generator
-and bound angle zero (U=I). Its generator certificate is trivially conserving
-and real up to scalar phase. With reference 1, one positive
-walker, dt=1, zero shift/diagonals/damping and one proposal attempt, uniform
-sampling excludes the source: q=1/(D-1)=1 for destination 2. The literal sector
-matrix is [[0,2],[2,0]], so population=3, reference population=1, projected
-numerator=-4 and energy=-4 after one step. The proposal distribution explicitly
-excludes the source.
+H=XX+YY, and a canonical Trotter ansatz with an identity-only generator and
+bound angle zero (U=I). Its generator certificate is trivially conserving and
+real up to scalar phase. With reference 1, one positive walker, dt=1, zero
+shift/diagonals/damping and one proposal attempt, uniform sampling excludes the
+source: q=1/(D-1)=1 for destination 2. The literal sector matrix is
+[[0,2],[2,0]], so population=3, reference population=1, projected numerator=-4
+and energy=-4 after one step. The proposal distribution explicitly excludes the
+source.
 
 Include the fixed root-seed-7, 64-trajectory Binomial(512,.2) regression (mean
 102.4, variance 81.92, five-standard-error mean tolerance and 60% variance
@@ -894,11 +993,12 @@ complex columns and orientation; compaction/sector gathering; resident signed X
 evolution; both binomial RNG fixtures and chunking; request transport/replay
 through real kernels; reference-zero/extinction/device-overflow/probability
 failure histories; bulk upload and cache reuse; realness/reference conflicts;
-evolution-only allocation guards; GIL release; and both notebook smokes. Their
-host/fake counterparts do not satisfy this list. Any required GPU skip blocks
-Gate 2. MC-disabled runs must establish MC unavailability/throwing stubs and
-pass the existing supported CUDA-Q engine cases; MC numerical cases are
-intentionally inapplicable to that profile.
+evolution-only allocation guards; GIL release; pooled trajectory results with
+both estimators on real kernels; and both notebook smokes. Their host/fake
+counterparts do not satisfy this list. Any required GPU skip blocks Gate 2.
+MC-disabled runs must establish MC unavailability/throwing stubs and pass the
+existing supported CUDA-Q engine cases; MC numerical cases are intentionally
+inapplicable to that profile.
 
 Bound execution to at most four qubits for analytic, transport and cache cases;
 two labels for statistical kernels; 4096 one-step trajectories for the larger
@@ -960,6 +1060,8 @@ ABI and regenerates the stub as required by §15.
 - [ ] Add operator-sector certification and the public Trotter accessor.
 - [ ] Add bulk startup, bounded caches, seeds, estimators, diagnostics and
   opt-in lazy QWC circuit accounting.
+- [ ] Add pooled trajectory estimation, whole-trajectory jackknife and strict
+  failure handling with independent literal host oracles.
 - [ ] Test every Python branch with scripted contexts and independent host
   oracles; retain CPU regressions.
 
