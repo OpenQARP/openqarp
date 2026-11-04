@@ -8,7 +8,7 @@ Every snippet below was run against `acad366` with an editable install built fro
 Mutation runs apply one change at a time to a copy of `qsci.py` and run `test_qsci.py` against
 it. The tests in the appendix pass on `acad366` where they pin behaviour that is already right, and
 fail where they pin B1, B3, B4 and B5. The fix sketches below were applied together to the copy.
-With them, the 56 existing tests and the 7 new ones all pass (63 of 63).
+With them, the 56 existing tests and the 8 new ones all pass (64 of 64).
 
 ## Summary
 
@@ -101,49 +101,131 @@ its residual 3e-15
 ```
 
 The count changes between runs: 7, 9, and 25 of 30 in three repeats. The sixth root is the next
-level, wrong by 0.04. At `U = 4` the same ring comes out right, as does the 4×2 periodic lattice
-at (3, 3), so whether a model is hit depends on the matrix. Degenerate low levels are common in
-QSCI targets: lattice symmetry, and degenerate orbitals such as N₂'s π pair.
+level, wrong by 0.04. At `U = 4` the same ring comes out right, so whether a model is hit
+depends on the matrix. It takes no more than two roots: the 4×2 periodic lattice at (3, 3) has
+a twofold ground level, and `n_roots=2` comes back wrong in 14 of 30 calls. Degenerate low
+levels are common in QSCI targets: lattice symmetry, and degenerate orbitals such as N₂'s π
+pair.
+
+`n_roots=1` always gets the energy right: 0 wrong in 120 calls across the cases here, real and
+complex. The vector is a valid ground state, but on a degenerate level it is a different one each
+run. On the ring at U = 4 with (4, 3) electrons, ten runs give overlaps down to 0.2 and
+occupations that differ by up to 0.21, and Phase 3 reads those occupations.
 
 - **Real input.** With an operator on 9 of 11 qubits, so that every level is eightfold degenerate,
   8 roots at dimension 2048 come out wrong in 9 of 10 runs.
 - **Complex input.** scipy routes complex input to `eigs`, which does not orthogonalise within
-  an eigenspace. The vectors are off orthonormal by up to 2e-2 in every run, and some runs also
-  lose a root. Phase 2 and 3 consume these vectors.
+  an eigenspace. In the same eightfold case the vectors are off orthonormal in every run, by up
+  to 0.22, and 4 of 10 runs also lose a root. Phase 2 and 3 consume these vectors.
 
-The first review's degenerate check (Hubbard 3×2, dimension 400, cutoff patched to 1) passed by
-chance.
+The first review's check on the Hubbard 3×2 lattice (dimension 400, 6 roots, cutoff patched to 1)
+called that spectrum degenerate, but it isn't. Its lowest seven levels are distinct at U = 1, 2, 4
+and 8, so that check could not catch this.
 
-Fix sketch. Ask for a few more roots, fix the starting vector, and diagonalise `H` in the returned
-basis. The last step makes the vectors orthonormal for complex input too:
+There are three separate problems here: missed copies, non-orthonormal vectors on the complex
+path, and vectors that change from run to run. Each has a fix with no tunable constant:
+
+- **Different vectors each run.** Pass a seeded `v0`. It has to be `v0`, not `rng=`: scipy drops
+  `rng` when it hands complex input to `eigs` (`scipy/sparse/linalg/_eigen/arpack/arpack.py:1663`
+  in scipy 1.18.1). Seeding makes results reproducible, not right: a fixed `v0` that misses a
+  copy misses it every time.
+- **Non-orthonormal vectors.** Take a QR of the returned vectors and diagonalise `H` in that basis
+  (a k×k `eigh`). This brings every case here to 1e-14. It costs 0.17 s for 245k × 24.
+- **Missed copies, for `n_roots > 1` only.** Check for a missed copy, and if there is one, ask
+  for one more root and solve again:
+  - The returned vectors `V` span an invariant subspace. Shifting it up by more than the spectral
+    width leaves the rest of the spectrum lowest.
+  - One single-root solve on `H + σ V V†` then finds the lowest level outside `span(V)`. If that
+    level is below the last returned energy, a copy was missed.
+  - The check relies only on a single-root solve finding the lowest level, which is what
+    `n_roots=1` already relies on. Multiplicity doesn't enter.
 
 ```python
-_EIGSH_PAD = 4
+def _missed_root(
+    matrix: scipy.sparse.csr_matrix, vectors: NDArray, top: float, v0: NDArray
+) -> bool:
+    """True if an eigenvalue below ``top`` lies outside ``span(vectors)``.
+
+    ``span(vectors)`` is invariant, so shifting it above the spectral width leaves
+    the rest of the spectrum lowest: one single-root solve decides.
+    """
+    shift = 2.0 * float(abs(matrix).sum(axis=1).max())
+    deflated = scipy.sparse.linalg.LinearOperator(
+        matrix.shape,
+        matvec=lambda x: matrix @ x + shift * (vectors @ (vectors.conj().T @ x)),
+        dtype=matrix.dtype,
+    )
+    lowest = scipy.sparse.linalg.eigsh(deflated, k=1, which="SA", v0=v0)[0][0]
+    return bool(lowest < top - 1e-8 * max(1.0, abs(top)))
 ...
     else:
-        # Single-vector ARPACK can skip copies of a degenerate level at the edge of
-        # the window: pad k, seed v0, and Rayleigh-Ritz the returned basis.
-        k = min(n_roots + _EIGSH_PAD, dim - 2)
-        v0 = np.random.default_rng(0).standard_normal(dim)
-        _, vectors = scipy.sparse.linalg.eigsh(matrix, k=k, which="SA", v0=v0)
-        basis, _ = np.linalg.qr(vectors)
-        energies, ritz = scipy.linalg.eigh(basis.conj().T @ (matrix @ basis))
-        energies, vectors = energies[:n_roots], basis @ ritz[:, :n_roots]
+        # Seeded so a degenerate level gets the same basis every run; scipy drops
+        # rng= for complex input, so starts go in as v0.  Each ARPACK call draws a
+        # fresh start: a start already used cannot reach the copy its solve missed.
+        rng = np.random.default_rng(0)
+        for k in range(n_roots, dim - 1):
+            _, vectors = scipy.sparse.linalg.eigsh(
+                matrix, k=k, which="SA", v0=rng.uniform(-1.0, 1.0, dim)
+            )
+            # eigs (complex input) does not orthogonalise within an eigenspace.
+            basis, _ = np.linalg.qr(vectors)
+            energies, ritz = scipy.linalg.eigh(basis.conj().T @ (matrix @ basis))
+            energies, vectors = energies[:n_roots], basis @ ritz[:, :n_roots]
+            if n_roots == 1 or not _missed_root(
+                matrix, vectors, energies[-1], rng.uniform(-1.0, 1.0, dim)
+            ):
+                break
 ```
 
-`dim - 2` is the largest `k` ARPACK takes for complex input, and the sparse branch only runs when
-`n_roots <= dim - 2`.
+Use one seeded generator and draw a fresh start vector for every ARPACK call. The reason:
 
-On the copy, this sketch gets the ring at U=1 and U=4, the 4×2 lattice, and the fourfold real and
-complex cases right to 1e-13, with orthonormality to 1e-14. The eightfold real and complex cases
-are right to within 1e-10 in 10 of 10 runs each.
-Without the seeded `v0`, padding by 2 or 4 already gives 0 wrong in 30 calls on the ring.
+- In exact arithmetic, the space ARPACK searches from a start vector `v` meets each eigenspace in
+  one direction only: the projection of `v` onto it. A copy is missed when `v` barely reaches it.
+- A solve started from a vector already used inherits that blind spot. With the solve's `v0`
+  reused for the check, the check passed wrong answers in 7 of 10 real and 7 of 10 complex
+  fourfold models.
+- A loop that appends the vector the check found and rechecks with the same start goes blind the
+  same way.
+- A fresh draw per call avoids all of this, and one seed keeps the result the same on every run.
 
-Padding is a heuristic, not a guarantee, so the docstring should state the limit. Two
-alternatives:
+The shift is twice the largest absolute row sum (Gershgorin), so it exceeds the spectral width.
+`dim - 2` is the largest `k` ARPACK takes for complex input. The sparse branch only runs when
+`n_roots <= dim - 2`, so the first pass is always valid.
 
-- **Raise `_DENSE_EIGH_MAX_DIM`.** This is the only exact guard. Dense `eigh` takes 4.8 s at
-  dimension 4900 here.
+On the copy:
+
+- **Physical cases.** All three come out right, with vectors orthonormal to 1e-14: the ring at
+  U = 1 with `n_roots=6`, the ring at U = 4 with (4, 3) electrons and `n_roots=4`, and the 4×2
+  lattice with `n_roots=2`. acad366 gets the first one wrong.
+- **Random models.** Ten each of five kinds, all at dimension 4096 with a dense reference: fourfold
+  real and complex (`n_roots=4`), eight- or sixteenfold real and complex (`n_roots=8`), and
+  nondegenerate complex (`n_roots=6`). All 50 come out right, orthonormal to 1e-14. On acad366
+  only 1, 4, 2 and 1 of 10 of the degenerate kinds are right. Its nondegenerate complex vectors
+  are off orthonormal by up to 6e-2.
+- **Reproducibility.** Ten `n_roots=1` runs on the U = 4 ring return the same vector.
+- **Cost, at dimension 245k (4×3 open Hubbard, (4, 4)).** `n_roots=1` is unchanged at 1.2 s
+  against 0.9 s, because the check is skipped there. `n_roots=6` goes from 2.5 s to 4.2 s.
+- **Rounds.** Across the 50 random models, the loop needed up to five rounds on fourfold levels
+  (k from 4 to 8) and on eight- or sixteenfold ones (k from 8 to 12). It never retried on the
+  nondegenerate ones, so there were no false alarms. Each round is cheap at these dimensions. At
+  large dimensions, growing `k` by more than one per round would cut the count.
+
+If the retry loop is more code than wanted, the minimum is to keep the check and warn, naming the
+level. That is what the user needs in order to rerun with more roots. Either way, the
+`n_roots` docstring should say two things. On a degenerate level, the vectors are some orthonormal
+basis of it. And `_DENSE_EIGH_MAX_DIM` is the exact fallback.
+
+Options that don't work as well:
+
+- **Padding `k`.** It is a heuristic, and it isn't sufficient: on a sixteenfold level, padding by
+  4 plus the QR step is still wrong in 3 of 30 runs. It also costs most where it helps least.
+  At dimension 245k, `n_roots=1` padded to 5 takes 1.9 s instead of 1.0 s. It adds no Krylov
+  memory up to `n_roots=5`, because scipy's default `ncv = max(2k + 1, 20)` stays at 20. At
+  `n_roots=10` the memory grows by about a third.
+- **A larger `ncv` alone.** It helps real input partly: the ring at `n_roots=6` goes from 23 to 3
+  wrong in 30. It doesn't help complex input, where orthonormality errors reach 1.0.
+- **Raise `_DENSE_EIGH_MAX_DIM`.** This is exact, but dense `eigh` takes 4.8 s at dimension 4900
+  and grows with the cube of the dimension.
 - **LOBPCG.** It is not a drop-in replacement. With scipy's defaults and a block of 12 it stops
   short on the ring: wrong by 6e-4, with only a warning. With `tol=1e-10, maxiter=1000` it is
   right to 1e-13, but it still warns. Its warnings therefore cannot decide whether a result is
@@ -340,8 +422,8 @@ seeds differ by ordinal, so the block samples are not correlated.
 
 The B1 regression kills an exact revert of `_pool` to the `067c595` accumulator. It doesn't kill
 `sum(weights)` in place of `fsum(weights)`, because Python 3.12's built-in `sum` of floats is
-compensated. Random searches of up to 500k positive-weight lists found no order dependence, so
-that mutant is effectively equivalent. `fsum` stays the right call because it is guaranteed
+compensated. A random search over 200k lists of 3 to 6 positive weights found no order
+dependence, so that mutant is effectively equivalent. `fsum` stays the right call because it is guaranteed
 exactly rounded.
 
 ## Minor
@@ -362,14 +444,15 @@ exactly rounded.
   different counts.
 - **The new tests.** They use independent oracles: `sparse_matrix()` blocks for the eigsh residuals
   and the `_solve` order, and the closed-form spectrum ±1 ± 0.5 for the ARPACK limits.
-- **The complex sparse path without degeneracy.** On a random complex Hermitian operator with
-  the cutoff patched to 1, energies match dense to 7e-14 and residuals are about 3e-14.
+- **The complex sparse path without degeneracy.** On a random complex Hermitian 6-qubit operator
+  with the cutoff patched to 1, the 3 lowest energies match dense to within 1e-10 in 10 of 10
+  runs, and the vectors are orthonormal to 1e-14.
 
 ## Appendix: tests for B1, B3–B5 and T4
 
-On `acad366`, the B1, B3, B4 and B5 tests fail and the two T4 tests pass. The degenerate test
-fails in at least one parametrisation in 10 of 10 runs. Each T4 mutant fails at least one of them.
-With the fix sketches, all pass.
+On `acad366`, the B1, B3, B4 and B5 tests fail and the two T4 tests pass. B3 has two tests here:
+degenerate roots and reproducibility. The degenerate test fails in at least one parametrisation in
+10 of 10 runs. Each T4 mutant fails at least one of these tests. With the fix sketches, all pass.
 
 ```python
 import itertools
@@ -471,4 +554,19 @@ def test_sparse_path_degenerate_roots(letters):
     reference = scipy.linalg.eigvalsh(hamiltonian.sparse_matrix(11).toarray())[:8]
     np.testing.assert_allclose(energies, reference, atol=1e-10)
     np.testing.assert_allclose(coefficients.conj().T @ coefficients, np.eye(8), atol=1e-10)
+
+
+def test_sparse_path_is_reproducible():
+    # A twofold ground level above the dense cutoff: any basis of it is valid,
+    # but two runs must return the same one.
+    sector = _sector(16, 3, 3)
+    algorithm = QSCI(
+        fermi_hubbard([4, 2], 1.0, 2.0, periodic=True),
+        distribution={b: 1 / len(sector) for b in sector},
+        n_electrons=(3, 3),
+        n_roots=2,
+    ).build()
+    _, first = algorithm.run()
+    _, second = algorithm.run()
+    np.testing.assert_array_equal(first, second)
 ```
