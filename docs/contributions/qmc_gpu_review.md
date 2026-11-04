@@ -8,7 +8,8 @@ Findings only; the green-light is the reviewer's call. The revision at
 `e9ee9d0` is reviewed against these findings in the second pass, the
 Architecture section after it records the reviewer's positions on the
 design, the revision at `57971d0` is reviewed against both in the third
-pass, and the revision at `3c99e80` in the fourth pass at the end.
+pass, the revision at `3c99e80` in the fourth pass, and the revision at
+`4225b8c` in the fifth pass at the end.
 
 ## Summary
 
@@ -1201,3 +1202,36 @@ writing (D4); the design fits the conventions and the plan names and writes
 the three §14 paragraphs it adds (plan:101-130); the Scope is complete and
 bounded with the grouping work in its own plan; every oracle in the test
 table is independent of the implementation.
+
+## Fifth pass at `4225b8c`
+
+Plan blob `8cfd4b8d`, 1085 lines; only the plan changed in this commit. PR
+#22 head is `4225b8c`, no comments, author boxes unticked. Checked against
+`develop` `6c632b9` by the collating reviewer alone; every literal oracle
+below was recomputed by hand.
+
+### Disposition
+
+F31 and every residual item are addressed. Nothing blocks the green-light.
+
+| Item | Plan lines | Note |
+|---|---|---|
+| F31 | 301-355, 529-530, 617-619, 802-818, 901-902, 996-997, 1063-1064 | Combined estimate `E = sum(A_r) / sum(B_r)` over completed trajectories, each after its own burn-in; instantaneous contributes each trajectory's final step. Leave-one-trajectory jackknife always, independent of the block size; invalid replica rule, zero pooled denominator (`ZeroDenominator`, NaN), failed trajectory (`RuntimeError`, `Incomplete`, no estimate), R = 1 without an error bar. Two-trajectory oracle: contributions (10, 3) and (50, 7) give 6, replicas 50/7 and 10/3, standard error 40/21; burn-in one gives 20/3, replicas 8 and 4, standard error 2. Edge oracles: [(1, 0), (3, 2)] gives 2 with one invalid replica; [(1, 1), (3, -1)] gives NaN; [(2, -1), (4, -1)] gives -3 with standard error 1; (10, 3) alone gives 10/3. All check. Top-level `estimator` keys listed, status set `Completed`/`ZeroDenominator`/`Incomplete`, per-trajectory keys kept separate. Two test rows and a phase box added. |
+| Residual 1 | 100, 1084 | The two long prose lines are now 81 columns, one over. Nit. |
+| Residual 2 | 903 | CPU row for the patched `_require_cudaq` override test added. |
+| Residual 3 | 194-200, 904 | Adapter resamples source draws from `sample_labels(rng, size)` in chunks bounded by `transition_batch_size`; acceptance conditions on a non-source label, so proposals stay uniform over the other D-1 states; dimension one rejected. Test row with a three-label sector, q = 1/2. |
+| Residual 4 | 56-58, 596-600, 911 | `test_montecarlo_unit.py` out of Scope; both CPU files run unchanged as regression coverage; Configuration matrix row points at the new file only. |
+| Residual 5 | 257-259, 262-266 | "Define the jackknife algorithm ... as below"; the literal tape oracles name the regression cases; both counters named and distinguished. |
+
+### Nits, not blocking
+
+- "the existing `sample_labels(rng, size)`" (plan:198) is a method of the
+  new `ComputationalBasisSector` (plan:707); write "the sector's".
+- The instantaneous row (plan:615) reads "the final step's instantaneous
+  energy", which is per trajectory; across trajectories it is the pooled
+  endpoint ratio (plan:304-306). One clause would close the gap.
+
+### Gate call
+
+Ready to green-light at `4225b8c`. The reviewer's four Gate 1 boxes hold as
+stated in the fourth pass. The nits above can ride in the header commit.
