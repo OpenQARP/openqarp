@@ -1,11 +1,11 @@
 # Add persistent GPU Monte Carlo and resident signed evolution
 
-**Status:** Planned
+**Status:** In progress
 **Author:** Antonio Márquez Romero (+ Codex)
 **Date:** 2026-10-29
 **Tier:** Structural
 **Branch:** `improvement/qmc`
-**Green-lit:**
+**Green-lit:** 2026-11-04, plan blob `8cfd4b8d9a18416e75216d1f5ba33a698b678306`
 **Scope:** The following implementation and documentation paths. Regenerate the
 stub, extend its runtime/drift tests, and add narrowly justified generator
 patterns only for signatures the bindings cannot express. Explicitly exclude the
@@ -195,7 +195,7 @@ rows into a persistent native cache and resumes on missing rows. Optional
 uniform-sector proposals sample walker destinations and acquire exact
 coefficients; they do not sample quantum measurements. Uniform proposals exclude
 the source and use q=1/(sector.dimension-1) per destination. The adapter calls
-the existing `sample_labels(rng, size)` in bounded chunks, retains every
+the sector's `sample_labels(rng, size)` in bounded chunks, retains every
 non-source draw and resamples source draws until the requested number of
 accepted destinations is obtained. Chunk size never exceeds
 `transition_batch_size`; acceptance is conditioning on a non-source label, so
@@ -612,7 +612,7 @@ untouched.
 | `unitary_block` not a `QarpBlock`; `sector` neither None nor `ComputationalBasisSector` | `TypeError` |
 | `seed` neither None nor a non-bool integer | `TypeError`; a negative integer raises `ValueError` |
 | `verbose` not bool | `TypeError` |
-| Instantaneous estimator with nonzero `estimator_burn_in_steps` or supplied `estimator_block_size` | `ValueError`; its reported estimate is the final step's instantaneous energy |
+| Instantaneous estimator with nonzero `estimator_burn_in_steps` or supplied `estimator_block_size` | `ValueError`; each trajectory contributes its final-step numerator and denominator, and the reported estimate across trajectories is their pooled endpoint ratio |
 | Ratio-of-sums with burn-in | Drop the first `estimator_burn_in_steps` samples from reported estimation; retain raw histories |
 | Multiple trajectories in either estimator mode | Pool signed per-trajectory contributions; across-trajectory jackknife is independent of local block-size selection |
 | Failed trajectory | Run raises RuntimeError with combined status Incomplete, no returned estimate and retained local histories |
