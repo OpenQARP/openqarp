@@ -23,6 +23,7 @@ implementation belongs to its own branch and PR.
 - `cpp/libqarpx/python/bindings_montecarlo.cpp`
 - `cpp/libqarpx/python/qarpx.pyi`
 - `cpp/libqarpx/python/stubgen_patterns.txt`
+- `cpp/libqarpx/src/montecarlo/host_protocol.h`
 - `cpp/libqarpx/src/montecarlo/contexts.cpp`
 - `cpp/libqarpx/src/montecarlo/rng.cuh`
 - `cpp/libqarpx/src/montecarlo/complete_evolution.cu`
@@ -47,9 +48,7 @@ implementation belongs to its own branch and PR.
 - `qarp/_abi.py`
 - `qarp/algorithms/__init__.py`
 - `qarp/algorithms/_composite/__init__.py`
-- `qarp/algorithms/_composite/montecarlo.py`
 - `qarp/algorithms/_composite/aggregated_montecarlo.py`
-- `qarp/algorithms/_composite/_montecarlo_common.py`
 - `qarp/blocks/_primitives/trotter_block.py`
 - `qarp/engines/_engine.py`
 - `qarp/engines/_cudaq_engine.py`
@@ -70,9 +69,10 @@ implementation belongs to its own branch and PR.
 
 At the baseline, `MonteCarlo` evaluates semiclassical coefficients on the CPU
 and represents walkers individually. Add `AggregatedMonteCarlo`, a separate
-composite with persistent batched exact GPU coefficients and device-resident signed
-populations. Preserve existing CPU, quantum-sampling and multi-target behavior,
-while fitting the current lazy primitive lifecycle and typed native API.
+composite with persistent batched exact GPU coefficients and device-resident
+signed populations. Preserve existing CPU, quantum-sampling and multi-target
+behavior, while fitting the current lazy primitive lifecycle and typed native
+API.
 
 The baseline for these new requirements is `develop` at
 `6c632b9a66383584a5944685abb81d33900c5836`. Recheck the base and paired ABI
@@ -81,20 +81,22 @@ before implementation if `develop` advances.
 The CPU build constructs a dense transformed basis: `2**n` vectors of length
 `2**n`, in addition to H. The GPU path must avoid that host allocation and use
 two FP64 complex state batches, approximately `32 * batch * 2**n` bytes before
-workspace. Acceptance requires independent coefficient/walker oracles,
-persistent allocation reuse and no host dense basis. For registers of one to
-four qubits, compare FP64 columns with independent NumPy matrices at absolute
-`1e-12`, `rtol=0`; integer populations and counters match exactly. The cutoff,
-realness, seeding and statistical contracts below are mandatory and cannot be
-relaxed to accommodate the architecture split. Batching, compact gathering,
-resident evolution and cache reuse are required capabilities. No runtime speedup
-target or comparative timing is part of this public plan.
+workspace. Analytically, CPU H plus transformed-basis storage is about `32 *
+4**n` bytes: 8 GiB at 14 qubits and 128 GiB at 16; two GPU batches at batch size
+64 and 16 qubits require 128 MiB before workspace. Acceptance requires
+independent coefficient/walker oracles, persistent allocation reuse and no host
+dense basis. For registers of one to four qubits, compare FP64 columns with
+independent NumPy matrices at absolute `1e-12`, `rtol=0`; integer populations
+and counters match exactly. The cutoff, realness, seeding and statistical
+contracts below are mandatory. Batching, compact gathering, resident evolution
+and cache reuse are required capabilities. No runtime speedup target or
+comparative timing is part of this plan.
 
 ## Design
 
-All GPU behavior below is new relative to the public baseline. Every added or
-adapted numerical test must assert a named independent oracle in this plan;
-recorded implementation output is not an oracle (§18).
+All GPU behavior below is new relative to `develop`. Every numerical test must
+assert a named independent oracle in this plan; recorded implementation output
+is not an oracle (§18).
 
 **Proposed §14 additions.** Apply these additions before the code changes: place
 the ownership paragraph immediately after "Engines own the pipeline", the
@@ -102,20 +104,23 @@ build-gate paragraph after "CUDA-Q is build-gated", and the seed paragraph after
 "Per-circuit seeds are prime-stride derived".
 
 > **Stateful Monte Carlo ownership.** `AggregatedMonteCarlo` obtains its
-> simulator from `CudaqEngine` through a resident-capability hook without a host
-> statevector-width cap. Batched transformed columns, CSR compaction and sector
-> gathering belong to the simulator layer. `qarpx::montecarlo` owns resident
-> walker evolution, transport and result records. The engine's simulator lends
-> opaque lifetime-safe resource leases; a lease prevents reconfiguration, and a
-> use guard serializes access with simulator runs. Leases remain valid after
-> simulator move/destruction. Native MC executes no primitives; any other engine
-> raises `CapabilityError`.
+> simulator through `Engine._resident_simulator(n_qubits)`, implemented by
+> `CudaqEngine`, without a host statevector-width cap. Batched transformed
+> columns, CSR compaction and sector gathering belong to the simulator layer.
+> `qarpx::montecarlo` owns resident walker evolution, transport and result
+> records. The engine's simulator lends opaque lifetime-safe resource leases; a
+> lease prevents reconfiguration, and a use guard serializes access with
+> simulator runs. Leases remain valid after simulator move/destruction. Native
+> MC executes no primitives; engines lacking the resident capability raise
+> `CapabilityError`.
 >
 > **Native Monte Carlo is separately build-gated.**
 > `QARP_WITH_CUDAQ_SEMICLASSICAL` defaults OFF and requires `QARP_WITH_CUDAQ`,
 > CUDA C++20 and development cuStateVec with batched matrix support. Disabled
 > builds expose host records and `montecarlo_available() == False`; numerical
-> factories raise `CapabilityError`.
+> evolution factories and `CudaqSimulator.make_transition_column_provider` raise
+> `CapabilityError`. The column factory uses the same gate and
+> `montecarlo_available()` probe, including for consumers outside MC.
 >
 > **Resident walker seeds are event-keyed.** Native MC uses Philox streams keyed
 > by root seed, trajectory, step and event. Host proposal destinations use a
@@ -127,49 +132,71 @@ build-gate paragraph after "CUDA-Q is build-gated", and the seed paragraph after
 
 **Ownership and native separation (§14).** `AggregatedMonteCarlo` extends
 `CompositeAlgorithm`. `MonteCarlo` keeps its signature, defaults, validation and
-CPU/Quantum behavior. Extract only existing common H/U/reference-label checks
-into `_montecarlo_common.py`; additional GPU checks stay in the new class. Do
-not introduce a new shared algorithm hierarchy.
+CPU/Quantum behavior. Keep new validation in `AggregatedMonteCarlo`; do not
+extract a shared helper or edit the CPU class.
 
-Add `Engine._resident_statevector_simulator(n_qubits)` with a default
-`CapabilityError` and a `CudaqEngine` override returning its existing simulator
-after MC availability/configuration checks. Recheck eligibility on use. The hook
-does not copy a host statevector or invoke the host-width guard. Simulator
-configuration comes solely from the engine; no second selector or raw-config
-argument is added to the algorithm. The simulator owns leases and serializes
-coefficient evaluation and evolution with its ordinary runs.
+Add `Engine._resident_simulator(n_qubits)` with a default `CapabilityError`.
+Eligibility is determined solely by calling this hook, never an engine
+`isinstance` check. A missing/noncallable hook is a capability failure. A
+`CudaqEngine` override returns its existing simulator, checking MC availability
+and `self._sim.config` for StateVector, FP64 and the default target. Recheck
+eligibility on use. The hook neither copies a host statevector nor invokes the
+host-width guard. Simulator configuration comes solely from the engine. The
+simulator serializes coefficient evaluation and evolution with its ordinary
+runs.
+
+CPU orchestration fakes subclass `Engine` and override the hook. Test the actual
+`CudaqEngine` override on CPU by patching `_require_cudaq` to return a scripted
+simulator class accepting/storing `CudaqConfig`. This permits its constructor
+and `self._sim.config` checks to run without a GPU. Keep actual GPU construction
+and numerical execution in separately marked GPU cases.
 
 Simulator transition columns use canonical gate unitaries from
 `QarpSimulator.local_unitary` / `local_unitary_of` and the existing
 `batch_expectation` Pauli-sum format. Add no second gate-matrix catalogue. The
 simulator factory accepts bound U and derives U-dagger from that command stream.
-No full-register dense unitary is constructed. `qarpx::montecarlo` contains only
+Handle `GPhase` as a scalar and cancel it with its adjoint in `U†HU`; skip
+`Barrier`. Neither goes through the local-unitary routine, which rejects
+zero-qubit commands. All other nonunitary commands are rejected. No
+full-register dense unitary is constructed. `qarpx::montecarlo` contains only
 walker evolution, transport and result records.
 
 Host validation, request identity/replay and checked capacity accounting live in
-`contexts.cpp`, compiled and directly tested in every build. Split CUDA code
+`contexts.cpp`, compiled and directly tested in every build. Internal
+`qarpx::montecarlo::detail::HostProtocol` is declared in
+`src/montecarlo/host_protocol.h`. C++ tests construct it directly without a
+simulator, lease or numerical factory. It owns request identity, accepted replay
+payload and checked capacity forecasts; real CUDA contexts delegate to this same
+host state machine. It is not bound or installed as public API. Split CUDA code
 into `complete_evolution.cu`, `request_evolution.cu` and shared Philox helpers
 in `rng.cuh`. Evolution-only contexts allocate neither dense statevectors nor a
 cuStateVec handle. Public headers contain no CUDA types or includes. Release the
 Python GIL around native advances, including an applying request batch that
-advances evolution; acquire array owners before release and construct Python
-results only after reacquiring it.
+advances evolution. Acquire array owners with the GIL held, release the GIL,
+then acquire the use guard; drop the guard before reacquiring the GIL and
+constructing Python results, including on exceptions. Apply this order to
+coefficient evaluation as well. Evolution-only work uses the same guard to
+protect the shared leased resource lifetime and serialize stream/device work
+with simulator runs, even though it allocates no statevector or handle.
 
 **Persistent exact coefficients.** Batched complex128 cuStateVec evaluates
 columns `(U† H U)|source>` in LSB order. Consumers requiring rows use the
 Hermitian conjugate. Upload gates and Pauli terms once and reuse capacity and
 workspace. Compact CSR results retain coefficients strictly above absolute
-`1e-12`. Certified fixed-charge sector gathering limits returned amplitudes,
-while statevector storage still scales with the full register. Certify every
-partition-number commutator for H and each emitted Trotter generator group;
-require a canonical, uncontrolled `TrotterAnsatzBlock` for sector certification.
-Uniform-sector request transport additionally certifies a real H and a real
-orthogonal ansatz, allowing a scalar global phase.
+`1e-12`. Sector gathering returns only labels satisfying the declared fixed
+partition occupations, after the conservation checks below, while statevector
+storage still scales with the full register. Certify every partition-number
+commutator for H and each emitted Trotter generator group; require a canonical,
+uncontrolled `TrotterAnsatzBlock` for sector certification. Uniform-sector
+request transport additionally certifies a real H and a real orthogonal ansatz,
+allowing a scalar global phase.
 
 **Two resident transport paths.** Complete-row evolution incrementally uploads
 rows into a persistent native cache and resumes on missing rows. Optional
 uniform-sector proposals sample walker destinations and acquire exact
-coefficients; they do not sample quantum measurements. Transport records retain
+coefficients; they do not sample quantum measurements. Uniform proposals exclude
+the source and use q=1/(sector.dimension-1) per destination. Requests,
+coefficient batches and evolution results are the transport records; they retain
 uint64 labels/counts and signed int64 populations. Validate parallel arrays,
 proposal probabilities, multiplicities, request identity (request id,
 trajectory, step and attempt count), and complete diagonal and
@@ -187,12 +214,13 @@ undefined instantaneous energies as NaN. CPU zero-reference behavior continues
 to return its initial energy; the new GPU policy does not change it.
 
 **Bulk startup and caches.** When complete-row circuit accounting is disabled,
-prepare native upload arrays using bounded NumPy operations. Preserve ordering,
-signs, strict cutoffs, reference exceptions, absent zeros and empty rows. Store
-complete support in the native cache without duplicating every edge in Python;
-add a bounded scalar Hermitian cache for separate exact requests. Reuse caches
-across trajectories, including a single trajectory. Add the complete row cache's
-16 GiB guard and bounded adaptive prefetch; request transport uses the
+prepare native upload arrays using bounded NumPy operations. Produce the same
+arrays as the accounting path: ordering, signs, strict cutoffs, reference
+exceptions, absent zeros and empty rows must agree. Store complete support in
+the native cache without duplicating every edge in Python; add a bounded scalar
+Hermitian cache for exact coefficient queries on both transport paths. Reuse
+caches across trajectories, including a single trajectory. Add the complete row
+cache's 16 GiB guard and bounded adaptive prefetch; request transport uses the
 configured scalar-cache budget and disallows adaptive full-row prefetch. Reject
 a bound H/U/configuration change until contexts are rebuilt.
 
@@ -216,38 +244,96 @@ and `max_complete_row_imaginary`. Resident paths report zero executed
 measurement circuits and shots, separately from constructed circuit counts. The
 serialized `qarp.resources` schema is unchanged (§19).
 
-**Public Python integration (§§13, 17).** `AggregatedMonteCarlo` accepts a finite
-Hermitian Pauli H, a bound unitary block, one computational-basis reference
-label and single-target exact evolution. H stays a Pauli operator throughout
-startup; never call CPU H densification or `generate_states_new_basis`. The GPU
-class has no Quantum mode, qDRIFT, custom walker basis, supplied `ham_cache`,
-multi-target or `save_walker_history` option. Its typed signature omits these
-unsupported choices. Existing `MonteCarlo` retains them.
+**Estimator option contract.** Keep instantaneous estimation as the final step's
+energy; nondefault burn-in/block options on that estimator raise `ValueError`.
+Ratio-of-sums uses the signed production numerator sum divided by the signed
+denominator sum after burn-in. A zero cumulative denominator produces NaN and
+increments its diagnostic counter.
+
+`estimator_block_size=None` disables jackknife. An explicit positive block
+size enables the existing literal leave-one-block calculation for ratio-of-sums.
+This makes uncertainty computation opt-in and gives the caller control of the
+block size, without an implicit sizing rule. Retain the jackknife algorithm,
+incomplete-tail handling, signed-denominator safeguards and regression cases.
+The point estimate and raw histories do not depend on enabling jackknife.
+
+For N production samples and explicit block size b, K=floor(N/b) contiguous
+complete blocks supply K leave-one-block ratios. The point estimate uses all N
+samples; jackknife uses only the first K*b and excludes the incomplete tail.
+A replica with zero remaining signed denominator is invalid. Report standard
+error `sqrt((K-1)/K * sum((replica-mean_replicas)**2))` only for K>=2 with all
+replicas valid; otherwise `jackknife_stderr=None`.
+
+When `estimator_block_size=None`, omit `block_size`, `block_count` and all
+`jackknife_*`/invalid-replica keys and perform no jackknife computation. With
+an explicit block size on ratio-of-sums, include those keys, the requested
+block size, sample counts and invalid-replica count, including when uncertainty
+is unavailable.
+
+Instantaneous estimation deliberately retains its final-step contract. Burn-in
+cannot change that endpoint, and deleting blocks from a tape to recompute an
+endpoint measures sensitivity to which final sample survives rather than
+uncertainty in an accumulated energy estimate. Therefore the proposal declines
+R7's suggestion to accept burn-in/blocking on both estimators. Nondefault
+burn-in/block options with `projected_energy_estimator="instantaneous"` raise
+`ValueError` with a message directing the caller to `"ratio_of_sums"` for
+production-sample burn-in and optional jackknife. This preserves the meaning
+of instantaneous energy and avoids silently interpreting it as a time average.
+
+A literal estimator oracle uses numerators [2,8,18,32] and denominators
+[1,2,3,4]. Ratio-of-sums gives 6 with jackknife disabled by default. Explicit
+block size 2 gives replicas 50/7 and 10/3 and standard error 40/21, with the
+same point estimate 6. Burn-in one gives 58/9 from the three remaining samples.
+Instantaneous returns 8, and its nondefault burn-in/block combinations reject.
+These references are computed from the supplied tapes, independently of
+estimator helpers.
+
+**Public Python integration (§§13, 17).** `AggregatedMonteCarlo` accepts a
+finite Hermitian Pauli H, a bound unitary block, one computational-basis
+reference label and single-target exact evolution. H stays a Pauli operator
+throughout startup; never call CPU H densification or
+`generate_states_new_basis`. The GPU class has no Quantum mode, qDRIFT, custom
+walker basis, supplied `ham_cache`, multi-target or `save_walker_history`
+option. Its typed signature omits these unsupported choices. Existing
+`MonteCarlo` retains them.
 
 Use `QarpBlock` where symbol/parameter members are read, `AnyBlock` where native
 members suffice, canonical sorted symbols and `parameter_map` for binding. Build
 and flatten a copied, bound U for coefficient acquisition; pending
 substitutions/daggers and exact global phase must survive. Preserve the public
-block lifecycle and container gate guards.
+block lifecycle: composite/controlled/conditional containers reject direct gate
+insertion, and pending child operations are materialized before embedding.
 
 **Circuit accounting and deferred measurement work.**
-`track_transition_circuits=False` by default. When enabled, count hypothetical
-QWC transition measurement circuits through the existing
-`GroupedTransitionHadamardTest.circuits()` interface, using unbuilt input blocks
-and both real and imaginary quadratures. Zero H gives zero circuits; I and X
-each give two, and X+Z gives four per coefficient pair. Never populate
-`sub_blocks` eagerly, compile or execute those circuits. Account each distinct
-coefficient pair once per run; repeated requests/caches do not multiply the
-hypothetical count. Report constructed circuits/settings separately from
-executed measurement circuits/shots, which are always zero. Accounting on/off
+`track_transition_circuits=False` by default. When enabled, derive the QWC
+per-pair circuit count once per run through the existing
+`GroupedTransitionHadamardTest.circuits()` interface, using representative
+unbuilt bra/ket input blocks and both real and imaginary quadratures. Counts
+depend on H, register width, grouping and quadratures, not the basis pair.
+Zero H gives C=0; I and X each give C=2; X+Z gives C=4. Never populate
+`sub_blocks` eagerly, compile or execute those circuits.
+
+Discard the representative circuit list after deriving C; retain only integer
+count metadata and the set of accounted pair labels for that run. No mutable
+circuit blocks are cached. Count each Hermitian coefficient pair once using
+`(min(source, target), max(source, target))`; repeated or reversed requests,
+including cache hits and later trajectories in the same run, add no settings.
+For P distinct accounted pairs, report C*P hypothetical measurement settings.
+Start fresh accounting metadata on each new run or rebuild after H/U/config
+changes. With accounting disabled, do not call `circuits()` at all.
+
+`generated_circuits` counts the C representative circuits actually constructed
+once, while `measurement_settings` counts the C*P hypothetical settings.
+Both are zero when accounting is disabled. Executed measurement circuits and
+shots are always zero. This distinguishes construction work from hypothetical
+measurement totals without changing the resource schema. Accounting on/off
 must give identical evolution histories for the same seed and configuration.
 
 No grouping or interferometric API changes are needed here. DSATUR, general
 commuting bases, `basis_change`, `prepared_state`, immutable layout caching and
 `measurement_plan` are assigned to
 [`qmc_measurement_layouts_plan.md`](qmc_measurement_layouts_plan.md), a separate
-Standard contribution and PR. This explicitly revises the earlier combined
-scope; it does not remove any resident numerical capability. The GPU
+Standard contribution and PR. This contribution excludes those features. The GPU
 contribution can be validated and merged without that follow-up.
 
 **Bindings, builds and packaging (§15).** Extend existing build files,
@@ -280,23 +366,9 @@ execution, retained-state batching, a native cache-budget API and further
 reduction/RNG/metadata scaling redesign are separate contributions. This
 contribution does not add workload-specific behavior.
 
-**Gate 1 decisions and remaining discussion.** The revised proposal adopts P1–P7,
-including the proposed class name `AggregatedMonteCarlo`. The name describes
-walker aggregation: one signed integer population per basis label, as defined
-in the class docstring. Backend selection belongs to `CudaqEngine`.
-
-The structural discussion is still pending. Its agenda is the engine hook and
-simulator/evolution boundary, the new class and public API, the separate
-measurement-layout contribution, and the declared memory guards. The reviewer
-accepted author-run GPU validation in P7; this is agreement on the validation
-arrangement, not the design green-light or Gate 2 approval. Scaling and native
-memory-budget redesign remain outside this contribution.
-
-Before asking for Gate 1, the author must reconcile PR #22's summary and five
-author checkboxes with this revision, remove stale publication wording, and
-reconcile the intended reviewer recorded on the PR with the actual review
-requests. The reviewer must record the required green-light comment before
-implementation. These PR/discussion actions are not completed by this edit.
+The class name `AggregatedMonteCarlo` describes one signed integer population
+per basis label; its engine supplies the simulator. The structural discussion is
+conducted in `qmc_gpu_review.md` on this PR.
 
 **Build and scope details.** Set the new gate to `"OFF"` in
 `[tool.scikit-build.cmake.define]` in `pyproject.toml` as well as CMake's
@@ -364,17 +436,17 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         population_threshold: int = 350,
         num_trajectories: int = 10,
         verbose: bool = False,
-        engine: Optional[Engine] = None,
+        engine: Engine,
         seed: Optional[int] = None,
-        gpu_row_batch_size: int = 1,
-        gpu_transition_prefetch: Literal["none", "adaptive"] = "none",
+        column_batch_size: int = 1,
+        transition_prefetch: Literal["none", "adaptive"] = "none",
         reference_zero_policy: Literal["error", "continue"] = "error",
         projected_energy_estimator: Literal[
             "instantaneous", "ratio_of_sums"
         ] = "instantaneous",
         estimator_burn_in_steps: int = 0,
         estimator_block_size: Optional[int] = None,
-        semiclassical_sector: Optional[ComputationalBasisSector] = None,
+        sector: Optional[ComputationalBasisSector] = None,
         resident_evolution: Optional[ResidentEvolutionConfig] = None,
         track_transition_circuits: bool = False,
     ) -> None: ...
@@ -382,13 +454,14 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
 
 `resident_evolution=None` selects complete-row transport; a config selects
 uniform-sector request transport and owns its sector declaration. There are no
-`semiclassical_backend`, `cudaq_config` or `walker_evolution` selectors.
-`engine=None` follows the composite base's `QarpEngine` default and therefore
-raises `CapabilityError`; users must supply a capable `CudaqEngine`. Use the
-existing composite lifecycle: `build() -> Self` prepares the contexts,
-`iterate() -> None` advances evolution, and `run() -> list[float]` returns the
-single-target estimate as a one-element list. Add read-only diagnostics to the
-new class only. Existing `MonteCarlo` signatures and results are unchanged.
+`semiclassical_backend`, `cudaq_config` or `walker_evolution` selectors. The
+keyword-only `engine` is required; omitting it raises ordinary `TypeError`.
+Engines without resident capability raise `CapabilityError` through the hook.
+The register width is `unitary_block.n_qubits`; H acting on a qubit at or above
+it raises `ValueError`. Use the existing composite lifecycle: `build() -> Self`
+prepares contexts, `iterate() -> None` advances evolution, and `run() ->
+list[float]` returns the single-target estimate as a one-element list. Add
+read-only diagnostics to the new class only.
 
 `ComputationalBasisSector` is exported only from `qarp.operators`; the frozen
 `ResidentEvolutionConfig` is exported from `qarp.algorithms`. Sector/charge
@@ -413,7 +486,8 @@ Native API (`qarpx` exports and simulator/provider/context methods):
 ```text
 montecarlo_available() -> bool
 simulator.make_transition_column_provider(U, n, observable,
-    initial_batch_capacity=1, sector_target_labels=None) -> TransitionColumnProvider
+    initial_batch_capacity=1, sector_target_labels=None)
+    -> TransitionColumnProvider
 make_resident_evolution_context(simulator, n) -> ResidentEvolutionContext
 provider.columns(source_labels) -> complex128[batch, 2**n]
 provider.compact_columns(source_labels, absolute_tolerance)
@@ -426,7 +500,8 @@ context.upload_aggregated_transition_rows(offsets, sources, targets,
 context.advance_aggregated_evolution(max_steps) -> EvolutionResult
 context.request_transitions(attempts_per_walker) -> TransitionRequest
 context.apply_transition_batch(request_id, trajectory_index, step_index,
-    attempts_per_walker, sources, targets, multiplicities, proposal_probabilities,
+    attempts_per_walker, sources, targets, multiplicities,
+    proposal_probabilities,
     transition_coefficients, diagonal_labels, diagonal_elements,
     reference_labels, reference_elements) -> EvolutionResult
 TransitionRequest, TransitionBatch, EvolutionResult, EvolutionStatus
@@ -453,24 +528,32 @@ histories.
 Every row below applies to `AggregatedMonteCarlo` only, except the explicit CPU
 regression row. Parameter names are constructor names above. Test all rows with
 CPU fakes in `test_montecarlo_aggregated.py`; keep CPU compatibility cases in
-`test_montecarlo_unit.py`. The new shared helper must introduce no CPU
-validation or new CPU options.
+`test_montecarlo_unit.py`. CPU validation and options are untouched.
 
 | Combination | Contract / exception |
 |---|---|
 | Existing `MonteCarlo` with any previously supported engine/mode/target count | Existing behavior and validation, including existing zero-reference policy |
-| `engine=None`, `QarpEngine`, or another non-CUDA-Q engine | `CapabilityError`, no native allocation or silent fallback |
+| `QarpEngine` or another engine without resident capability (including explicit `None`) | `CapabilityError`, no native allocation or silent fallback |
 | `CudaqEngine` without MC capability, non-StateVector, non-FP64 or custom target | `CapabilityError` before allocation and rechecked on use |
-| Valid `CudaqEngine` | Call its resident hook; use and lease its simulator; never execute primitives |
+| Engine with a working resident hook | Call its resident hook; use and lease its simulator; never execute primitives |
 | `hamiltonian` as a dense array | `CapabilityError`; unrelated type is `TypeError` |
 | Nonfinite or non-Hermitian Pauli `hamiltonian` | `ValueError` before native allocation; this is GPU-only validation |
+| Missing required `engine` | Constructor `TypeError` |
+| `reference_walker_label` not a non-bool integer | `TypeError` |
+| `unitary_block` not a `QarpBlock`; `sector` neither None nor `ComputationalBasisSector` | `TypeError` |
+| `seed` neither None nor a non-bool integer | `TypeError`; a negative integer raises `ValueError` |
+| `verbose` not bool | `TypeError` |
+| Instantaneous estimator with nonzero `estimator_burn_in_steps` or supplied `estimator_block_size` | `ValueError`; its reported estimate is the final step's instantaneous energy |
+| Ratio-of-sums with burn-in | Drop the first `estimator_burn_in_steps` samples from reported estimation; retain raw histories |
+| Ratio-of-sums with `estimator_block_size=None` | Jackknife disabled; omit block/jackknife diagnostics and perform no replica calculations |
+| Ratio-of-sums with positive explicit block size | Literal leave-one-block ratio-of-sums replicas; see diagnostics contract below |
 | CPU-only keywords (`mode`, `num_target_states`, `walker_basis`, `qdrift`, `ham_cache`, `save_walker_history`) | Absent from the new signature; ordinary unexpected-keyword `TypeError` |
 | Complete rows with no sector | Full-register columns; finite real transformed coefficients checked as acquired |
-| Complete rows with `semiclassical_sector` | Certify before enumeration/allocation; dimension one is allowed |
-| Request config plus `semiclassical_sector` | `ValueError`; declare sector only in config |
+| Complete rows with `sector` | Certify before enumeration/allocation; dimension one is allowed |
+| Request config plus `sector` | `ValueError`; declare sector only in config |
 | Request config plus adaptive prefetch | `CapabilityError` |
 | Request config of wrong type; non-bool `track_transition_circuits` | `TypeError` |
-| Nonpositive/bool `gpu_row_batch_size`, `num_trajectories`, `initial_walker_count`, `population_threshold`, or supplied `estimator_block_size` | `ValueError` |
+| Noninteger/nonpositive/bool `column_batch_size`, `num_trajectories`, `initial_walker_count`, `population_threshold`, or supplied `estimator_block_size` | `ValueError` |
 | Unknown prefetch/estimator/reference-zero selector | `ValueError` |
 | Nonfinite `time_step`, `total_time`, `shift_damping` or `approx_ground_state_energy`; nonpositive `time_step`; negative `shift_damping`; `total_time < time_step` | `ValueError` |
 | Noninteger/bool/negative `estimator_burn_in_steps` or burn-in leaving no production step | `ValueError` |
@@ -480,15 +563,17 @@ validation or new CPU options.
 | Unbound U parameters at coefficient construction | `ValueError` before allocation; no inferred parameter values |
 | Bound H/U/config changes after build | `RuntimeError` requiring rebuild |
 
-`gpu_row_batch_size` bounds the coefficient column batch capacity.
+`column_batch_size` bounds the coefficient column batch capacity.
 `transition_batch_size` independently bounds proposal-destination sampling
 chunks. Both transport paths use a new scalar Hermitian coefficient cache; it is
 unrelated to the existing CPU `_hamiltonian_cache`. Complete-row transport has a
 fixed scalar budget of `16 * 2**30` bytes; request transport uses
 `ResidentEvolutionConfig.cache_max_bytes` (the same default). Account 256 bytes
 per entry, evict least-recently-used entries before insertion, and skip caching
-if one entry cannot fit. Cache misses recompute exact values. These budgets do
-not bound native GPU allocations.
+if one entry cannot fit. Cache misses recompute exact values. These budgets
+account host RAM, not native GPU allocations; the 16 GiB default can exceed a CI
+runner's RAM. CPU tests inject tiny budgets and test large forecasts
+arithmetically, never allocating the default limit.
 
 The separate complete-support guard rejects `64 * (edges + rows) > 16 * 2**30`
 before mutation; this is support accounting, not an allocator cap. Adaptive
@@ -496,18 +581,19 @@ prefetch runs only once, with at least 64 steps remaining, stopping above 20,000
 candidate rows or a `64 * average_edges * candidate_rows` forecast above 16 GiB.
 Request transport disallows adaptive complete-row prefetch.
 
-Native MC checks the engine's StateVector/FP64/default-target configuration and
-directly uses CUDA/cuStateVec, without switching the CUDA-Q runtime target.
-`CUDAQ_DEFAULT_SIMULATOR` does not relax these requirements.
+The `CudaqEngine` hook checks `self._sim.config` for
+StateVector/FP64/default-target configuration and directly uses CUDA/cuStateVec,
+without switching the CUDA-Q runtime target. `CUDAQ_DEFAULT_SIMULATOR` does not
+relax these requirements.
 
 `root_seed = int(np.random.SeedSequence(seed).generate_state(1,
 dtype=np.uint64)[0])`; `seed=None` is allowed and consumes fresh entropy.
 Uniform proposals use a local NumPy Generator seeded by
 `SeedSequence([root_seed, trajectory, 0x50524F50])`. No process-wide RNG is
 reseeded. GPU/CPU seeded trajectories are not required to agree; same-GPU split
-advances use the same event keys.
-`AggregatedMonteCarlo.seed` controls these streams. `CudaqEngine.seed` remains the
-seed for its circuit execution and does not override the walker root seed.
+advances use the same event keys. `AggregatedMonteCarlo.seed` controls these
+streams. `CudaqEngine(seed=...)` remains the seed for its circuit execution and
+does not override the walker root seed.
 
 A real coefficient on a Pauli string containing Y can produce an imaginary
 matrix entry. The provider supports these complex Hermitian matrices. Signed
@@ -517,9 +603,13 @@ H/orthogonal U in advance. Sector certification uses `N_partition =
 sum((I-Z_q)/2)`, checks `[H,N_partition]` and each generator commutator to
 absolute `1e-10`, using the public `TrotterAnsatzBlock.generator_groups()`
 accessor. Certificate helpers accept H and the returned generator-group data,
-keeping block inspection in the algorithm adapter. Canonical means
-`target_qubits=None` or exactly `list(range(n_qubits))` and no controlling
-wrapper. Arbitrary user block subclasses are not certified.
+keeping block inspection in the algorithm adapter. This certificate is
+sufficient, not necessary: every emitted group must conserve charge separately.
+Pin the XX+YY acceptance case to `FullyCommuting`; under `NoGrouping` or QWC its
+separate XX and YY groups fail the certificate even though their sum conserves
+charge. Test that rejection explicitly. Canonical means `target_qubits=None` or
+exactly `list(range(n_qubits))` and no controlling wrapper. Arbitrary user block
+subclasses are not certified.
 
 Cutoffs apply in order: compact columns retain `abs(value) > 1e-12`, then
 realness is validated, then off-diagonal complete-row uploads select
@@ -543,7 +633,9 @@ class ComputationalBasisSector:
     def validate_register(self, n_qubits: int) -> None: ...
     def contains(self, label: int) -> bool: ...
     def labels(self, n_qubits: int) -> tuple[int, ...]: ...
-    def sample_labels(self, rng: np.random.Generator, size: int) -> NDArray[np.uint64]: ...
+    def sample_labels(
+        self, rng: np.random.Generator, size: int
+    ) -> NDArray[np.uint64]: ...
     @property
     def dimension(self) -> int: ...
     def configuration_payload(self) -> dict[str, list]: ...
@@ -563,8 +655,8 @@ Alpha occupies even qubits `0,2,...`, beta odd qubits `1,3,...`, for
 `dimension` is the product of partition binomial coefficients. `sample_labels`
 uses the supplied Generator, returns shape `(size,)`, samples fixed-weight
 subsets uniformly without enumerating `labels()`. Sector combinatorics use
-Python integers. Sampling into uint64 requires qubit indices `0 <= q < 64`
-(a covered register may have up to 64 qubits). Native GPU coefficient/evolution
+Python integers. Sampling into uint64 requires qubit indices `0 <= q < 64` (a
+covered register may have up to 64 qubits). Native GPU coefficient/evolution
 contexts separately require `1 <= n_qubits < 63` before allocation. Payloads
 contain the dataclass field names with tuples converted to JSON lists; config
 payload nests the sector payload. Config requires sector dimension > 1, proposal
@@ -572,11 +664,13 @@ payload nests the sector payload. Config requires sector dimension > 1, proposal
 
 The provider factory is a method on `qx.CudaqSimulator`. `U` is a concrete,
 unitary `Sequence[qx.Command]`; the simulator derives its inverse. `observable`
-is the same `Sequence[tuple[Sequence[tuple[int, str]], float]]` Pauli-sum format
-as `batch_expectation`, with in-range qubits and X/Y/Z letters (empty term is
-identity). Reject nonunitary commands and free symbols. `n: int` is the register
-width. The simulator's canonical local gate-unitary routines supply gate
-matrices, including phase and controlled gates.
+is the same `Sequence[tuple[Sequence[tuple[int, str]], complex]]` Pauli-sum
+format as `batch_expectation`, with in-range qubits and X/Y/Z letters (empty
+term is identity). Provider coefficients must be finite and have zero imaginary
+part; reject violations with `ValueError`. Reject nonunitary commands and free
+symbols, but skip `Barrier` and apply `GPhase` as a scalar. `n: int` is the
+register width. The simulator's canonical local gate-unitary routines supply
+gate matrices, including phase and controlled gates.
 
 `columns(s)[k,t] = (U†HU)[t,s[k]]`; a consumer wanting mathematical row
 `(s[k],t)` conjugates that entry. The provider performs no implicit conjugation.
@@ -618,19 +712,17 @@ shifts/energy/dt/damping/threshold are float64 (threshold integral and
 positive). `max_steps` and request attempts are positive uint64.
 
 `diagnostics` is a read-only `Mapping[str, object]` snapshot on
-`AggregatedMonteCarlo` only. Top-level keys are provider, configuration_hash, root_seed,
-trajectory_index, proposal_seed_sequence, status, completed_steps,
-measurement_circuits_executed, actual_shots_executed, unique_templates,
-histories and trajectories; after build also python_coefficient_cache_entries,
-row_provider, evolution and estimator. `provider` is `"cudaq"`; the
-`row_provider` diagnostic key describes the simulator column provider. Its
-`rows`/`row_batches` counters count source columns/batches, not transposed
-outputs. Histories map names from EvolutionResult to immutable tuples;
-trajectories is a tuple of read-only mappings with trajectory_index, root_seed,
-configuration_hash, status, error (type/message pair or None), completed_steps,
-wall_time_seconds, histories and estimator. The configuration hash is SHA-256 of
-UTF-8 canonical JSON (`sort_keys=True`, compact separators, `allow_nan=False`)
-over the bound H terms, U command digest, register, engine configuration and all
+`AggregatedMonteCarlo` only. Top-level keys are provider, configuration_hash,
+root_seed, trajectory_index, proposal_seed_sequence, status, completed_steps,
+measurement_circuits_executed, actual_shots_executed, histories and
+trajectories; after build also python_coefficient_cache_entries,
+column_provider, evolution and estimator. `provider` is `"cudaq"`. Histories map
+names from EvolutionResult to immutable tuples; trajectories is a tuple of
+read-only mappings with trajectory_index, root_seed, configuration_hash, status,
+error (type/message pair or None), completed_steps, wall_time_seconds, histories
+and estimator. The configuration hash is SHA-256 of UTF-8 canonical JSON
+(`sort_keys=True`, compact separators, `allow_nan=False`) over the bound H
+terms, U command digest, register, engine configuration and all
 evolution/estimator settings, reference label and batch/cache/prefetch settings.
 Include the complete sector/configuration payload. Encode complex numbers as
 real/imaginary pairs, sort Pauli terms, and store the existing command-stream
@@ -639,7 +731,8 @@ circuit-accounting flag. Freeze this payload at build and compare it before use;
 no hash of Python object identity. Estimator keys are name, burn_in_steps,
 sample_count, numerator_sum, denominator_sum, estimate, reference_zero_samples,
 block_size, block_count, jackknife_samples, jackknife_stderr and
-invalid_jackknife_replicates.
+invalid_jackknife_replicates, with conditional presence as specified in the
+estimator option contract.
 
 Counters are nonnegative Python integers; times are finite float seconds.
 Operation counters may be absent before use; callers use `.get(key, 0)`. Native
@@ -658,7 +751,7 @@ key sets complete the diagnostics contract:
   `row_evaluation_wall_seconds`, `speculative_coefficients`, `speculative_rows`,
   `transition_array_preparation_wall_seconds`.
 
-- Native diagnostics: `row_batches`, `rows`, `capacity_growths`,
+- Native diagnostics: `column_batches`, `columns`, `capacity_growths`,
   `handle_creations`, `term_uploads`, `gate_uploads`, `transferred_bytes`,
   `compact_entries`, `pruned_entries`, `sector_omitted_entries`,
   `sector_target_count`, `capacity`, `state_buffer_bytes`, `workspace_bytes`,
@@ -680,15 +773,17 @@ key sets complete the diagnostics contract:
   `transition_upload_wall_seconds`, `transition_kernel_wall_seconds`.
 
 Unsupported build/backend capabilities throw C++ `capability_error`, mapped to
-Python `CapabilityError`, including the new CPU numerical factories. Existing
-raw `CudaqSimulator` CPU stubs retain their `RuntimeError`; `CudaqEngine`
+Python `CapabilityError`, including disabled-build evolution factories and the
+simulator column factory. Both use the MC gate/probe. Existing raw
+`CudaqSimulator` CPU stubs retain their `RuntimeError`; `CudaqEngine`
 availability prechecks provide the Python `CapabilityError` contract. Test both
-boundaries without changing the old raw stubs. Attempts to reconfigure a leased
-simulator, mix request/complete-row operations in flight, or run a
-changed/unbuilt context raise RuntimeError. Simulator move/destruction with a
-live lease is supported, not an error. Backend execution errors carry operation
-prefixes and raise RuntimeError. Invalid payload values/replays are ValueError;
-dtype/shape conversion violations are TypeError at bindings. Host
+new factory boundaries and the existing engine/raw-simulator exception boundary
+without changing the old raw stubs. Attempts to reconfigure a leased simulator,
+mix request/complete-row operations in flight, or run a changed/unbuilt context
+raise RuntimeError. Simulator move/destruction with a live lease is supported,
+not an error. Backend execution errors carry operation prefixes and raise
+RuntimeError. Invalid payload values/replays are ValueError; dtype/shape
+conversion violations are TypeError at bindings. Host
 checked-size/proposal-count arithmetic raises OverflowError. Device arithmetic
 returns IntegerOverflow and partial histories; high-level MC retains those
 histories then raises RuntimeError identifying the status. No-progress means a
@@ -702,21 +797,21 @@ RuntimeError rather than adding another native status.
 |---|---|---|
 | CPU gates and host records | False numerical availability without MC; exact integer extrema, complex payloads, dtype/shape rejection, owner destruction and read-only record views | `tests/test_algorithms/test_composite/test_montecarlo_gpu.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | Resource leases | Configuration frozen while a lease/use guard lives; serialized access and lifetime after simulator move/destruction | `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
-| Exact complex columns | Literal LSB Pauli matrices, analytic Rz/Ry and literal H-CX matrices; independent NumPy `U† H U` | `tests/test_engines/test_transition_columns.py`, `cpp/libqarpx/tests/cpp/test_transition_columns.cpp` |
+| Exact complex columns | Literal LSB Pauli matrices, analytic Rz/Ry, H-CX, and GPhase+Barrier cancellation; independent NumPy `U† H U` | `tests/test_engines/test_transition_columns.py`, `cpp/libqarpx/tests/cpp/test_transition_columns.cpp` |
 | Compaction and sector gathering | Literal entries on either side of strict cutoffs, including 2e-12 retained at rtol=1e-14/atol=0; combinatorial fixed-charge labels and nonconserving counterexamples | `tests/test_engines/test_transition_columns.py`, `cpp/libqarpx/tests/cpp/test_transition_columns.cpp` |
 | Resident signed evolution | Hand-counted two-label X populations, raw numerators and energy tapes | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | RNG and chunking | Independent binomial moments; split-advance equality is supplementary | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Request transport and replay | Combinatorial uniform proposal q, literal multiplicities and weights above one; exact-once counters plus changed/stale payload rejection | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | Failure histories | Constructed reference-zero, extinction, invalid-probability, integer-overflow and no-progress tapes; NaN and partial history expectations | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
-| Estimators | Literal signed numerator/denominator tapes, cancellation, burn-in and leave-one-block jackknife ratios | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Estimators | Literal signed numerator/denominator tapes, cancellation, burn-in, default-disabled jackknife versus explicit blocks with identical point estimates, absent disabled diagnostics, incomplete tails, invalid replicas and rejection of instantaneous-only option conflicts with an error directing users to ratio_of_sums | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Bulk upload and cache reuse | Hand-derived CSR arrays, uint64 labels, empty support, strict cutoff/reference exceptions and upload counts across one/two trajectories | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `tests/test_algorithms/test_composite/test_montecarlo_gpu.py` |
 | Realness and transactional guards | Finite boundary/nonfinite injected coefficients; conflicting reference coefficients and cache-bound rejection before mutation | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | No execution or fallback | Resident-hook spy plus primitive-execution-forbidding sentinels and literal zero shots/circuits executed; existing analytic CPU MC cases remain | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `tests/test_algorithms/test_composite/test_montecarlo.py` |
 | ABI, stubs and exports | Matching checkout/source/ABI stamps; fresh generated-stub comparison, typed signatures, retained exports and wheel stub resolution outside checkout | `tests/test_stubs.py`, `tests/test_abi_stamp.py`, `tests/test_conventions_exports.py` |
 | Example | Small independent CPU matrix oracle runs by default; bounded GPU complete/request smokes require explicit opt-in | `examples/algorithms/composite/mwe_montecarlo_gpu.ipynb` |
-| Configuration matrix | One independently parametrized acceptance/rejection case for each option-matrix row, asserting exact exception and no allocation on invalid input | `tests/test_algorithms/test_composite/test_montecarlo_unit.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Configuration matrix | One independently parametrized acceptance/rejection case for each option-matrix row, asserting exact exception and no allocation on invalid input; parametrize over plain specs and build qarpx-backed objects inside each test | `tests/test_algorithms/test_composite/test_montecarlo_unit.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Sector API and config validation | Literal fixed-weight labels and product of binomial coefficients; invalid partitions, booleans, empty/one-state configs; sample with fixed Generator seed and forbid labels() enumeration; literal JSON payload | `tests/test_operators/test_computational_basis_sector.py`, `tests/test_blocks/test_primitives/test_trotter_ansatz.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
-| Charge and realness certificates | Known conserving XX+YY generator and nonconserving single X; odd-Y H and even-Y non-scalar generator counterexamples; wrong block and remapping rejected | `tests/test_operators/test_computational_basis_sector.py`, `tests/test_blocks/test_primitives/test_trotter_ansatz.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Charge and realness certificates | XX+YY accepted with FullyCommuting and rejected under NoGrouping/QWC; nonconserving single X; odd-Y H and even-Y non-scalar generator counterexamples; wrong block and remapping rejected | `tests/test_operators/test_computational_basis_sector.py`, `tests/test_blocks/test_primitives/test_trotter_ansatz.py`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Column orientation | Analytic Rz conjugation gives lower-left exp(-i theta), upper-right exp(+i theta); assert provider output and conjugated consumer separately | `tests/test_engines/test_transition_columns.py`, `cpp/libqarpx/tests/cpp/test_transition_columns.cpp` |
 | Cache resume, budgets and identity | Scripted missing-row tape; literal 16 GiB/20,000-row boundary forecasts; mutation of H/U/config requires rebuild; no duplicate upload after reset | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Diagnostics and timing partition | Read-only snapshot survives later trajectories; literal key sets and histories; deterministic mocked clock shows preparation included in orchestration, no double addition | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
@@ -725,11 +820,11 @@ RuntimeError rather than adding another native status.
 | No dense host startup | Failing sentinels on H densification, generate_states_new_basis, host statevector/unitary and engine primitive execution while allowing the resident hook with scripted contexts | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Threshold order | Literal values just below/at/above 1e-12 with dt below/above .01 and reference/nonreference sources; assert removed entries never spawn GPU zero-sign walkers | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Seed contract | Fixed SeedSequence root and proposal entropy inputs; supplied seed repeatability plus distinct trajectory/event keys; record generated root for seed=None; no global RNG mutation | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
-| CPU native protocol | Real host validator/replay state machine: hand-written request ids, stale/changed payloads, exact-once counters and checked size boundaries without CUDA | `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
+| CPU native protocol | Direct construction of internal HostProtocol without a numerical factory: hand-written request ids, stale/changed payloads, exact-once counters and checked size boundaries without CUDA | `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | CUDA-free headers | Translation unit includes both public headers using only a C++ compiler with CUDA disabled | `cpp/libqarpx/tests/cpp/test_montecarlo_headers.cpp` |
 | Evolution-only allocation | Instrumented allocation/handle counters stay zero for statevectors/cuStateVec during evolution-context construction/reset/advance, while walker buffers may grow | `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
-| Engine ownership and GIL | Hook returns the engine simulator without host-width check; lease serializes existing runs; a Python thread progresses during native advances | `tests/test_engines/test_cudaq_engine.py`, `tests/test_algorithms/test_composite/test_montecarlo_gpu.py` |
-| Optional lazy accounting | Hand-counted QWC circuits for I, X and X+Z; unbuilt input and forbidden compile/run sentinels; same fixed-seed numerical histories on/off, zero executed circuits/shots | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| Engine ownership and GIL | Hook returns the engine simulator without host-width check; lease serializes existing runs; a second thread runs an engine primitive during an advance and both complete without deadlock; ordinary Python threads progress too | `tests/test_engines/test_cudaq_engine.py`, `tests/test_algorithms/test_composite/test_montecarlo_gpu.py` |
+| Optional lazy accounting | Literal C=0/2/2/4 for zero/I/X/X+Z; spy proves one circuits() call per enabled run and none when disabled; for X+Z and three distinct Hermitian pairs assert generated_circuits=4 and measurement_settings=12; repeats/reversals/cache hits/trajectories add nothing; new run resets counts; unbuilt-input and forbidden compile/run sentinels, identical fixed-seed histories on/off, zero executed circuits/shots | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Public generator accessor | Literal per-generator groups under NoGrouping/QWC, independent analytic emitted matrices, no build/mutation and no cross-generator merging | `tests/test_blocks/test_primitives/test_trotter_ansatz.py` |
 | Scalar cache bounds | Literal capacity at budget below/at/above 256 bytes; LRU eviction/recomputation and complete-row fixed budget separate from CPU cache | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 
@@ -737,11 +832,22 @@ The deterministic X tape uses two labels, initial signed population +8 at label
 0, H=X, dt=1, zero diagonals/shift/damping, threshold 1000. Every spawn has
 probability one: absolute populations [16,32], reference populations [8,16],
 numerators [-8,-16], energies [-1,-1]. No expected value is read from an RNG
-tape. The separate request fixture uses H=2X, U=I, dt=1, one positive walker at
-reference 0, zero shift/diagonals/damping, one proposal attempt and q=1 for
-destination 1. Spawn weight `dt*abs(H10)/q = 2` gives two negative walkers at 1,
-absolute population 3 and projected numerator `H01*n1 = 2*(-2) = -4` (reference
-population 1).
+tape. A low-level request fixture drives `apply_transition_batch` directly with
+hand-built arrays, bypassing sector/configuration construction. It uses H=2X,
+U=I, dt=1, one positive walker at reference 0, zero shift/diagonals/damping, one
+proposal attempt and q=1 for destination 1. Spawn weight `dt*abs(H10)/q = 2`
+gives two negative walkers at 1, absolute population 3 and projected numerator
+`H01*n1 = 2*(-2) = -4` (reference population 1).
+
+The class-level request fixture uses two qubits, weight-one sector {1,2},
+H=XX+YY, and a canonical Trotter ansatz with an identity-only generator
+and bound angle zero (U=I). Its generator certificate is trivially conserving
+and real up to scalar phase. With reference 1, one positive
+walker, dt=1, zero shift/diagonals/damping and one proposal attempt, uniform
+sampling excludes the source: q=1/(D-1)=1 for destination 2. The literal sector
+matrix is [[0,2],[2,0]], so population=3, reference population=1, projected
+numerator=-4 and energy=-4 after one step. The proposal distribution explicitly
+excludes the source.
 
 Include the fixed root-seed-7, 64-trajectory Binomial(512,.2) regression (mean
 102.4, variance 81.92, five-standard-error mean tolerance and 60% variance
@@ -772,11 +878,16 @@ existing CUDA-Q engine regressions. Copy the `_requires_gpu` marker pattern into
 the new test files, adding checks for MC availability and
 `QARP_RUN_CUDAQ_GPU_TESTS=1`; do not change the existing engine skip marker.
 Changes in `test_cudaq_engine.py` cover the new hook and capability prechecks.
+New GPU tests construct `CudaqEngine()` with its default target; do not reuse
+`_cudaq()` helpers that pin a custom target rejected by MC.
 
 CPU CI must execute host record/validation/replay/capacity tests directly in
 C++, all fake-driven orchestration tests, sector/accessor tests and numerical
 estimator oracles. For mixed test rows, give the real GPU cases explicit `gpu_`
-test names and select them separately from host/fake cases.
+test names and select them separately from host/fake cases. C++ numerical cases
+call `GTEST_SKIP()` when `!montecarlo_available()` before constructing GPU
+resources. The MC-enabled Gate 2 report must show zero skipped required `gpu_`
+cases, including the C++ cases.
 
 Required MC-enabled GPU cases are: resource lease lifetime/serialization;
 complex columns and orientation; compaction/sector gathering; resident signed X
@@ -795,27 +906,25 @@ binomial oracle; and two steps/one trajectory for each notebook transport.
 Adaptive prefetch/memory boundaries use CPU forecasts and scripted contexts, not
 allocations near 16 GiB. Run profiles sequentially from this checkout's own
 environment, verify import origins after each rebuild, and record commands and
-per-case outcomes. No job submission is part of these instructions.
+per-case outcomes.
 
 Post a sanitized PR comment or attachment containing revision, dirty-state patch
 identity if applicable, Python/extension/source origins, ABI, GPU and
 compiler/runtime versions, exact build/test commands, exit status and per-case
 JUnit XML/logs. Keep raw artifacts outside the tree; make the reviewed evidence
-accessible from the PR. The reviewer accepted this author-run arrangement in P7.
-Attach evidence for the exact head SHA marked ready for Gate 2; a dirty-tree run
-is diagnostic only and must be repeated on that head. Prior runs cannot certify
-a new build.
+accessible from the PR. Attach evidence for the exact head SHA marked ready for
+Gate 2; a dirty-tree run is diagnostic only and must be repeated on that head.
+Prior runs cannot certify a new build.
 
 The notebook always runs its independent CPU oracle; enable GPU cells only with
 `QARP_RUN_CUDAQ_GPU_TESTS=1` and available MC capability, otherwise explicitly
 report those cells unverified. The smoke uses at most four qubits, two steps,
 one trajectory and fixed seed with small budgets. Statistical and cache-reuse
-tests are separate bounded cases. No cluster submission is authorized here.
+tests are separate bounded cases.
 
 ## Phases
 
-All increments belong to the same contribution branch and PR. After the
-structural discussion and recorded Gate 1 green-light, each increment is
+All increments belong to the same contribution branch and PR. Each increment is
 reviewable and CPU-buildable with its own tests; mark it complete only with
 dated evidence. The complete proposed binding surface is introduced with CPU
 stubs in the first increment; any later binding change still bumps the paired
@@ -847,8 +956,7 @@ ABI and regenerates the stub as required by §15.
 
 ### Phase 4 — Python MC integration
 
-- [ ] Add `AggregatedMonteCarlo` and extract existing common checks without CPU
-  behavior changes; implement the GPU option matrix.
+- [ ] Add `AggregatedMonteCarlo` with its GPU option matrix and validation.
 - [ ] Add operator-sector certification and the public Trotter accessor.
 - [ ] Add bulk startup, bounded caches, seeds, estimators, diagnostics and
   opt-in lazy QWC circuit accounting.
