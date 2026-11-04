@@ -7,8 +7,8 @@ meet.
 Findings only; the green-light is the reviewer's call. The revision at
 `e9ee9d0` is reviewed against these findings in the second pass, the
 Architecture section after it records the reviewer's positions on the
-design, and the revision at `57971d0` is reviewed against both in the third
-pass at the end.
+design, the revision at `57971d0` is reviewed against both in the third
+pass, and the revision at `3c99e80` in the fourth pass at the end.
 
 ## Summary
 
@@ -1120,3 +1120,84 @@ Gate 1 boxes (R2) against the revision that carries them. F21, F22 and F23 are
 public-API decisions, since §15 fixes names at first release; the reviewer's
 recommendation is stated in each, and the author settles them in the next
 revision. One revision carrying all of them is the sha to green-light.
+
+## Fourth pass at `3c99e80`
+
+Plan blob `493a1bd9`, 983 lines; the layouts plan edited in the same commit.
+PR #22 head is `3c99e80`, no comments, author boxes unticked. Checked against
+`develop` `6c632b9` by the collating reviewer alone; the arithmetic below was
+recomputed by hand.
+
+### Disposition
+
+Every third-pass item is addressed. R7 is addressed with a counter, accepted.
+
+| Item | Plan lines | Note |
+|---|---|---|
+| R5 | 138-152, 536-538 | Eligibility by calling the hook only; CPU fakes subclass `Engine`; the `CudaqEngine` override is tested on CPU through a patched `_require_cudaq`; the override reads `self._sim.config`. |
+| R6 | 460-461 | Register width is `unitary_block.n_qubits`; H beyond it raises `ValueError`. |
+| R7 | 247-291, 546-549 | Counter: burn-in and blocking are rejected with the instantaneous estimator, which keeps its final-step meaning; `None` disables jackknife and omits the keys; an explicit block size opts in. The reasoning holds. Within one trajectory the contract is complete; how trajectories combine is undefined, F31. The literal oracle checks: ratio-of-sums 6, replicas 50/7 and 10/3, standard error 40/21, burn-in one 58/9, instantaneous 8. |
+| F16 | 173-180, 826 | GIL released before the guard, guard dropped before reacquiring, exceptions included; the evolution-only guard is justified; the test row runs a primitive on a second thread during an advance. |
+| F17 | 26, 164-170, 823 | `detail::HostProtocol` in `src/montecarlo/host_protocol.h`, constructed directly by the C++ tests, not bound or installed. |
+| F18 | 666-670 | `complex` coefficients, finite, zero imaginary part, `ValueError` otherwise. |
+| F19 | 158-161, 670-671, 800 | `GPhase` as a scalar, `Barrier` skipped, neither through the local-unitary routine; column test row extended. |
+| F20 | 835-850 | Low-level fixture drives `apply_transition_batch` directly; class-level fixture on sector {1, 2} with H = XX + YY and U = I: sector matrix [[0, 2], [2, 0]], q = 1, population 3, reference 1, numerator -4, energy -4. Checks. The identity-only generator emits nothing (`trotter_block.py:542-545`), so the certificate is vacuous there and exercised by the other rows. |
+| F21 | 439, 456-458, 541 | `engine` is a required keyword; omission is `TypeError`; `None` falls under the capability row. |
+| F22 | 50-52, 134-136, 959 | Helper and `montecarlo.py` dropped from Scope; new validation stays in the new class. |
+| F23 | 104-113, 138, 441-449, 594-596, 714-720, 754-755 | `column_batch_size`, `transition_prefetch`, `sector`, `column_provider`/`columns`/`column_batches`, `unique_templates` gone, `CudaqEngine(seed=...)`, hook named `Engine._resident_simulator` in §14 and Design. |
+| F24 | 541-548, 812 | Rows for the missing engine, reference label type, `unitary_block`/`sector` type, `seed`, `verbose`; plain-spec parametrisation stated on the matrix row. |
+| F27 | 606-612, 814 | Certificate stated as sufficient, not necessary; XX+YY pinned to `FullyCommuting`, rejected under `NoGrouping`/QWC. |
+| F30 | 121-123, 775-780 | Column factory named in the §14 build-gate paragraph and in the exception boundaries. |
+| F25, F26, F28, F29 | 83-92, 97-99, 337, 881-882, 886-890, 908, 922 | Wording, Why numbers (8 GiB at 14 qubits, 128 GiB at 16, 128 MiB on GPU), default-target engines in GPU tests, `GTEST_SKIP()` with zero skips required at Gate 2. |
+| Nits | 302-305, 369-371, 572-576, 216-222, 318-330 | Process prose reduced to three lines; cache on both paths; host-RAM note; "same arrays as the accounting path"; one `circuits()` call per run. |
+| L1 to L5, merge order, Branch | layouts:7, 12-15, 39-43, 54-57, 59-61, 109-119, 142 | All addressed: README out of Scope, Heisenberg XX+YY+ZZ consumer with 3 versus 1 groups (6 versus 2 circuits, checks), `diagonalise_group` reused, `measurement_plan` rule written, DSATUR order stated, GPU merges first. |
+
+### Fix before the green-light
+
+- **F31. How trajectories combine is undefined.** `run()` returns "the
+  single-target estimate as a one-element list" (plan:462-463), the
+  top-level diagnostics describe one `trajectory_index` and `root_seed`
+  (plan:715-719), and the jackknife lives inside each trajectory's estimator
+  (plan:720-723). Nothing says how `num_trajectories` (default 10) combine.
+  `develop`'s `MonteCarlo.run` returns the last trajectory's final value only
+  (`montecarlo.py:1049-1068`); mirroring it drops nine of ten independent
+  trajectories from the estimate and its error, and the 4096 one-step
+  trajectories (plan:904) give K = 0 per trajectory, so no per-trajectory
+  error bar exists there. State the combined estimate (recommended: pooled
+  signed numerator and denominator sums over completed trajectories, each
+  after its own burn-in), its uncertainty (recommended: leave-one-trajectory
+  replicas on the pooled ratio, K = trajectory count), how failed
+  trajectories count, and add a two-trajectory literal oracle row.
+
+### Residual, none blocking
+
+- Two prose lines over 80 columns (plan:101, 982).
+- The CPU test of the `CudaqEngine` override through a patched
+  `_require_cudaq` (plan:148-152) has no row in the test table; the nearest
+  is "Engine ownership and GIL" (plan:826), which is GPU-required. Add a CPU
+  row or a clause to row 826.
+- Uniform proposals exclude the source with `q = 1/(D-1)` (plan:198-199),
+  while `sample_labels(rng, size)` (plan:636-638) has no exclusion argument.
+  Say that the adapter resamples or that the sampler takes an excluded label.
+- `test_montecarlo_unit.py` stays in Scope (plan:59) although the CPU class
+  is untouched; only the CPU regression row (plan:535) points at it.
+- "the existing literal leave-one-block calculation" (plan:254) and "Retain
+  the jackknife algorithm, incomplete-tail handling, signed-denominator
+  safeguards and regression cases" (plan:256-257) describe as existing what
+  `develop` does not have (B1; no jackknife exists on `develop`). Write "a
+  literal leave-one-block calculation" and "Define the jackknife algorithm,
+  the incomplete-tail rule and the signed-denominator safeguards as below",
+  and give each regression case a named oracle (plan:97-99). "increments its
+  diagnostic counter" (plan:250-251) does not name the key:
+  `reference_zero_samples` or
+  `aggregated_projected_estimator_zero_cumulative_denominator_steps`.
+
+### Gate call
+
+Ready to green-light once F31 is in the plan; the residual items can ride
+in the header commit. The
+reviewer's four Gate 1 boxes hold: Structural tier with the discussion in
+writing (D4); the design fits the conventions and the plan names and writes
+the three §14 paragraphs it adds (plan:101-130); the Scope is complete and
+bounded with the grouping work in its own plan; every oracle in the test
+table is independent of the implementation.
