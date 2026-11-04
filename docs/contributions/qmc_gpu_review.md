@@ -5,9 +5,10 @@ against the code at `develop` `6c632b9`. No implementation exists yet, so this
 checks the plan's claims against the code and its design against what it will
 meet.
 Findings only; the green-light is the reviewer's call. The revision at
-`e9ee9d0` is reviewed against these findings in the second pass, and the
-Architecture section after it records the reviewer's positions on the design
-for the sit-down.
+`e9ee9d0` is reviewed against these findings in the second pass, the
+Architecture section after it records the reviewer's positions on the
+design, and the revision at `57971d0` is reviewed against both in the third
+pass at the end.
 
 ## Summary
 
@@ -777,8 +778,8 @@ a second spelling to deprecate.
 
 ### Reviewer positions
 
-The reviewer's positions for the sit-down (R1). Each changes the plan as
-stated.
+The reviewer's positions, settled through the review iterations on this PR
+(D4 in the third pass). Each changes the plan as stated.
 
 | | Position | Plan changes |
 |---|---|---|
@@ -796,3 +797,326 @@ engine=CudaqEngine(), resident_evolution=ResidentEvolutionConfig(sector=sector,
 ...))`, the CPU `MonteCarlo` signature does not change, and the §14 edit keeps
 its build-gate and seed paragraphs while its ownership paragraph covers the
 evolution context only.
+
+## Third pass at `57971d0`
+
+Plan blob `83e24fd7`, 875 lines. Commit `30399ca` rewrote the plan, added
+`qmc_measurement_layouts_plan.md` (140 lines) and its README row; `57971d0`
+renamed the class to `AggregatedMonteCarlo`. PR #22 is unchanged: body as at
+the second pass, no comments. Three independent passes, re-verified against
+the plan and `develop` `6c632b9`. "plan:N" cites the GPU plan at `57971d0`,
+"layouts:N" the new plan. Every architecture position P1 to P7 is taken; what
+remains is contract precision, three undefined contracts, and the process
+items.
+
+### Disposition
+
+| Item | Disposition | Plan lines | Note |
+|---|---|---|---|
+| R1 | resolved by D4 | 288-293 | The structural discussion is held in writing on this PR; no meeting. |
+| R2 | addressed by the reviewer | 295-299 | Body rewritten by the reviewer after the third pass; the five author boxes stay the author's. |
+| R3 | partly | 95-97 | Transfer paragraph gone; oracle rule stated. Residue wording in F25. |
+| R4 | addressed | 129-131, 453-457, 461 | Matrix is the new class's; the helper adds no CPU check. |
+| F1 | partly | 740-744 | Arithmetic right (H=2X, q=1: population 3, numerator -4). The fixture cannot run through the class, F20. |
+| F2 | addressed | 479, 566-568, 591 | `< 63` for native contexts, `< 64` for sector sampling, int64 population, each once. |
+| F3 | addressed | 192-196, 483-491 | New scalar cache, fixed 16 GiB complete-row budget, LRU, 256 B per entry. |
+| F4 | addressed | 120-126 | The NumPy proposal stream is in the §14 seed paragraph. |
+| F5 | addressed | 99-102 | Placement named; anchors exist (`qarp_conventions.md:580, 626, 640`). |
+| F6 | addressed | 62, 771-774 | Marker copied; existing marker unchanged; file in Scope. |
+| F7 | addressed | 776-790 | Required GPU list; `gpu_` names for mixed rows. |
+| F8 | addressed | 312-319 | Install-page wording replaced; SDK route unvalidated until run. |
+| F9 | addressed | 11-13 | Review file excluded explicitly. |
+| F10 | addressed | 209-211, 223 | `save_walker_history` named. |
+| F11 | addressed | 301-311 | One discovery order. |
+| F12 | partly | 81-91 | GPU formula only; no CPU size at a named width, F26. |
+| F13 | addressed | 473-476 | Constructor names used. New naming points in F23. |
+| F14 | addressed | 729-730 | CUDA-free headers and evolution-only allocation rows. |
+| F15 | addressed | 303-311 | cuQuantum SDK named as header provider. |
+| P1 | addressed | 72-75, 128-132, 283-286, 352-391 | Own class, name adopted, docstring definition. Gaps: R6, F21, F22. |
+| P2 | addressed | 104-112, 134-140, 383-387, 462-464, 499-501 | Hook, `engine=None` raises, selectors dropped, FP64 check. Gaps: R5, F16. |
+| P3 | addressed | 142-147, 411-441, 573-587, 705-706, 720 | Simulator-layer provider on canonical unitaries. Gaps: F18, F19. |
+| P4 | addressed | 233-251, 379, layouts plan | Grouping split out; accounting off by default through `circuits()`. |
+| P5 | addressed | 393-409, 516-522, 718-719, 733 | Sector in `qarp.operators`; public `generator_groups()`. Gap: F27. |
+| P6 | addressed | 149-156, 682-686, 728-731 | Host `.cpp`, three CUDA files, engine pre-check as the exception contract, GIL. Gaps: F17, F29. |
+| P7 | addressed | 291-292, 804-807 | Evidence for the head sha marked ready for Gate 2. |
+| Nit: process prose | not addressed | 283-299, 817-818 | Grew to a 17-line paragraph citing review items. |
+| Nit: reflow | partly | 73, 99, 219, 283, 416, 429, 509, 546, 621, 874 | Ten lines left of forty. |
+| Nit: N3 leftovers | partly | 162, 172, 231 | "container gate guards" still undefined. |
+| Nit: `FullyCommuting` | addressed | layouts:44-45 | |
+| Nit: `_sequences_grouped` | addressed | 401-409 | Public accessor. |
+| Nit: hash, float counters | addressed | 631-639, 644 | SHA-256 over canonical JSON; integer counters. |
+| Nit: sector dimension | addressed | 469, 570 | Explicit on both paths. |
+
+R1 and R2 are closed: R1 by D4 below, R2 by the reviewer rewriting the PR
+body after this pass (Summary, "Sit-down held", intended reviewer, Design
+summary, Gate 1 paragraph). The five author Gate 1 boxes are the author's to
+tick against the revision to be green-lit, and plan:295-299 reduces to that.
+
+### Still blocking
+
+- **R5. The `CudaqEngine` rows cannot be reached by CPU fakes as written.**
+  plan:454-455 says every matrix row is tested with CPU fakes, including
+  rows 463 and 464, and row 731 puts the hook test in
+  `test_cudaq_engine.py`. On a CPU build `CudaqEngine.__init__` raises
+  `CapabilityError` at `_require_cudaq()` (`_cudaq_engine.py:172`, `:97-105`,
+  `test_cudaq_engine.py:36-38`) before any hook exists. State two things:
+  eligibility is decided only by calling `_resident_statevector_simulator`,
+  never by an `isinstance` on the engine, so the fake is an `Engine` subclass
+  overriding the hook; and the override's own checks run on CPU through a
+  patched `_require_cudaq` returning a scripted simulator class, or are
+  listed as GPU-required. The engine stores no backend or precision fields,
+  only `self._sim` built from a `CudaqConfig` (`_cudaq_engine.py:174-181`),
+  so the override reads `self._sim.config` (`qarpx.pyi:1833-1834`); say so at
+  plan:499.
+- **R6. The register width has no source.** CPU `MonteCarlo` takes it from
+  `count_qubits(H)` (`montecarlo.py:196`), which makes row 479 "H beyond
+  register" impossible. State "the register width is
+  `unitary_block.n_qubits`; H acting on a qubit at or above it raises
+  `ValueError`".
+- **R7. Estimator option combinations are undefined.** Row 386 at `e9ee9d0`
+  covered "nondefault estimator options" and has no replacement. Undefined:
+  what `estimator_block_size=None` means (plan:376, 473), and whether
+  `estimator_burn_in_steps` and `estimator_block_size` are accepted, ignored
+  or rejected with `projected_energy_estimator="instantaneous"`. The
+  diagnostics keys `block_size`, `block_count` and `jackknife_*`
+  (plan:639-642) depend on both answers. Recommended: `None` means no
+  jackknife, and the `block_*` and `jackknife_*` keys are absent; burn-in
+  applies to both estimators and drops the first steps from the reported
+  estimate; a block size is accepted with both estimators and yields
+  leave-one-block replicas of whichever estimate is reported. One matrix row
+  each.
+
+### Reviewer decision
+
+- **D4. No separate sit-down.** The tier table asks for a sit-down before a
+  Structural plan is green-lit. The reviewer records that the structural
+  discussion is held in writing through the review iterations on this PR:
+  the open decisions were numbered at `e9ee9d0` (D1 to D3), answered in the
+  Architecture section (P1 to P7), adopted by the author at `57971d0`
+  (plan:283-286), and the remaining items are R5 to R7 and F16 to F30 below.
+  The loop green-lights "a design agreed elsewhere, at a sit-down or in a
+  chat" by the Gate 1 comment (`README.md:28-29`); a design agreed in
+  writing on the PR itself meets that. R1 is closed. The author replaces
+  plan:288-293 with one sentence stating that the structural discussion is
+  conducted in `qmc_gpu_review.md` on this PR; the PR body already says so.
+
+### Fix before the green-light
+
+- **F16. Lock order between the GIL and the use guard.** The guard serializes
+  evolution with the simulator's runs (plan:109-110, 139-140) and advances
+  release the GIL (plan:153-156). The `CudaqSimulator` bindings hold the GIL
+  for the whole call (`bindings.cpp:1557-1570`). Thread A advances with the
+  GIL released and the guard held; thread B enters `engine.run` holding the
+  GIL and blocks on the guard; if A reacquires the GIL before dropping the
+  guard, both deadlock. State that the guard is taken after the GIL is
+  released and dropped before it is reacquired, extend row 731 with a second
+  thread running a primitive during an advance, and say why evolution-only
+  work takes the guard when it holds no statevector or handle (plan:152-153).
+- **F17. The CPU-run native tests have no entry point.** Host validation,
+  replay and capacity accounting are "directly tested in every build"
+  (plan:149-150, row 728), but every numerical factory raises
+  `CapabilityError` on CPU (plan:117-118, 682-683), so
+  `test_montecarlo_contexts.cpp` cannot obtain a context to drive them. Name
+  the host-side type the C++ test constructs and whether it is public in
+  `contexts.h` or in an internal header added to Scope.
+- **F18. Observable coefficient type.** plan:575 declares "the same
+  `Sequence[tuple[Sequence[tuple[int, str]], float]]` format as
+  `batch_expectation`". That format takes `complex` (`qarpx.pyi:1846`,
+  `cudaq_simulator.h:118-120`). Take `complex` and reject a nonzero imaginary
+  part at the provider, or drop "the same".
+- **F19. Zero-qubit commands in the column provider.** Every gate goes
+  through `local_unitary` / `local_unitary_of` (plan:142-144, 578-579), and
+  exact global phase must survive (plan:229-230). `QarpSimulator::local_unitary`
+  rejects a command on zero qubits (`qarp_simulator.cpp:92-97`), `GPhase`
+  acts on zero qubits (`core/gates.h:145-149`), and `Barrier` is a
+  non-evolving command (`qarp_simulator.h:256`).
+  State that `GPhase` is applied as a scalar, which cancels in `U†HU`, that
+  `Barrier` is skipped rather than rejected under plan:577, and add a column
+  case with both.
+- **F20. The request fixture cannot run through the class.** H=2X on one
+  qubit, reference 0, destination 1, q=1 (plan:740-744): labels 0 and 1 have
+  different Hamming weights, so no fixed-weight sector holds both
+  (plan:561-565); X fails the charge certificate (row 478); a config needs
+  dimension > 1 (plan:570); a uniform proposal over D states cannot give
+  q=1. Say the fixture drives `apply_transition_batch` directly with
+  hand-built arrays, and add a class-level fixture, for example a two-qubit
+  weight-one sector {1, 2} with H = XX + YY, with its literal q and
+  populations derived the same way.
+- **F21. `engine` defaults to a value that always raises.** plan:367
+  `engine: Optional[Engine] = None`, and plan:386-387 says `None` becomes
+  `QarpEngine()` (`composite_algorithm.py:40-41`) and then raises. Make it a
+  required keyword, so a missing engine is an ordinary `TypeError`, and
+  reword row 462 to "`QarpEngine` or another engine without the resident
+  hook".
+- **F22. The shared helper has little to extract.** plan:130-131 "existing
+  common H/U/reference-label checks": `_validate_inputs`
+  (`montecarlo.py:234-303`) has no U check, accepts an ndarray H where the
+  new class raises `CapabilityError` (row 465), and checks Hermiticity only
+  for ndarrays where the new class checks Pauli Hermiticity (row 466). The
+  common part is two `TypeError` checks: the single-int reference label
+  (`montecarlo.py:249-253`) and the unrelated H type (`:287-290`). Name those
+  two, or drop `_montecarlo_common.py` (plan:52, 130-131, 850).
+- **F23. Names, fixed at first release (§15).** `gpu_row_batch_size` and
+  `gpu_transition_prefetch` carry a backend prefix on a class whose backend
+  comes from the engine (plan:284-286), and the first bounds columns
+  (plan:483): `column_batch_size`, `transition_prefetch`. Diagnostics keep
+  `row_provider`, `rows`, `row_batches` with a note that they count columns
+  (plan:625-628): rename and drop the note. `semiclassical_sector` has no
+  mode to contrast with (plan:223): `sector`. `unique_templates` (plan:623)
+  belongs to the layouts plan now: delete or define. `CudaqEngine.seed`
+  (plan:509) is not an attribute, the constructor stores `_seed`
+  (`_cudaq_engine.py:185`): write `CudaqEngine(seed=...)`. Name the hook in
+  the §14 text (plan:105 says "a resident-capability hook", plan:134 names
+  it); "statevector" in `_resident_statevector_simulator` misleads, since MC
+  reads none.
+- **F24. Option matrix gaps against the signature** (plan:352-380). No row
+  for `reference_walker_label` of wrong type, `unitary_block` not a
+  `QarpBlock` (§13), `semiclassical_sector` of wrong type, `seed` of wrong
+  type, negative or bool, or `verbose`. Each row is a test (plan:717). Append
+  to row 717: "parametrized over plain specs; qarpx-backed objects are built
+  inside each test" (the module-scope rule).
+
+- **F27. The charge certificate depends on grouping.** It checks each emitted
+  generator group (plan:163-165, 516-518), and `generator_groups()` follows
+  the block's grouping within a generator (`trotter_block.py:552-567`). XX+YY
+  conserves N, XX and YY separately do not; under `NoGrouping` or
+  `QubitWiseCommuting` they are separate groups (`_grouping.py:186, 195`), so
+  a conserving ansatz is rejected; under the default `FullyCommuting`
+  (`trotter_block.py:441`) it passes. State that the certificate is
+  sufficient, not necessary, pin row 719's XX+YY case to `FullyCommuting`,
+  and add the rejected `NoGrouping` case.
+
+- **F30. The column factory's gate and probe.** plan:438-439 gates the
+  simulator-layer factory with MC, yet the §14 build-gate paragraph
+  (plan:114-118) names only MC factories and the only probe is
+  `montecarlo_available()` (plan:437). Add the column factory to that
+  paragraph and to the "both boundaries" sentence at plan:682-686, so a
+  non-MC consumer knows which gate, probe and stub exception apply.
+
+### Before Gate 2, not before the green-light
+
+These do not change the design contract. The author may fold them into
+the next revision or into the implementation phases.
+
+- **F25. Residue wording (R3).** "this public plan" (plan:91), "relative to
+  the public baseline" (95), "added or adapted" (95-96), "relaxed to
+  accommodate the architecture split" (88-89), "revises the earlier combined
+  scope" (249-250), "The revised proposal adopts" (283), "No job submission"
+  and "No cluster submission is authorized here" (798, 813). Write "relative
+  to `develop`", "every numerical test", "are mandatory", "This contribution
+  excludes them", "The proposal adopts", and delete the two submission
+  sentences.
+- **F26. Why numbers (F12).** `develop` densifies H (`montecarlo.py:189`) and
+  builds `2**n` transformed basis vectors (`montecarlo.py:360`): about
+  `32 * 4**n` bytes, 8 GiB at 14 qubits and 128 GiB at 16, against
+  `32 * batch * 2**n` bytes for the GPU batches, 128 MiB at batch 64 and 16
+  qubits. One sentence with these two numbers.
+- **F28. The existing GPU test helper builds engines MC rejects.** `_cudaq()`
+  pins a custom target (`test_cudaq_engine.py:66-68`); row 463 rejects one.
+  Say the new GPU tests construct `CudaqEngine()` with the default target.
+- **F29. Skip mechanism for `gpu_` C++ cases.** CPU CI builds one
+  `qarpx_tests` binary with `gtest_discover_tests`
+  (`tests/cpp/CMakeLists.txt:60`, `ci.yml:264`) and runs every case;
+  plan:778-779 says "selected separately" without saying how a CPU build
+  avoids failing them. State `GTEST_SKIP()` on `!montecarlo_available()`
+  (precedent `test_blas_threads.cpp:211`) or compile-out under the gate, and
+  that the Gate 2 evidence shows zero skipped `gpu_` cases.
+
+### Nits
+
+- Process prose: plan:283-299 cites review item numbers and records PR
+  actions; plan:804 repeats the P7 acceptance; plan:817-818 "After the
+  structural discussion and recorded Gate 1 green-light". Keep plan:284-286
+  (the name's definition) and drop the rest with the next revision.
+- Reflow: ten prose lines over 80 columns (73, 99, 219, 283, 416, 429, 509,
+  546, 621, 874).
+- Undefined: "certified fixed-charge sector gathering" (162), "Transport
+  records" (172), "container gate guards" (231).
+- plan:192-193 "a bounded scalar Hermitian cache for separate exact requests"
+  reads as request-path only; plan:485 says both paths use it. The 16 GiB
+  default is host RAM and exceeds a CI runner; say so.
+- plan:190-191 "Preserve ordering, signs, strict cutoffs" does not say against
+  what: "produce the same arrays as the accounting path".
+- Accounting counts depend only on H and the quadratures, not on the pair
+  (`grouped_transition_hadamard_test.py:135-173`), so one `circuits()` list
+  per run suffices (plan:239-241). Optional.
+
+### The layouts plan
+
+Header order matches `_template.md`; Scope is an explicit list and every
+existing path resolves; oracles are hand-coloured graphs, analytic eigenbases
+with the YY sign, analytic amplitudes and an exact-readout example; the README
+row is sorted and in form. The GPU plan no longer depends on it: accounting
+uses the existing QWC `circuits()` (plan:234-238), which still rejects
+non-QWC grouping (`grouped_transition_hadamard_test.py:107-110`), and no
+grouping file is in the GPU Scope. For its own Gate 1:
+
+- **L1.** Drop `docs/contributions/README.md` from its Scope (layouts:14); the
+  row lands here and index rows are "not edited after" (`README.md:128-129`).
+- **L2.** The Why names no consumer and no number (layouts:32-37). Give the
+  group counts for one named Hamiltonian under QWC and `FullyCommuting`, and
+  who needs non-QWC transition measurement.
+- **L3.** `diagonalise_group` already returns the Clifford, Z masks and signs
+  (`_grouping.py:73`). State that the primitive uses it, or why not; otherwise
+  the plan adds a second diagonaliser (layouts:50-51).
+- **L4.** `measurement_plan` before derivation and invalidation on input or
+  grouping change are left "pending" (layouts:98-100, 123-124). That is this
+  plan's own Gate 1 decision; write the rule.
+- **L5.** State the DSATUR group and member order against the
+  `GroupingStrategy` contract (`_grouping.py:155-162`): groups by colour,
+  members by canonical term order, and point row layouts:106 at the existing
+  order-insensitivity test.
+- Six paths are in both Scopes (README, the layouts plan file, three rst
+  pages, `qarp/operators/__init__.py`), all disjoint entries. State the merge
+  order in layouts:9-12. `**Branch:**` carries "(proposed; not created)";
+  the template takes the name only.
+
+### What checks out in the revision
+
+Scope: 49 paths, 27 existing on `develop`, 22 new, the grouping and
+interferometric files gone, nothing unrelated; `trotter_block.py`,
+`_engine.py`, `_cudaq_engine.py` and their tests are in; `test_montecarlo.py`,
+`test_abi_stamp.py` and `test_conventions_exports.py` are cited but need no
+edit, and the last enforces one public path per symbol generically
+(`test_conventions_exports.py:182`), so plan:393 is gated. The three §14
+anchors exist. The ABI pair is 15 and 15 (`_abi.py:9`, `bindings.cpp:240`).
+`[tool.scikit-build.cmake.define]` exists with `QARP_WITH_CUDAQ = "OFF"`;
+`QARP_CUDAQ_WHEEL_DIR`, `QARP_CUDAQ_NVQIR_BACKEND` and the
+`QARP_CUDAQ_MLIR_LIB_DIR` branch exist; the coverage flags are global today,
+so "scope to CXX" (plan:272) is a real change. `CudaqEngine(backend=
+"statevector", precision="fp64")` is the signature (`_cudaq_engine.py:152-161`).
+`run() -> list[float]`, `iterate() -> None` and `build() -> Self` match
+`develop`. `generator_groups()` matches the shape of `_sequences_grouped`
+(`trotter_block.py:552-567`); `NoGrouping` and `QubitWiseCommuting` exist;
+`onv.is_alpha`/`is_beta` exist; `Command::dagger` exists for U†. The QWC
+counts 0, 2, 2 and 4 for zero, I, X and X+Z hold
+(`grouped_transition_hadamard_test.py:140-173`). The X tape, the request
+arithmetic (two walkers of sign -1, population 3, numerator -4) and the
+binomial bounds hold. The CPU spawning threshold `dt*abs(H) > 1e-14` is at
+`montecarlo.py:458-466`. Docs code blocks are import-checked only, so GPU
+snippets in the rst pages do not break CPU CI. No em-dash outside the
+template's phase headings; no company or platform name.
+
+### Author checklist, pre-verified at `57971d0`
+
+The five Gate 1 boxes in the PR body are the author's to tick. Each condition
+holds at this revision, so ticking them is a formality once the next revision
+is pushed:
+
+- Header complete: Status, Author, Date, Tier, Branch, Green-lit (empty),
+  Scope (plan:3-9).
+- Scope is an explicit file list (plan:17-65).
+- Test plan table has the oracle column filled on every row (plan:701-734).
+- Conventions checked; the §14 additions are named and written in the Design
+  (plan:99-127).
+- Status Planned (plan:3); index row present (`README.md:148`).
+
+### Gate call
+
+Not ready to green-light. R5 to R7 are undefined contracts, each with a
+recommended answer; F16 to F24, F27 and F30 are each a sentence or a test
+row; F25, F26, F28 and F29 can wait for Gate 2. The author ticks the five
+Gate 1 boxes (R2) against the revision that carries them. F21, F22 and F23 are
+public-API decisions, since §15 fixes names at first release; the reviewer's
+recommendation is stated in each, and the author settles them in the next
+revision. One revision carrying all of them is the sha to green-light.
