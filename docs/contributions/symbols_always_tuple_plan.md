@@ -1,9 +1,9 @@
 # Make `.symbols` a tuple on every block that has a registry, and an error before
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-10-23
-**Tier:** Standard
+**Tier:** Structural
 **Branch:** improvement/symbols-always-tuple
 **Green-lit:** 2026-10-28, plan blob 7594a513dd769952af9cfc8396accdbb5aa6a4d0
 **Scope:**
@@ -69,7 +69,7 @@ block with no free parameter (§17).
   rather than returning `None`; the incident test asserts the raise.
 - **Composites.**  The five "no parameters to optimize" probes read a ket they
   have just built, so `if not ket.symbols:` stays; the message drops "(symbols
-  is None or empty)".  The seven `assert symbols is not None` narrowings in
+  is None or empty)".  The eight `is not None` narrowings in
   the composites go: mypy no longer needs them.
 - **Alternatives, rejected.**  `()` before build collapses "unbuilt or failed"
   into "parameter-free", the incident.  Keeping `Optional` is the gap this plan
@@ -130,24 +130,25 @@ def symbols(self, value: Optional[Iterable[Symbol]]) -> None:
 
 ### Phase 1 — Code and tests
 
-- [x] `_block.py`: property, setter, the private probes
+- [x] `_block.py`: property, setter, the private probes *(2026-10-29)*
 - [x] `ucc_block.py`, `trotter_block.py` probes; composite messages; the
-      `assert`s
+      `assert`s *(2026-10-29)*
 - [x] The three new tests; the five existing `is None` / `is not None`
-      assertions in `tests/` adapted
-- [x] `ruff`, `mypy`, `pytest` green
+      assertions in `tests/` adapted *(2026-10-29)*
+- [x] `ruff`, `mypy`, `pytest` green *(2026-10-29)*
 
 ### Phase 2 — Docs and records
 
-- [x] §17 sentence
-- [x] `CHANGELOG.md`: Changed, with the `is_built` migration
-- [x] `to_do.md`: the `symbols` clause leaves the *typed for its users* entry
+- [x] §17 sentence *(2026-10-29)*
+- [x] `CHANGELOG.md`: Changed, with the `is_built` migration *(2026-10-29)*
+- [x] `to_do.md`: the `symbols` clause leaves the *typed for its users* entry *(2026-10-29)*
 
 ## Deviations log
 
-- **Seven dead narrowings, not two.**  `vqa.py`, `ssvqe.py`, `pce.py` (twice)
+- **Eight dead narrowings, not two.**  `vqa.py`, `ssvqe.py`, `pce.py` (twice)
   and `vqd.py` carry the same `assert symbols is not None` as `adapt_vqe.py`
-  and `projected_vqe.py`; all seven go.
+  and `projected_vqe.py`, and `VFF._all_symbols` asserts both its registries
+  are not `None`; all eight go.
 - **A second probe in `trotter_block.py`.**  `TrotterAnsatzBlock.replace_symbols`
   truth-tests the copy's registry before renaming its pairs; it reads
   `_symbols` with the other private probes.
@@ -157,3 +158,6 @@ def symbols(self, value: Optional[Iterable[Symbol]]) -> None:
   `SimpleBlock(1).h(0).symbols` to check that a builder returns its block;
   the chain is `SimpleBlock(1).h(0).build().symbols` now, which checks the
   same thing on a block that has a registry.
+- **One docs snippet, out of the green-lit Scope.**  The `n_parameters`
+  example in `docs/source/qarp_philosophy.rst` read `len(block.symbols or ())`;
+  it reads `len(block.symbols)` now, and the file joins Scope.
