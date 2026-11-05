@@ -142,6 +142,7 @@ something else, parked until they are picked up.
 
 | Plan | Theme |
 |---|---|
+| [`circuit_cutting_shot_allocation_plan.md`](circuit_cutting_shot_allocation_plan.md) | Budget standalone QPD sampling, reuse local experiments and allocate shots with independent pilots |
 | [`compiled_backend_stubs_plan.md`](compiled_backend_stubs_plan.md) | Ship type stubs for `qarpx` and type-check `qarp` against them |
 | [`lazy_circuit_derivation_plan.md`](lazy_circuit_derivation_plan.md) | Primitives derive circuits lazily; declared structure planned inside `Engine.build`; `Target` below the engine layer |
 | [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator |
