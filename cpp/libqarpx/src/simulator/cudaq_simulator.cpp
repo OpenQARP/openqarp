@@ -2,6 +2,12 @@
 
 #include "qarpx/core/command.h"
 #include "qarpx/core/gates.h"
+#include "qarpx/core/errors.h"
+
+#ifdef QARP_WITH_CUDAQ_SEMICLASSICAL
+#include <cuda_runtime.h>
+#include <custatevec.h>
+#endif
 
 #include <stdexcept>
 #include <string>
@@ -274,6 +280,7 @@ void apply_target(const CudaqConfig& cfg) {
 SamplingResult CudaqSimulator::run(
     const std::vector<Command>& commands,
     int n_qubits, int n_shots, std::optional<uint32_t> seed) const {
+    auto resource_use = lease_resources().acquire();
     apply_target(cfg_);
     if (seed) cudaq::set_random_seed(static_cast<std::size_t>(*seed));
 
@@ -290,6 +297,7 @@ std::vector<SamplingResult> CudaqSimulator::batch_run(
     int n_qubits, int n_shots,
     const std::vector<std::unordered_map<std::string, double>>& param_sets,
     std::optional<uint32_t> seed) const {
+    auto resource_use = lease_resources().acquire();
     apply_target(cfg_);
     if (seed) cudaq::set_random_seed(static_cast<std::size_t>(*seed));
 
@@ -311,6 +319,7 @@ std::vector<SamplingResult> CudaqSimulator::batch_run(
 
 std::vector<std::complex<double>> CudaqSimulator::statevector(
     const std::vector<Command>& commands, int n_qubits) const {
+    auto resource_use = lease_resources().acquire();
     apply_target(cfg_);
 
     auto kernel = cudaq::make_kernel();
@@ -334,6 +343,7 @@ std::vector<double> CudaqSimulator::batch_expectation(
         std::pair<std::vector<std::pair<uint32_t, char>>,
                   std::complex<double>>>& observable,
     const std::vector<std::unordered_map<std::string, double>>& param_sets) const {
+    auto resource_use = lease_resources().acquire();
     apply_target(cfg_);
 
     // Out-of-range observable qubits corrupt the NVQIR state (no bounds
@@ -371,6 +381,7 @@ bool CudaqSimulator::available() noexcept { return false; }
 
 SamplingResult CudaqSimulator::run(
     const std::vector<Command>&, int, int, std::optional<uint32_t>) const {
+    auto resource_use = lease_resources().acquire();
     not_built_with_cudaq();
 }
 
@@ -378,11 +389,13 @@ std::vector<SamplingResult> CudaqSimulator::batch_run(
     const std::vector<Command>&, int, int,
     const std::vector<std::unordered_map<std::string, double>>&,
     std::optional<uint32_t>) const {
+    auto resource_use = lease_resources().acquire();
     not_built_with_cudaq();
 }
 
 std::vector<std::complex<double>> CudaqSimulator::statevector(
     const std::vector<Command>&, int) const {
+    auto resource_use = lease_resources().acquire();
     not_built_with_cudaq();
 }
 
@@ -391,10 +404,73 @@ std::vector<double> CudaqSimulator::batch_expectation(
     const std::vector<std::pair<std::vector<std::pair<uint32_t, char>>,
                                 std::complex<double>>>&,
     const std::vector<std::unordered_map<std::string, double>>&) const {
+    auto resource_use = lease_resources().acquire();
     not_built_with_cudaq();
 }
 
 #endif  // QARP_WITH_CUDAQ
+
+namespace detail {
+struct CudaqResources {
+    explicit CudaqResources(CudaqConfig c) : config(std::move(c)) {}
+    CudaqConfig config;
+    std::mutex operation_mutex;
+    std::uint64_t handle_creations = 0;
+#ifdef QARP_WITH_CUDAQ_SEMICLASSICAL
+    cudaStream_t stream = nullptr;
+    custatevecHandle_t handle = nullptr;
+    ~CudaqResources() {
+        if (stream) cudaStreamSynchronize(stream);
+        if (handle) custatevecDestroy(handle);
+        if (stream) cudaStreamDestroy(stream);
+    }
+#endif
+};
+}  // namespace detail
+
+CudaqResourceLease::CudaqResourceLease(std::shared_ptr<detail::CudaqResources> resources)
+    : resources_(std::move(resources)) {}
+CudaqResourceLease::Use::Use(std::shared_ptr<detail::CudaqResources> resources)
+    : resources_(std::move(resources)), lock_(resources_->operation_mutex) {}
+CudaqConfig CudaqResourceLease::config() const { return resources_->config; }
+void* CudaqResourceLease::Use::stream() {
+#ifdef QARP_WITH_CUDAQ_SEMICLASSICAL
+    if (!resources_->stream) {
+        const auto status = cudaStreamCreateWithFlags(&resources_->stream, cudaStreamNonBlocking);
+        if (status != cudaSuccess)
+            throw capability_error(std::string("Cannot create Monte Carlo CUDA stream: ") + cudaGetErrorString(status));
+    }
+    return resources_->stream;
+#else
+    throw capability_error("CUDA stream resources require QARP_WITH_CUDAQ_SEMICLASSICAL=ON");
+#endif
+}
+void* CudaqResourceLease::Use::statevector_handle() {
+#ifdef QARP_WITH_CUDAQ_SEMICLASSICAL
+    auto cuda_stream = static_cast<cudaStream_t>(stream());
+    if (!resources_->handle) {
+        custatevecHandle_t handle = nullptr;
+        auto status = custatevecCreate(&handle);
+        if (status != CUSTATEVEC_STATUS_SUCCESS)
+            throw capability_error("Cannot create the Monte Carlo cuStateVec handle");
+        status = custatevecSetStream(handle, cuda_stream);
+        if (status != CUSTATEVEC_STATUS_SUCCESS) {
+            custatevecDestroy(handle);
+            throw capability_error("Cannot bind the Monte Carlo cuStateVec stream");
+        }
+        resources_->handle = handle;
+        ++resources_->handle_creations;
+    }
+    return resources_->handle;
+#else
+    throw capability_error("cuStateVec resources require QARP_WITH_CUDAQ_SEMICLASSICAL=ON");
+#endif
+}
+std::uint64_t CudaqResourceLease::Use::handle_creations() const noexcept {
+    return resources_->handle_creations;
+}
+
+CudaqResourceLease::Use CudaqResourceLease::acquire() const { return Use(resources_); }
 
 // ── Methods common to both build modes ──────────────────────────────────────
 
@@ -407,6 +483,18 @@ CudaqSimulator::~CudaqSimulator() = default;
 CudaqSimulator::CudaqSimulator(CudaqSimulator&&) noexcept = default;
 CudaqSimulator& CudaqSimulator::operator=(CudaqSimulator&&) noexcept = default;
 
-void CudaqSimulator::set_config(CudaqConfig c) { cfg_ = std::move(c); }
+CudaqResourceLease CudaqSimulator::lease_resources() const {
+    const std::lock_guard<std::mutex> lock(*config_mutex_);
+    if (!resources_) resources_ = std::make_shared<detail::CudaqResources>(cfg_);
+    return CudaqResourceLease(resources_);
+}
+
+void CudaqSimulator::set_config(CudaqConfig c) {
+    const std::lock_guard<std::mutex> lock(*config_mutex_);
+    if (resources_ && resources_.use_count() > 1)
+        throw std::runtime_error("Cannot reconfigure CudaqSimulator while resource leases are live");
+    resources_.reset();
+    cfg_ = std::move(c);
+}
 
 }  // namespace qarpx

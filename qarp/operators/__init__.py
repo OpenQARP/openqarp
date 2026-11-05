@@ -20,6 +20,7 @@ from ._fermion_operator import FermionOperator
 from ._linear_combination_unitaries import LinearCombinationUnitaries
 from ._qdrift import qDRIFT
 from ._qubit_operator import QubitOperator
+from ._computational_basis_sector import ComputationalBasisSector
 from ._grouping import (
     FullyCommuting,
     GroupingStrategy,
@@ -38,6 +39,7 @@ from ._tensor_operators import (
 
 __all__ = [
     "BravyiKitaev",
+    "ComputationalBasisSector",
     "FermionOperator",
     "FullyCommuting",
     "GroupingStrategy",

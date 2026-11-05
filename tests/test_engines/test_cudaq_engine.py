@@ -511,3 +511,32 @@ def test_vqe_gradient_true_matches_qarp_engine():
         energies[name] = e
 
     assert energies["gpu"] == pytest.approx(energies["cpu"], abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{}, {"backend": "tensornet"}, {"precision": "fp32"}, {"target": "qpp"}]
+)
+def test_resident_hook_checks_simulator_configuration_on_cpu(monkeypatch, kwargs):
+    from qarp.engines import _cudaq_engine as module
+
+    class ScriptedSimulator:
+        def __init__(self, config):
+            self.config = config
+
+    monkeypatch.setattr(module, "_require_cudaq", lambda: ScriptedSimulator)
+    monkeypatch.setattr(qx, "montecarlo_available", lambda: True)
+    engine = CudaqEngine(**kwargs)
+    if kwargs:
+        with pytest.raises(CapabilityError, match="StateVector/FP64"):
+            engine._resident_simulator(2)
+    else:
+        # A resident hook never invokes the 30-qubit host-transfer cap.
+        assert engine._resident_simulator(61) is engine._sim
+        monkeypatch.setattr(qx, "montecarlo_available", lambda: False)
+        with pytest.raises(CapabilityError):
+            engine._resident_simulator(2)
+
+
+def test_default_engine_has_no_resident_capability():
+    with pytest.raises(CapabilityError):
+        _MinimalEngine()._resident_simulator(2)

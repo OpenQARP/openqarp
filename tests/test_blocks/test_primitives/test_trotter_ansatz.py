@@ -639,3 +639,37 @@ def test_live_generators_keep_every_symbol():
 
     assert block.symbols == (a, z)
     assert sorted(block.free_symbols()) == ["a", "z"]
+
+
+@pytest.mark.parametrize(
+    "grouping_name,group_sizes", [("full", (2, 1)), ("none", (1, 1, 1)), ("qwc", (1, 1, 1))]
+)
+def test_generator_groups_is_immutable_and_matches_emission(grouping_name, group_sizes):
+    strategies = {"full": FullyCommuting, "none": NoGrouping, "qwc": QubitWiseCommuting}
+    a, b = Symbol("a"), Symbol("b")
+    h = QubitOperator("X0 X1") + QubitOperator("Y0 Y1")
+    block = TrotterAnsatzBlock(
+        2, [h, QubitOperator("Z0 Z1")], [a, b], grouping=strategies[grouping_name]()
+    )
+    groups = block.generator_groups()
+    assert not block.is_built
+    assert tuple(len(g) for g in groups) == group_sizes
+    triples = [
+        (tuple(str(p) for p in paulis), symbol, coefficient)
+        for group in groups
+        for paulis, symbol, coefficient in group
+    ]
+    assert sorted(triples) == [
+        (("X", "X"), "a", 1.0),
+        (("Y", "Y"), "a", 1.0),
+        (("Z", "Z"), "b", 1.0),
+    ]
+    assert isinstance(groups, tuple) and all(isinstance(g, tuple) for g in groups)
+    bound = block.set_symbols({a: 0.17, b: -0.23}).build()
+    xx = np.kron(X, X)
+    yy = np.kron(Y, Y)
+    zz = np.kron(Z, Z)
+    expected = expm(-0.23j * zz) @ expm(0.17j * (xx + yy))
+    actual = np.asarray(qx.QarpSimulator().unitary_matrix(bound.flatten(), 2))
+    np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-12)
+    assert block.generator_groups() == groups

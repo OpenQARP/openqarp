@@ -1,4 +1,7 @@
 add_executable(qarpx_tests
+    test_montecarlo_contexts.cpp
+    test_transition_columns.cpp
+    test_montecarlo_headers.cpp
     test_core.cpp
     test_architecture.cpp
     test_noise_model.cpp

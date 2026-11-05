@@ -1024,6 +1024,10 @@ tests are separate bounded cases.
 
 ## Phases
 
+Checked implementation items below have CPU evidence dated 2026-11-05.
+GPU numerical execution remains open in Phases 2, 3 and 6; checked items do
+not claim GPU validation or Gate 2 approval.
+
 All increments belong to the same contribution branch and PR. Each increment is
 reviewable and CPU-buildable with its own tests; mark it complete only with
 dated evidence. The complete proposed binding surface is introduced with CPU
@@ -1032,52 +1036,85 @@ ABI and regenerates the stub as required by §15.
 
 ### Phase 1 — host API and ownership
 
-- [ ] Apply approved §14 text; add host records, validation/replay/capacity
-  logic, resource leases and the engine resident hook.
-- [ ] Register the complete binding API with CPU throwing stubs, bump paired ABI
-  and regenerate/test the stub.
-- [ ] Test host payloads, ownership, lease lifetime/configuration and CPU
-  availability.
+- [x] Apply approved §14 text; add host records, validation/replay/capacity
+  logic, resource leases and the engine resident hook. (2026-11-05)
+- [x] Register the complete binding API with CPU throwing stubs, bump paired ABI
+  and regenerate/test the stub. (2026-11-05)
+- [x] Test host payloads, ownership, lease lifetime/configuration and CPU
+  availability. (2026-11-05)
 
 ### Phase 2 — simulator columns and complete-row evolution
 
-- [ ] Add simulator-layer batched columns, canonical gate matrices and compact
-  sector gathering with their independent simulator tests.
-- [ ] Add build gates and separate resident complete-row kernels.
+- [x] Add simulator-layer batched columns, canonical gate matrices and compact
+  sector gathering with their independent simulator tests. (2026-11-05)
+- [x] Add build gates and separate resident complete-row kernels. (2026-11-05)
 - [ ] Test analytic complex columns, signed X tapes, cache resume, RNG, overflow
   and reference-conflict guards.
 
 ### Phase 3 — request transport
 
-- [ ] Add immutable requests, exact payload replay, proposal multiplicities and
-  full estimator support.
+- [x] Add immutable requests, exact payload replay, proposal multiplicities and
+  full estimator support. (2026-11-05)
 - [ ] Test request identity, stale/change rejection, weight-above-one and
   failure histories.
 
 ### Phase 4 — Python MC integration
 
-- [ ] Add `AggregatedMonteCarlo` with its GPU option matrix and validation.
-- [ ] Add operator-sector certification and the public Trotter accessor.
-- [ ] Add bulk startup, bounded caches, seeds, estimators, diagnostics and
-  opt-in lazy QWC circuit accounting.
-- [ ] Add pooled trajectory estimation, whole-trajectory jackknife and strict
-  failure handling with independent literal host oracles.
-- [ ] Test every Python branch with scripted contexts and independent host
-  oracles; retain CPU regressions.
+- [x] Add `AggregatedMonteCarlo` with its GPU option matrix and validation. (2026-11-05)
+- [x] Add operator-sector certification and the public Trotter accessor. (2026-11-05)
+- [x] Add bulk startup, bounded caches, seeds, estimators, diagnostics and
+  opt-in lazy QWC circuit accounting. (2026-11-05)
+- [x] Add pooled trajectory estimation, whole-trajectory jackknife and strict
+  failure handling with independent literal host oracles. (2026-11-05)
+- [x] Test every Python branch with scripted contexts and independent host
+  oracles; retain CPU regressions. (2026-11-05)
 
 ### Phase 5 — documentation
 
-- [ ] Update algorithm/operator/block/install reference pages and add the
-  bounded notebook.
+- [x] Update algorithm/operator/block/install reference pages and add the
+  bounded notebook. (2026-11-05)
 
 ### Phase 6 — integration evidence and Gate 2
 
-- [ ] Run CPU/native/lint/type/stub/wheel/coverage/example checks and resolve
-  all failures.
+- [x] Run CPU/native/lint/type/stub/wheel/coverage/example checks and resolve
+  all failures. (2026-11-05)
 - [ ] Execute both CUDA-Q profiles and attach author numerical evidence;
   required GPU skips remain open.
 - [ ] Fold declared deviations into the plan, date phase boxes and finish the
   Gate 2 sequence on this PR.
+
+## Local validation — 2026-11-05
+
+These are public-port working-tree checks, not validation of a committed
+Gate 2 head. The checkout uses its own Python 3.12.12 environment with
+nanobind 3.0.1. Python, extension and native source origins were checked;
+paired ABI is 16, advanced from the public baseline's 15, without a bypass.
+The CPU build has both GPU gates disabled.
+
+- Full CPU Python regression run: 5834 passed, 160 optional-backend skips,
+  24 deselected and seven expected failures. Final host-side MC fixes were
+  rechecked by the focused suite below.
+- Native suite: 955 passed; four explicitly gated GPU cases skipped.
+- Final focused MC/sector/column/stub suite: 495 passed; 20 GPU cases skipped.
+- Combined regression/final-module coverage is 94.8% globally and 96.82% on
+  changed Python lines, including untracked additions. The final focused run
+  replaces the algorithm module's earlier coverage after its last host fixes;
+  other modules retain full-regression coverage. Floors remain 94% and 80%.
+- Ruff check and format, mypy over 524 source files, documentation code checks,
+  generated-stub drift and wheel stub resolution outside the checkout pass.
+  The wheel contains the matching generated native stub.
+- The notebook's independent CPU oracle passes, including under editable
+  rebuild-on-import with persistent tooling and notebook-safe verbosity.
+  Both optional GPU smokes remain explicitly unverified.
+- The invalid MC-enabled/CUDA-Q-disabled build combination fails configuration
+  with the required dependency explanation.
+
+CUDA compilation and numerical execution were not available locally. Antonio
+must run both CUDA-Q profiles, the required GPU cases and both notebook smokes,
+and compare generated stubs against the same committed stub. The bounded
+commands and evidence requirements are in `docs/source/installation.rst` and
+the Test plan above. Required GPU skips keep Gate 2 open. Results must be
+repeated on the exact committed head submitted for review.
 
 ## Deviations log
 

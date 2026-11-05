@@ -2,10 +2,12 @@
 
 #include "../core/command.h"
 #include "sampling_result.h"
+#include "transition_columns.h"
 
 #include <complex>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -50,6 +52,33 @@ struct CudaqConfig {
     int            max_bond_dim = 0;
 };
 
+namespace detail { struct CudaqResources; }
+
+// The lease and its use guard outlive the simulator wrapper without dangling
+// resource pointers; no CUDA types cross this header.
+class CudaqResourceLease {
+public:
+    class Use {
+    public:
+        Use(Use&&) noexcept = default;
+        Use& operator=(Use&&) = delete;
+        [[nodiscard]] void* stream();
+        [[nodiscard]] void* statevector_handle();
+        [[nodiscard]] std::uint64_t handle_creations() const noexcept;
+    private:
+        explicit Use(std::shared_ptr<detail::CudaqResources> resources);
+        std::shared_ptr<detail::CudaqResources> resources_;
+        std::unique_lock<std::mutex> lock_;
+        friend class CudaqResourceLease;
+    };
+    [[nodiscard]] CudaqConfig config() const;
+    [[nodiscard]] Use acquire() const;
+private:
+    explicit CudaqResourceLease(std::shared_ptr<detail::CudaqResources> resources);
+    std::shared_ptr<detail::CudaqResources> resources_;
+    friend class CudaqSimulator;
+};
+
 /// In-process GPU simulator built on CUDA-Q (cuStateVec / cuTensorNet).
 ///
 /// Implementation notes:
@@ -70,8 +99,12 @@ public:
     CudaqSimulator(CudaqSimulator&&) noexcept;
     CudaqSimulator& operator=(CudaqSimulator&&) noexcept;
 
-    [[nodiscard]] const CudaqConfig& config() const { return cfg_; }
+    [[nodiscard]] CudaqConfig config() const {
+        const std::lock_guard<std::mutex> lock(*config_mutex_);
+        return cfg_;
+    }
     void set_config(CudaqConfig c);
+    [[nodiscard]] CudaqResourceLease lease_resources() const;
 
     /// True iff this build linked CUDA-Q (`QARP_WITH_CUDAQ`).  The Python
     /// `CudaqEngine` checks this before constructing, so a CPU-only wheel gives
@@ -120,12 +153,20 @@ public:
                       std::complex<double>>>&                       observable,
         const std::vector<std::unordered_map<std::string, double>>& param_sets) const;
 
+    [[nodiscard]] std::unique_ptr<simulator::TransitionColumnProvider> make_transition_column_provider(
+        const std::vector<Command>& U, int n,
+        const std::vector<std::pair<std::vector<std::pair<uint32_t,char>>,std::complex<double>>>& observable,
+        std::uint64_t initial_batch_capacity=1,
+        const std::vector<std::uint64_t>& sector_target_labels={});
+
 private:
     CudaqConfig cfg_ {};
+    mutable std::shared_ptr<std::mutex> config_mutex_ = std::make_shared<std::mutex>();
 
     /// Opaque CUDA-Q handle(s); defined only in the .cpp under the build flag.
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    mutable std::shared_ptr<detail::CudaqResources> resources_;
 };
 
 }  // namespace qarpx

@@ -3157,3 +3157,15 @@ controlled-rotation structure legible:
    :width: 100%
    :align: center
    :alt: Piecewise-linear payoff circuit with a one-breakpoint comparator on a two-qubit domain
+
+Trotter generator inspection
+----------------------------
+
+``TrotterAnsatzBlock.generator_groups()`` returns immutable tuples of
+``(pauli_tuple, symbol_name, coefficient)`` triples grouped within each original
+generator, before Suzuki scaling/repetition. It does not build or mutate the
+block and uses the same grouping source as gate emission. Coefficients follow
+the block's real/imaginary-generator convention. The Pauli tuple is in local
+LSB qubit order; symbol names are not a positional parameter vector. Use
+``parameter_map`` for binding. This accessor supports conservation checks
+without depending on a private grouping method.

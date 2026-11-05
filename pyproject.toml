@@ -314,6 +314,7 @@ QARP_BUILD_TESTS = "OFF"          # don't fetch googletest for a wheel build
 # LAPACK's canonical (bit-reproducible) degenerate-σ CSD.
 QARP_USE_LAPACK = "OFF"
 QARP_WITH_CUDAQ = "OFF"           # CPU wheel; GPU is a separate source build
+QARP_WITH_CUDAQ_SEMICLASSICAL = "OFF"
 # Symbolic operator coefficients (SymEngine v0.14 + Boost.Multiprecision —
 # MIT + BSL-1.0 only, no GMP/LGPL; CMake hard-fails if boostmp is not picked
 # up). Boost headers are a build-time-only requirement: system Boost when

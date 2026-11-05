@@ -420,6 +420,10 @@ class Engine(ABC):
         logical→physical map.  Engines that route override this."""
         return False
 
+    def _resident_simulator(self, n_qubits: int):
+        """Return a simulator capable of resident population evolution."""
+        raise CapabilityError("This engine does not provide resident population evolution")
+
     def _host_statevector_simulator(self, n_qubits: int):
         """The live simulator an algorithm-level statevector fast path reads
         ``statevector(commands, n_qubits)`` from, or None when this engine

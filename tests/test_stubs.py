@@ -216,6 +216,7 @@ def test_builder_overload_runs_as_the_stub_declares(name, params, make_param, ma
 _SETUP = """\
 import numpy as np
 import qarpx as qx
+from numpy.typing import NDArray
 from sympy import Symbol
 from qarp.algorithms import VQD, VQE, TermwiseSWAPTest
 from qarp.blocks import (
@@ -239,6 +240,7 @@ kets = [hb]
 amplitudes = {(0, 1): 1.0}
 onvs = {(1, 0): 1.0}
 table = {0: (1, 0, 1), 1: (0, 1, 1)}
+float_labels: NDArray[np.float64] = np.array([0.0], dtype=np.float64)
 """
 _SNIPPETS = [
     # (statement, mypy error code or None, runs)
@@ -272,6 +274,24 @@ _SNIPPETS = [
     ("SparseStateBlock(2, amplitudes)", None, True),
     ("MultiONVStateBlock(onvs)", None, True),
     ("QROMBlock(index_qubits=1, data=table)", None, True),
+]
+_SNIPPETS += [
+    (
+        "qx.TransitionRequest(1, 0, 0, 1, np.array([0], dtype=np.uint64), np.array([1], dtype=np.int64)).sources.dtype",
+        None,
+        True,
+    ),
+    (
+        "qx.TransitionRequest(1, 0, 0, 1, float_labels, np.array([1], dtype=np.int64))",
+        "arg-type",
+        False,
+    ),
+    (
+        "qx.EvolutionResult(status=qx.EvolutionStatus.IntegerOverflow, completed_steps=1, projected_numerator_history=np.array([2.0], dtype=np.float64)).status",
+        None,
+        True,
+    ),
+    ("callable(qx.CudaqSimulator.make_transition_column_provider)", None, True),
 ]
 _KNOWN_FALSE_REJECTIONS = [
     # A numpy integer is not an int to mypy; nanobind converts it.
