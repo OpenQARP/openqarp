@@ -8,8 +8,9 @@ Findings only; the green-light is the reviewer's call. The revision at
 `e9ee9d0` is reviewed against these findings in the second pass, the
 Architecture section after it records the reviewer's positions on the
 design, the revision at `57971d0` is reviewed against both in the third
-pass, the revision at `3c99e80` in the fourth pass, and the revision at
-`4225b8c` in the fifth pass at the end.
+pass, the revision at `3c99e80` in the fourth pass, the revision at
+`4225b8c` in the fifth pass, and the implementation at `b2d1b5d` in the
+Gate 2 conformance review at the end.
 
 ## Summary
 
@@ -1235,3 +1236,360 @@ F31 and every residual item are addressed. Nothing blocks the green-light.
 
 Ready to green-light at `4225b8c`. The reviewer's four Gate 1 boxes hold as
 stated in the fourth pass. The nits above can ride in the header commit.
+
+## Gate 2 conformance review at `b2d1b5d`
+
+Implementation commit `b2d1b5d` (47 files, 10364 insertions) against the plan
+as green-lit: `4225b8c`, blob `8cfd4b8d`, taken from the reviewer's
+`Green-lit at` comment on PR #22 and matching the plan header. Three
+independent passes (collating reviewer, native angle, Python and test angle),
+compared, then every finding below re-verified in the tree by the collating
+reviewer and the draft confirmed by the other two. Findings, not a verdict;
+the Gate 2 boxes are the reviewer's. PR #22 is still Draft and Phases 2, 3
+and 6 keep their GPU boxes open, so this review covers what a CPU checkout
+can establish. Plan lines cite the green-lit blob unless marked HEAD.
+
+### Summary
+
+The PR implements the green-lit design closely on everything a CPU build
+compiles: constructor, engine hook and `CudaqEngine` override, sector type,
+public generator accessor, estimator and pooled-trajectory contract,
+diagnostics key sets, native records, leases, GIL order, bindings, ABI, stub,
+CMake gate and the three §14 paragraphs. Every estimator and combination
+oracle in the plan recomputes by hand and the code reproduces it; the GPU
+kernel oracles are open. The CUDA side does not conform yet: the MC-enabled
+profile cannot compile, one GPU-required test cannot pass, two CPU tests
+cannot fail, the column provider accepts two nonunitary gates, several
+option-matrix rows and named oracles have no assertion, and the plan carries
+a run-history section that belongs in the PR.
+
+### Deviations claim
+
+The PR's "Deviations from plan" section is empty, claiming an exact
+implementation of blob `8cfd4b8d`. The plan at HEAD is blob `613dad8`; the
+diff from the green-lit blob is the header fill, Status In progress, the two
+wording nits the green-light allowed (plan:198 and the option-matrix row
+plan:615, both in `c168a5f`), dated phase boxes, a Phases preamble and a new
+"Local validation" section (G3). Differences between code and plan that the
+empty section does not declare: G4a (request transitions in the CUDA
+`Impl`, not `HostProtocol`), G5 (nonunitary gates accepted), G8 and G9
+(two readings of the plan), G11 (file split, binding placement, GIL release
+on existing bindings, `set_config` during a run, unused primitive, step
+rounding, empty sector array, runtime GPU skip). None changes the design.
+
+### Checks run on this Mac (CPU build, MC off)
+
+| Check | Result |
+|---|---|
+| pytest, 11 new and regression files | 706 passed, 37 skipped (20 new `gpu_` MC cases, 17 existing CUDA-Q engine cases) |
+| ruff check, ruff format --check | clean |
+| `scripts/generate_stubs.py --check` | clean |
+| mypy `qarp/ tests/` | clean, 524 files |
+| ctest, 947 cases | 940 pass, 4 `gpu_` cases skipped, 3 BlasThreads exit-handler failures identical to untouched `develop` on this machine |
+| CPU coverage, CI form | `aggregated_montecarlo.py` 94.6%, `_computational_basis_sector.py` 100% |
+| Notebook code cells on CPU | oracle passes, GPU cells report unverified |
+
+A CPU build never compiles a `.cu` file, so none of these checks reaches G1.
+
+### Findings, most severe first
+
+- **G1. The MC-enabled build cannot compile.** Five expressions in
+  `complete_evolution.cu` name the static `detail::HostProtocol::checked_bytes`
+  through an object whose class does not derive from `HostProtocol`, with an
+  undeclared unqualified argument: `batch.detail::HostProtocol::checked_bytes(
+  reference_labels.size(), ...)` at :651 (`TransitionBatch`), `result.detail::
+  ...(missing_labels.size(), ...)` at :867 and :871 (`EvolutionResult`), and
+  `aggregated_host_control_.detail::...(active_count, ...)` at :994 and :1002.
+  Each is ill-formed; the intended form is `detail::HostProtocol::
+  checked_bytes(batch.reference_labels.size(), ...)`. The affected paths are
+  request apply, the missing-label return and population capacity growth, so
+  every MC-enabled profile fails at this file. The Phase 2 box "Add build
+  gates and separate resident complete-row kernels" and the Phase 3 box "Add
+  immutable requests, exact payload replay ..." are ticked (HEAD plan:1050,
+  :1055) although the preamble (HEAD :1027-1029) admits CPU evidence only and
+  a CPU build gives these two boxes no evidence at all. Untick them until the
+  MC-enabled profile builds.
+- **G2. A GPU-required test cannot pass.** `test_montecarlo_gpu.py:284`
+  asserts `generated_circuits > 0`, but the constructor call at :263-280
+  leaves `track_transition_circuits` at its default `False` (plan:517) and
+  `run()` sets the counter to 0 (`aggregated_montecarlo.py:351`). Both
+  parametrizations fail on an MC-enabled run, and a required `gpu_` case may
+  not skip or fail at Gate 2 (plan:985-989, 991-998). Pass
+  `track_transition_circuits=True` or assert the counter is 0.
+- **G3. Run history in the plan file.** The "Local validation" section
+  (HEAD plan:1086-1118) records pass counts, coverage percentages and
+  environment versions of a working-tree run, names a person who "must run"
+  the GPU cases, and says "public-port working-tree checks" and "advanced
+  from the public baseline's 15" (:1088, :1091). The template has no such
+  section, the plan itself places this evidence in the PR (plan:1011-1017),
+  and the wording implies a non-public counterpart. Move the content to the
+  PR's Validation section, drop "public-port" and "public baseline", and
+  name the role, not the person. The Phase 6 box "Run CPU/native/lint/type/
+  stub/wheel/coverage/example checks" is ticked on that dirty-tree run
+  although plan:1015-1017 requires evidence on the committed head; untick it
+  until the head is marked ready.
+- **G4. Two CPU tests cannot fail.** (a) The plan puts request identity,
+  accepted replay and checked capacity in `HostProtocol`, "this same host
+  state machine" the CUDA contexts delegate to, constructed directly by the
+  C++ tests (plan:163-169, row "CPU native protocol" plan:922). The struct
+  (`host_protocol.h:22-42`) holds the fields and the validators only; every
+  transition is written inline in the CUDA-only `Impl`: reset clears the
+  pending and replay state (`complete_evolution.cu:399-404`), request issue
+  sets the pending request (:556-558), accept records the batch (:735-738).
+  The CPU test (`test_montecarlo_contexts.cpp` LiteralBatchValidationAndReplay)
+  therefore sets the fields by hand and exercises the validators; exact-once
+  counters and stale-after-reset run only in the `gpu_` cases. Move the
+  transitions into `HostProtocol` methods and drive them from the CPU test.
+  (b) `mc::Diagnostics` carries `handle_creations`, `state_buffer_bytes`,
+  `gate_uploads` and `term_uploads` (`contexts.h:76-79`) and nothing in
+  `complete_evolution.cu` or `request_evolution.cu` writes them, so the
+  "Evolution-only allocation" assertions (`test_montecarlo_contexts.cpp:139-
+  143`, `test_montecarlo_aggregated.py:664-665`, plan:924) pass whatever the
+  context allocates. The instrument exists: `CudaqResourceLease::Use::
+  handle_creations()`. Copy it into the context diagnostics or assert it
+  through a lease. The implementation itself conforms (the context takes only
+  a stream, `complete_evolution.cu:351-354`); the test is vacuous.
+- **G5. The column provider accepts `Reset` and a bare `Measure` as
+  identity.** plan:159-160 and :740-742 reject all nonunitary commands other
+  than the skipped `Barrier` and scalar `GPhase`. `make_transition_column_
+  provider` rejects only commands with `cbits` or `condition_bits`
+  (`transition_columns.cpp:30-36`, `transition_columns.cu:690`); `gate_matrix`
+  then calls `QarpSimulator::local_unitary` (`transition_columns.cu:59`), and
+  `apply_command` treats `Measure` and `Reset` as no-ops
+  (`qarp_simulator.cpp:585-589` on `develop`), so both come back as identity.
+  `develop` already rejects them in `unitary_matrix` (`qarp_simulator.cpp:
+  1276-1277`). Reject by gate type in the host check, which runs before the
+  CPU stub, and add a CPU test.
+- **G6. Option-matrix rows without a test** (plan:602-635; the Test plan row
+  asks for "one independently parametrized acceptance/rejection case for
+  each"). The code behaves as each row says (read and probed), the assertion
+  is absent: :605 `QarpEngine`/`None` at the algorithm level with no native
+  allocation; :610 missing `engine` is `TypeError`; :615 instantaneous with
+  burn-in or block size is `ValueError` directing to `ratio_of_sums` (the
+  parametrized `estimator_block_size=0` at `test_montecarlo_aggregated.py:88`
+  fails earlier on positivity); :623 sector of dimension one is allowed; :624
+  request config plus `sector` is `ValueError`; :625 request config plus
+  adaptive prefetch is `CapabilityError`; :633 width outside `1 <= n < 63`
+  and H beyond the register; :634 unbound U parameters at coefficient
+  construction. Partially covered: :606 recheck on use through the class,
+  :609 nonfinite H, :618 failed trajectory (through `run()` on the first walk
+  only, :1233; the second-walk case is hand-built, :1210), :621
+  `walker_basis`, :627 bool values, :629 `total_time < time_step` and
+  nonfinite times, :630 bool or noninteger burn-in, :635 U/config mutation
+  after build (H only).
+- **G7. Named oracles absent from the assertions.** The plan's
+  single-trajectory tape (plan:293-299: 6, replicas 50/7 and 10/3, standard
+  error 40/21, burn-in one 58/9, instantaneous 8) is not asserted; the local
+  estimator test (:226) uses a different tape, correct but unnamed. The
+  two-trajectory test (:1135) asserts 6, 40/21, 20/3 and 2 but not the
+  replicas 50/7, 10/3, 8 and 4 (`trajectory_jackknife_estimates` is read only
+  by the GPU case at `test_montecarlo_gpu.py:421`). The class-level request
+  fixture (plan:941-948, energy -4 through
+  `run()` with the real sector and certificate) has no test; the GPU smoke
+  and the notebook use (XX+YY)/2 and -1. The literal JSON payload (Sector
+  row) is checked only against itself (:70). The pinned certificate case,
+  XX+YY accepted under `FullyCommuting` and rejected under `NoGrouping` and
+  QWC (plan:679-681), is absent: both the accepted ansatz (:48-53) and the
+  rejected one (:189-193) use the generator X0Y1 - Y0X1. The resident-hook
+  spy of the "No execution or fallback" row does not exist:
+  `_CpuResidentEngine._resident_simulator` (:26) counts nothing and no test
+  asserts the hook is called. Also absent: incomplete tail and invalid block
+  replica (Estimators row), mocked clock and literal key sets (Diagnostics
+  row), H densification and `generate_states_new_basis` sentinels (No dense
+  host startup row), the exact 256-byte budget and recomputation after
+  eviction (Scalar cache row), the `(root, trajectory)` pair passed to
+  `reset_aggregated_evolution` (Seed row).
+- **G8. Accounting across runs, question for the humans.** plan:384-389
+  counts C times the distinct pairs of a run and starts fresh metadata on
+  each run. The accounting path of `_upload_complete_rows` skips rows already
+  in the native cache before any accounting (`aggregated_montecarlo.py:583`),
+  so a second identical run reports `measurement_settings` 2 where the first
+  reports 4; `test_montecarlo_aggregated.py:1037-1042` pins this. If "fresh
+  metadata" means the same logical requests give the same count, the second
+  run should report 4 and the test should change; if the native cache is
+  meant to reduce the count, the plan should say so in a folded-back
+  deviation.
+- **G9. `TrotterAnsatzBlock` subclasses are certified, question for the
+  humans.** plan:682-683 ends "Arbitrary user block subclasses are not
+  certified"; the checks at `aggregated_montecarlo.py:1000` and :1035 use
+  `isinstance`, so a subclass overriding `generator_groups()` is certified on
+  its own word (probe: an override returning `()` with the nonconserving
+  generator X0 passes for sector {1, 2}). If the sentence means subclasses
+  of `TrotterAnsatzBlock`, use `type(self.U) is TrotterAnsatzBlock` and add a
+  row; if it means unrelated user blocks, the code conforms and the sentence
+  could be sharpened in a folded-back deviation.
+- **G10. Native test rows thinner than the table.** `test_transition_
+  columns.cpp` holds one `gpu_` case (Rz on two qubits, lower-left
+  `exp(-i theta)`, lease persistence; `ud` at :16 unused) while the rows
+  "Exact complex columns", "Compaction and sector gathering" and "Column
+  orientation" name it beside the Python file, which carries Ry, H-CX,
+  GPhase+Barrier, the upper-right entry, the conjugated consumer and
+  compaction. The "Resource leases" row tests the use guard against a second
+  lease, not against a simulator run, although the CPU stub `run` now takes
+  the guard. The Python "Exception boundaries" row covers host checked
+  overflow only through the binding range check at `test_montecarlo_gpu.py:
+  110`; the C++ `HostProtocol` tests carry it. The C++ `gpu_` cases also
+  require `QARP_RUN_CUDAQ_GPU_TESTS=1` where plan:987 skips on
+  `!montecarlo_available()` alone; the installation page exports the
+  variable before ctest, so the Gate 2 run must keep that order or the
+  required cases skip.
+- **G11. Undeclared, none changing the design; declare in the PR or fold
+  back.** (a) Request transport host code (`request_transitions`,
+  `apply_transition_batch`, the sampled capacity functions) lives in
+  `complete_evolution.cu:509-740`; `request_evolution.cu` holds the two
+  sampled kernels only, and `rng.cuh` carries the device status enum, the
+  control and summary structs and kernel declarations beyond "shared Philox
+  helpers" (plan:169-171). (b) The column-provider class and `CudaqSimulator.
+  make_transition_column_provider` are registered in `bindings_montecarlo.
+  cpp:349-382` and called from `bindings.cpp:1581`, not "beside the simulator
+  in `bindings.cpp`" (plan:582). (c) The existing `CudaqSimulator` bindings
+  `run`, `batch_run`, `statevector` and `batch_expectation` now release the
+  GIL and take the use guard (`bindings.cpp:1561-1578`, `cudaq_simulator.
+  cpp`); the GIL row (plan:925) needs it, the plan does not state it, and it
+  changes the MC-disabled CUDA-Q profile, which must therefore run (plan:999-
+  1001). (d) Every simulator run now holds a `Use`, so `sim.config = ...`
+  from another thread raises "while resource leases are live" during an
+  ordinary run; consistent with plan:877-878 for leases, unstated for runs.
+  (e) `super().__init__(primitive=StateVector(), engine=engine)`
+  (`aggregated_montecarlo.py:290`) deep-copies a primitive the class never
+  reads; pass `None`. (f) `_resident_step_count` (:43) rounds to the nearest
+  integer within 1e-12 and floors otherwise; the plan states only
+  `total_time < time_step`. (g) For no sector the adapter passes an empty
+  uint64 array (:123) where plan:414 says `None` or an array; the native
+  side treats both alike. (h) The Python GPU cases skip at run time through
+  `_require_gpu()` instead of copying the `_requires_gpu` marker pattern
+  (plan:976-978).
+- **G12. Low.** `contexts.h:109` reads "A configured build gate alone never
+  establishes numerical availability" while `available()` returns exactly
+  the gate (`contexts.cpp:16-22`, plan:579); say what the probe means.
+  `compact_columns` is typed `-> tuple` in `qarpx.pyi:1856` where plan:560-
+  561 fixes the three arrays (plan:409 "fix binding annotations first"). A
+  moved-from `CudaqSimulator` has a null `config_mutex_` (defaulted move of
+  the `shared_ptr`), so `config()` or `set_config()` on it dereferences null;
+  Python never moves one. `installation.rst:388-421` carries reviewer
+  evidence process ("The author validates two source-build profiles",
+  "Record the head SHA", "Previous builds or results do not certify") where
+  plan:427-428 asks for supported behaviour and bounded execution
+  instructions; :297-300 says twice that the build links against the wheel.
+  `algorithms.rst` describes the engine hook and simulator capability in
+  prose but names neither `Engine._resident_simulator` nor `CudaqSimulator.
+  make_transition_column_provider`, and the `contexts.h` include note is
+  absent (plan:459-462). Error strings say "semiclassical-sector"
+  (`aggregated_montecarlo.py:998`, :1002, :1009) for the argument named
+  `sector`, and "currently requires" (:1002) is history wording. Test
+  variable names `legacy_rows`/`legacy`
+  (`test_montecarlo_aggregated.py:381-394`) and "the initial implementation"
+  in `algorithms.rst` are history wording. Dead code: an unused
+  `checked_dimension` and empty anonymous namespaces in
+  `complete_evolution.cu`, unused `dagger.build()` calls and a duplicated
+  H-CX case in `test_transition_columns.py` (:94, :122).
+- **G13. PR body is at plan stage.** Summary ("This Draft PR is at design
+  review"), the Gate 1 paragraph ("Not yet green-lit", third pass) and
+  Validation ("at plan stage") are stale; the five author Gate 1 boxes and
+  the five Gate 2 boxes are unticked, and `pr-checklist` fails a non-draft
+  PR with an unticked box (the reviewer boxes inside HTML comments are
+  stripped first and do not count). Update before marking ready; the
+  Deviations section then
+  carries G4a, G5, G8, G9 and G11 as declared, or the plan is edited to
+  match.
+
+### Test plan, row by row
+
+Status: Present means the row's tests exist and the named oracle values
+appear in assertions; GPU means the case skips on CPU and is required at
+Gate 2 (plan:991-998); Partial points at the G-item. Every GPU skip is
+honest: explicit opt-in, `gpu_` or `test_gpu_` names.
+
+| Plan row | Tests found | Status |
+|---|---|---|
+| CPU gates and host records | `test_montecarlo_gpu.py:23-217, 347-353, 426`; `test_montecarlo_contexts.cpp` NumericalFactoriesStayUnavailable, HostRecordsPreserveIntegerAndComplexPayloads | Present |
+| Resource leases | `test_montecarlo_contexts.cpp` LeaseOutlivesSimulator, UseGuardKeepsResourcesAlive, SharedResourceUseIsSerialized, SimulatorMovePreservesActiveLease | Partial; G10 guard versus a run |
+| Exact complex columns | `test_transition_columns.py:20, 94, 122, 154`; `test_transition_columns.cpp` gpu_AnalyticComplexColumns (Rz only) | Present, GPU; G10 |
+| Compaction and sector gathering | `test_transition_columns.py:74` (2e-12 at rtol 1e-14, 1e-12 pruned, omitted count 2) | Partial, GPU; G10, no provider-level nonconserving counterexample |
+| Resident signed evolution | `test_montecarlo_aggregated.py:650`; `test_montecarlo_contexts.cpp` gpu_SignedXTape, gpu_ConflictingReferenceUpload | Present, GPU |
+| RNG and chunking | `test_montecarlo_aggregated.py:670, 696` (102.4, 81.92, both tolerances, root 7) | Present, GPU |
+| Request transport and replay | `:711` GPU; `:558, 606, 822` CPU; `test_montecarlo_contexts.cpp` gpu_RequestReplay, LiteralBatchValidationAndReplay | Present for kernels, GPU; G4a on CPU |
+| Failure histories | `:752` GPU; `:784, 919, 1110, 1233` CPU | Present |
+| Combined trajectories and final uncertainty | `:1135-1176` | Partial; G7 replicas |
+| Combined-estimator edge cases | `:1179-1231` (hand-built diagnostics, no scripted second-walk failure through `run()`) | Partial; G6 :618 |
+| CPU resident-hook implementation | `test_cudaq_engine.py:516-542` | Present |
+| Uniform source exclusion | `test_montecarlo_aggregated.py:606, 558` | Present |
+| Estimators | `:226, 964` | Partial; G7 tape, tail, invalid replica; G6 :615 |
+| Bulk upload and cache reuse | `:339, 397, 412, 876`; `test_montecarlo_gpu.py:287` GPU | Present |
+| Realness and transactional guards | `:426-500, 502`; `test_montecarlo_contexts.cpp` gpu_ConflictingReferenceUpload, ImmutableRowsAndInvalidPayloads | Present |
+| No execution or fallback | `:542`, `_CpuResidentEngine._sweep`; `test_montecarlo_gpu.py:241` GPU | Partial; G7 hook spy, G2 |
+| ABI, stubs and exports | `test_stubs.py` snippets, `test_abi_stamp.py`, `test_conventions_exports.py` | Present |
+| Example | notebook cell 1 CPU oracle; GPU cells gated | Present |
+| Configuration matrix | `:56-146, 943` | Partial; G6 |
+| Sector API and config validation | `test_computational_basis_sector.py`; `:56` | Partial; G7 payload |
+| Charge and realness certificates | `:182, 213` (in the algorithm test file, not the sector file the row names) | Partial; G7 QWC, G9 |
+| Column orientation | `test_transition_columns.py:20, 154`; `test_transition_columns.cpp` | Present, GPU; G10 |
+| Cache resume, budgets and identity | `:516, 876, 1063, 1077` (16 GiB and 20,001 rows literal) | Partial; G6 :635 |
+| Diagnostics and timing partition | `:516, 1077` | Partial; G7 clock and key sets |
+| Exception boundaries | `test_montecarlo_gpu.py:88-165`; `test_montecarlo_contexts.cpp` WidthAndCheckedArithmetic, LiteralBatchValidationAndReplay | Present; G10 |
+| Bulk preparation without accounting | `:339, 397` | Present |
+| No dense host startup | `:542` | Partial; G7 sentinels |
+| Threshold order | `:339` (dt 0.005 only) | Partial |
+| Seed contract | `:1046` | Partial; G7 reset arguments |
+| CPU native protocol | `test_montecarlo_contexts.cpp` three HostProtocol cases | Partial; G4a |
+| CUDA-free headers | `test_montecarlo_headers.cpp` | Present |
+| Evolution-only allocation | `test_montecarlo_contexts.cpp` gpu_SignedXTapeAndEvolutionOnlyAllocations; `test_montecarlo_aggregated.py:664-665` | Cannot fail; G4b |
+| Engine ownership and GIL | `test_cudaq_engine.py:516`; `test_montecarlo_gpu.py:356` GPU | Partial; no overlap shown, "ordinary Python threads progress" not asserted |
+| Optional lazy accounting | `:984, 1000, 1020` (0/2/2/4, 12 for X+Z, one `circuits()` call) | Present; G8 |
+| Public generator accessor | `test_trotter_ansatz.py:644` (triples sorted, so emission order unchecked) | Present |
+| Scalar cache bounds | `:164` | Partial; G7 256 B |
+
+Tests that compare the implementation with itself, all supplementary and
+none posing as the oracle: payload equals payload (:70), identity across
+integer types (:160), bulk versus accounting byte equality (:394), seed
+repeatability under scripted tapes (:1051), the status record round trip
+(`test_montecarlo_gpu.py:347-353`).
+
+### Conventions
+
+Exports take one public path each and `__all__` stays sorted; `zip` is
+strict throughout; no SDK import; `QarpBlock` types the unitary; no
+qarpx-backed object at module scope in any parametrize list; comments are
+constraints only except G12's first item. The §14 edit is word-identical to
+plan:105-130 and sits after its three anchors (`qarp_conventions.md:580/585`,
+`636/639`, `657/663`). ABI 15 to 16 on both sides, stub regenerated,
+pyproject define OFF, CMake gate requires `QARP_WITH_CUDAQ`, FATAL_ERROR on
+the invalid combination, CUDA sources only under the gate, coverage flags
+scoped to CXX, cuStateVec rpath appended before the Python subdirectory. The
+Monte Carlo bindings copy array owners under the GIL, release it, and take
+the use guard inside the native call; results are built after reacquiring
+(plan:172-180). Public headers contain no CUDA types. The Philox4x32-10 round
+and the splitmix event key match plan:124-125 and :212-213; the Pauli Y-phase
+table checks by hand.
+
+### Unverifiable here
+
+Every GPU numerical case: 20 Python `gpu_` cases, 4 C++ `gpu_` cases, both
+notebook GPU cells, lease serialization and GIL release under real kernels,
+the Philox and binomial kernels, cuStateVec column evaluation, the CMake
+cuStateVec probe and include propagation, separable compilation of the
+cross-TU kernels into the nanobind module, and Eigen inside an nvcc
+translation unit. G1 currently prevents all of them. The author's two CUDA-Q
+profiles and the evidence on the head marked ready remain the Gate 2
+condition (plan:1011-1017).
+
+### Design questions, separate from conformance
+
+Not findings: the plan sets no performance target (plan:91-92). The merge and
+finalize kernels run single-threaded (`<<<1, 1>>>`, `complete_evolution.cu:
+197-290`, :678, :686), so each step's merge is serial in the active-label
+count, and `exact_binomial` falls back to one Bernoulli draw per walker when
+`n*p >= 16` (`rng.cuh:149-153`). Both bound how far the aggregated
+representation scales.
+
+### Suggested reviewer focus
+
+1. G1 and its ticked boxes: nothing on the GPU can be claimed before the
+   five-line fix and a compile of the MC-enabled profile.
+2. G2, G4 and G5: a GPU case that fails for certain, two CPU tests that
+   pass regardless, and a public `qarpx` method that accepts gates `develop`
+   rejects.
+3. G3: the plan file is public and permanent; the run history and the
+   "public-port" wording must leave it before the merge.
+4. G8 and G9 need a human reading of the plan; both are one-line fixes
+   either way.
