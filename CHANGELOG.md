@@ -134,6 +134,10 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `Engine.prepare_structured_qpe`, `StructuredQPEPlan` and the
   `QarpSimulator.simulate_qpe_structured` and `simulate_dosqpe_structured`
   bindings.  Structured execution covers their case for any block.
+- `BlockEncodingBlock.lambda_factor()` and the same method on the LCU
+  projector blocks; read `lambda_norm`, the value they returned.
+  `QubitizationBlock.lambda_factor` is `lambda_norm`, the name its `BE`
+  uses.
 
 ### Fixed
 
