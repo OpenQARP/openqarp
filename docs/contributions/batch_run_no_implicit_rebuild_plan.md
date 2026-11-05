@@ -1,6 +1,6 @@
 # Make `Engine.batch_run` reuse the prior build by default
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-10-23
 **Tier:** Standard
