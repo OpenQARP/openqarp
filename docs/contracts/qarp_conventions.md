@@ -750,8 +750,9 @@ How circuits run.
   `run_gradient` naming a bound symbol is a `ValueError`.  `batch_run` reuses them by default,
   recompiles a bound build, and raises `RuntimeError` naming `engine.build` for a primitive
   that has circuits but none compiled; `rebuild=True` compiles afresh.  A sweep leaves the
-  primitives `run` evaluates as the last `build` set them.  `QarpEngine` runs a counts circuit through its program, or its gate stream
-  as one `Gates` kernel when the stream needs no trajectory (no noise, no mid-circuit
+  primitives `run` evaluates as the last `build` set them.  `QarpEngine` runs a counts
+  circuit through its program, or its gate stream as one `Gates` kernel when the stream
+  needs no trajectory (no noise, no mid-circuit
   operation), so `run`, `EXACT` readout and `batch_run` bind a parameter set in C++; a
   circuit with no free symbol is not substituted.  The engine knows
   no algorithm and no block class: `QPE` and `DOSQPE` hand their block to a `Sampler` and

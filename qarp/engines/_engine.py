@@ -519,7 +519,9 @@ class Engine(ABC):
             if (
                 not rebuild
                 and prim.compiled
-                and all(c.stamp == stamp and c.bound == bound for c in prim.compiled)
+                and all(
+                    c.stamp == stamp and (not c.bound or c.bound == bound) for c in prim.compiled
+                )
             ):
                 self._validate_primitive(prim)
                 continue
@@ -530,19 +532,21 @@ class Engine(ABC):
             prim.build()
             self._validate_primitive(prim)
             prim.compiled = [
-                self._compile_circuit(prim, blk, params, stamp) for blk in prim.sub_blocks
+                self._compile_circuit(prim, blk, params, stamp, bound) for blk in prim.sub_blocks
             ]
             prim.built_empty = not prim.compiled
             fresh = True
         return fresh
 
-    def _compile_circuit(self, prim: Runnable, blk, params, stamp: tuple) -> CompiledCircuit:
-        bound = tuple(sorted(params.items()))
+    def _compile_circuit(
+        self, prim: Runnable, blk, params, stamp: tuple, bound: tuple
+    ) -> CompiledCircuit:
         program = self._plan_unbuilt(prim, blk)
         if program is not None:
             # Lowered from its composition, no stream: plan_structure refuses a
-            # parametric part, so the program has nothing to bind.
-            return CompiledCircuit([], blk.n_qubits, stamp, program=program, bound=bound)
+            # parametric part, so the program has nothing to bind — no binding
+            # blocks its reuse either.
+            return CompiledCircuit([], blk.n_qubits, stamp, program=program, bound=())
         blk.build()
         flat = blk.flatten()
         if params:
