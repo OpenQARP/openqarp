@@ -228,6 +228,8 @@ def test_symbols_before_build_raises_and_is_empty_after():
         _ = block.symbols
     with pytest.raises(RuntimeError, match="build it first"):
         block.parameter_map([])
+    with pytest.raises(RuntimeError, match="Build the block first"):
+        block.refresh_symbols("_x")
     block.build()
     assert block.symbols == ()
     assert block.parameter_map([]) == {}

@@ -120,9 +120,9 @@ def symbols(self, value: Optional[Iterable[Symbol]]) -> None:
 |---|---|---|
 | `SimpleBlock(2).symbols` before `build()` raises `RuntimeError` naming build; after `build()` it is `()` | the contract; `()` is the registry of a stream with no `Param` | `tests/test_blocks/test_symbols_contract.py` |
 | A composite whose child sits on an out-of-range wire raises `IndexError` at `build()`, and reading `symbols` afterwards raises `RuntimeError`, never `()` | the incident | `tests/test_blocks/test_block.py` (existing test, assertion adapted) |
-| Constructor-declared symbols are readable before `build()`, in canonical order | the declared names sorted by `str` (§17) | `test_symbols_contract.py`, the `UCCBlock` and `HEABlock` factories |
+| Constructor-declared symbols are readable before `build()`, in canonical order | `UCCBlock`: the constructor's `symbol_qop_pairs` names sorted by `str` (§17); `HEABlock`: the pre-build tuple against the built stream's free symbols, a cross-check of two paths | `test_symbols_contract.py`, the `UCCBlock` and `HEABlock` factories |
 | `set_symbols` and `replace_symbols` on an unbuilt block still queue and build to the right unitary | the analytic unitary of `Rz(θ)` at the bound value | `test_symbols_contract.py` (existing partial-bind tests) |
-| `parameter_map` and `refresh_symbols` on an unbuilt block raise the same `RuntimeError` | the contract | existing tests kept |
+| `parameter_map` and `refresh_symbols` on an unbuilt block raise the same `RuntimeError` | the contract | `test_symbols_contract.py`, `test_symbols_before_build_raises_and_is_empty_after` |
 | Every `FACTORIES` block: `len(block.symbols)` after `build()`, with no narrowing, type-checks and runs | mypy on `qarp/` and `tests/`; the suite | existing suite |
 | The five composites still reject a built parameter-free ket with "no parameters to optimize" | existing tests | `tests/test_algorithms/test_composite/test_pce.py`, `test_vqd.py` |
 
@@ -158,6 +158,10 @@ def symbols(self, value: Optional[Iterable[Symbol]]) -> None:
   `SimpleBlock(1).h(0).symbols` to check that a builder returns its block;
   the chain is `SimpleBlock(1).h(0).build().symbols` now, which checks the
   same thing on a block that has a registry.
+- **The test table states what the tests check.**  The `HEABlock` half of the
+  constructor-declared row is a cross-check of the pre-build tuple against the
+  built stream's free symbols, not an independent oracle; the `UCCBlock` half
+  checks the constructor's `symbol_qop_pairs` names sorted by `str`.
 - **One docs snippet, out of the green-lit Scope.**  The `n_parameters`
   example in `docs/source/qarp_philosophy.rst` read `len(block.symbols or ())`;
   it reads `len(block.symbols)` now, and the file joins Scope.
