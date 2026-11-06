@@ -141,6 +141,9 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ### Fixed
 
+- `AdaptVQD` stops once the energy changes by less than
+  `convergence_thresh` between iterations, as `AdaptVQE` does; it ignored
+  the argument and ran until the gradient threshold or `max_iter`.
 - `QPEBlock` and `DOSQPEBlock` place a copy of the eigenstate block, so one
   state block can serve two QPE blocks; sharing it corrupted the first.
 - `build(rebuild=False)` and `batch_run(rebuild=False)` reuse a primitive's
