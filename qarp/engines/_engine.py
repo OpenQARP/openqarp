@@ -519,9 +519,9 @@ class Engine(ABC):
             if (
                 not rebuild
                 and prim.compiled
-                and all(
-                    c.stamp == stamp and (not c.bound or c.bound == bound) for c in prim.compiled
-                )
+                # A bound symbol is gone from the circuit, and a stream bound to the
+                # identity compiles to no command at all: reuse needs the same binding.
+                and all(c.stamp == stamp and c.bound == bound for c in prim.compiled)
             ):
                 self._validate_primitive(prim)
                 continue
@@ -544,9 +544,9 @@ class Engine(ABC):
         program = self._plan_unbuilt(prim, blk)
         if program is not None:
             # Lowered from its composition, no stream: plan_structure refuses a
-            # parametric part, so the program has nothing to bind — no binding
-            # blocks its reuse either.
-            return CompiledCircuit([], blk.n_qubits, stamp, program=program, bound=())
+            # parametric part, so the program has nothing to bind.  The binding is
+            # recorded all the same, so one reuse rule serves every circuit.
+            return CompiledCircuit([], blk.n_qubits, stamp, program=program, bound=bound)
         blk.build()
         flat = blk.flatten()
         if params:

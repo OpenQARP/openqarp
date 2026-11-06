@@ -238,6 +238,17 @@ def test_rebuild_false_reuses_only_under_an_equal_binding():
     assert eng.run()[0] == pytest.approx(-1.0, abs=1e-12)
 
 
+def test_rebuild_false_after_an_unbound_build_bakes_the_binding_in():
+    s = _z_expval()
+    eng = QarpEngine()
+    eng.build([s])
+    before = list(s.compiled)
+    eng.build([s], params={"a": math.pi}, rebuild=False)
+    assert [c is d for c, d in zip(s.compiled, before, strict=True)] == [False]
+    # <Z> of Ry(pi)|0> is -1.
+    assert eng.run()[0] == pytest.approx(-1.0, abs=1e-12)
+
+
 def test_run_and_run_gradient_refuse_a_bound_symbol():
     s = _z_expval()
     eng = QarpEngine()
