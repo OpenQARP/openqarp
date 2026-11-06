@@ -36,6 +36,10 @@ from .composite_algorithm import CompositeAlgorithm
 # Dense ``eigh`` up to this subspace dimension, ARPACK ``eigsh`` above it.
 _DENSE_EIGH_MAX_DIM = 2000
 
+# Guard roots ARPACK computes and discards when n_roots > 1: started from one
+# vector, it can skip a copy of a degenerate level at the edge of the window.
+_EIGSH_PAD = 4
+
 # External distributions only: exact sampling prunes probabilities <= 1e-12,
 # so a primitive's own result can legitimately fall short by more than this.
 _MASS_TOL = 1e-10
@@ -88,10 +92,17 @@ class QSCI(CompositeAlgorithm):
             beta on odd qubits (abab).  Required for a ``FermionOperator``.  For
             a ``QubitOperator`` it is optional and asserts a Jordan-Wigner
             occupation basis; ``None`` means no sector filter.
-        n_roots: Number of lowest eigenpairs to return.
+        n_roots: Number of lowest eigenpairs to return.  On a degenerate level
+            the vectors are some orthonormal basis of it.  Above a subspace
+            dimension of 2000 the solver is ARPACK, which can skip a copy of a
+            degenerate level and return the next level instead.  For
+            ``n_roots > 1`` it computes 4 extra roots and discards them, which
+            covers low degeneracies; a level with many copies can still be
+            skipped, so request more roots than needed and keep the lowest.
         primitive: A ``Sampler`` measuring every qubit in register order; a
             default ``Sampler()`` when ``ket`` is given.  Must be ``None`` with
-            ``distribution``.
+            ``distribution``.  ``build()`` copies it once per block, so a later
+            change to ``primitive`` takes effect only after a rebuild.
         engine: Execution engine for ``ket``.
         verbose: Print a one-line summary after each run.
 
@@ -236,13 +247,16 @@ class QSCI(CompositeAlgorithm):
 
         ``distribution``, ``in_sector_mass`` and ``rejected`` are set before the
         subspace checks, so a run that fails them keeps its samples; the solve
-        outputs stay ``None``.
+        outputs stay ``None``.  A run that fails while sampling leaves them
+        ``None`` too.
         """
         if self._qubit_hamiltonian is None:
             raise ValueError("Call build() before run().")
         self.energies = self.coefficients = self.configurations = None
         self.in_sector_mass = None
         self.rejected = None
+        if self.blocks:
+            self.distribution = None
         self.distribution = self._sample()
         selection = _select(
             self.distribution,
@@ -416,6 +430,17 @@ def _pool(samples: Sequence[SamplingDictionary]) -> SamplingDictionary:
     Exact sampling prunes probabilities <= 1e-12, so a block can fall short of
     one; normalising after pooling makes the pool valid ``distribution=`` input.
     """
+    shots = {getattr(sample, "n_shots", None) for sample in samples}
+    n_shots = shots.pop() if len(shots) == 1 else None
+    if isinstance(n_shots, int) and n_shots > 0:
+        # Equal counts pool to equal weights however they split across blocks;
+        # a common n_shots keeps the weight equal per block.
+        counts: dict[tuple[int, ...], int] = {}
+        for sample in samples:
+            for key, weight in sample.items():
+                counts[key] = counts.get(key, 0) + round(float(weight) * n_shots)
+        total = sum(counts.values())
+        return {key: count / total for key, count in counts.items()}
     parts: dict[tuple[int, ...], list[float]] = {}
     for sample in samples:
         for key, weight in sample.items():
@@ -604,16 +629,26 @@ def _eigensolve(
     """Lowest ``n_roots`` eigenpairs, ascending: dense ``eigh`` or ARPACK ``eigsh``.
 
     ARPACK refuses ``n_roots >= dim - 1`` for complex matrices, so that goes dense
-    regardless of size.
+    regardless of size.  Above the cutoff, the ``_EIGSH_PAD`` guard roots reduce,
+    not remove, the chance of skipping a copy of a degenerate level.
     """
     dim = matrix.shape[0]
+    if n_roots > dim:
+        raise ValueError(f"n_roots={n_roots} exceeds the subspace dimension {dim}")
     if matrix.count_nonzero() == 0:
         # ARPACK fails on an all-zero matrix ("starting vector is zero").
         return np.zeros(n_roots), np.eye(dim, n_roots, dtype=matrix.dtype)
     if dim <= _DENSE_EIGH_MAX_DIM or n_roots >= dim - 1:
         energies, vectors = scipy.linalg.eigh(matrix.toarray(), subset_by_index=[0, n_roots - 1])
     else:
-        energies, vectors = scipy.sparse.linalg.eigsh(matrix, k=n_roots, which="SA")
-        order = np.argsort(energies)
-        energies, vectors = energies[order], vectors[:, order]
+        # dim - 2 is the largest k ARPACK takes for complex input.
+        k = n_roots if n_roots == 1 else min(n_roots + _EIGSH_PAD, dim - 2)
+        # A fixed start, so the same input gives the same roots.
+        v0 = np.random.default_rng(0).standard_normal(dim)
+        energies, vectors = scipy.sparse.linalg.eigsh(matrix, k=k, which="SA", v0=v0)
+        order = np.argsort(energies)[:n_roots]
+        # Complex input goes to eigs, whose copies of a degenerate level are not
+        # orthonormal.
+        vectors, _ = np.linalg.qr(vectors[:, order])
+        energies = energies[order]
     return np.asarray(energies, dtype=np.float64), vectors

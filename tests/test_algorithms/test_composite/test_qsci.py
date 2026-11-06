@@ -16,6 +16,7 @@ import scipy.linalg
 import scipy.sparse
 
 import qarp
+from qarp import SamplingDistribution
 from qarp.algorithms import QSCI, Sampler, StateVector
 from qarp.algorithms._composite import qsci as qsci_module
 from qarp.blocks import ComputationalBasisStateBlock, MultiONVStateBlock, SimpleBlock
@@ -368,13 +369,47 @@ def test_solve_follows_input_order():
     hamiltonian = fermi_hubbard([2], 1.0, 4.0)
     sector = _sector_configurations(4, 1, 1)
     algorithm = QSCI(hamiltonian, distribution=_uniform(sector), n_electrons=(1, 1)).build()
-    shuffled = [sector[i] for i in (2, 0, 3, 1)]
+    # Its argsort is a 4-cycle, so placing rows by the argsort instead of its
+    # inverse gives a different order.
+    shuffled = [sector[i] for i in (1, 2, 0, 3)]
     energies, coefficients = algorithm._solve(shuffled)
     index = [bits_to_label(bits) for bits in shuffled]
     block = hamiltonian.sparse_matrix(4).toarray()[np.ix_(index, index)]
     np.testing.assert_allclose(block @ coefficients, coefficients * energies, atol=1e-10)
     with pytest.raises(ValueError, match="duplicates"):
         algorithm._solve([sector[0], sector[0]])
+
+
+def test_solve_refuses_more_roots_than_configurations():
+    # X0 projects to zero on one configuration, which reaches the zero-matrix shortcut.
+    algorithm = QSCI(QubitOperator("X0"), distribution={(0, 0): 1.0}, n_roots=2).build()
+    with pytest.raises(ValueError, match="exceeds the subspace dimension"):
+        algorithm._solve([(0, 0)])
+    with pytest.raises(ValueError, match="exceeds the subspace dimension"):
+        algorithm._solve([])
+
+
+@pytest.mark.parametrize(("letters", "seed"), [("XZ", 2), ("XYZ", 0)])
+def test_sparse_path_degenerate_roots(monkeypatch, letters, seed):
+    """Qubits 8 and 9 are idle, so every level is at least fourfold degenerate;
+    without guard roots ARPACK skips a copy on these seeds.  XYZ is complex."""
+    rng = np.random.default_rng(seed)
+    hamiltonian = QubitOperator()
+    for _ in range(30):
+        i, j = sorted(rng.choice(8, 2, replace=False))
+        a, b = rng.choice(list(letters), 2)
+        hamiltonian += QubitOperator(f"{a}{i} {b}{j}", float(rng.normal()))
+    monkeypatch.setattr(qsci_module, "_DENSE_EIGH_MAX_DIM", 1)
+    configurations = list(itertools.product((0, 1), repeat=10))
+    algorithm = QSCI(hamiltonian, distribution=_uniform(configurations), n_roots=3).build()
+    energies, vectors = algorithm.run()
+    # Every configuration is selected, so row i is label i of sparse_matrix().
+    dense = hamiltonian.sparse_matrix(10).toarray()
+    np.testing.assert_allclose(energies, scipy.linalg.eigvalsh(dense)[:3], atol=1e-10)
+    np.testing.assert_allclose(dense @ vectors, vectors * energies, atol=1e-10)
+    np.testing.assert_allclose(vectors.conj().T @ vectors, np.eye(3), atol=1e-10)
+    # A fixed start vector: the same input gives the same roots.
+    np.testing.assert_array_equal(algorithm.run()[1], vectors)
 
 
 # ── Input validation ─────────────────────────────────────────────────────
@@ -580,21 +615,29 @@ def test_zero_projected_hamiltonian_on_sparse_path():
     np.testing.assert_allclose(zero_vectors.T @ zero_vectors, np.eye(2))
 
 
-# ── Implementation review regressions (qsci_implementation_review.md) ────
+# ── Build, pooling and run-state edge cases ──────────────────────────────
 
 
 def test_wide_build_drops_images_outside_the_subspace():
-    """T1: X63 maps |0...0> outside the one-configuration subspace, so only
+    """X63 maps |0...0> outside the one-configuration subspace, so only
     <Z0> = +1 remains; an image misfiled onto row 0 would give 2."""
     hamiltonian = QubitOperator("X63") + QubitOperator("Z0")
     energies, _ = QSCI(hamiltonian, distribution={(0,) * 64: 1.0}).build().run()
     assert energies[0] == pytest.approx(1.0, abs=1e-12)
 
 
+def test_parity_reaches_high_bits():
+    # 60 qubits stays on the int64 build; every Z acts on an occupied qubit.
+    occupied = tuple(int(q in (20, 35, 50)) for q in range(60))
+    hamiltonian = QubitOperator("Z20") + QubitOperator("Z35", 0.5) + QubitOperator("Z50", 0.25)
+    energies, _ = QSCI(hamiltonian, distribution={occupied: 1.0}).build().run()
+    assert energies[0] == pytest.approx(-1.75, abs=1e-12)
+
+
 @pytest.mark.parametrize("order", [(0, 1, 2), (1, 2, 0), (2, 0, 1)])
 def test_tie_break_independent_of_block_order(order):
-    """B1: labels 1 and 4 pool the same three weights, so they tie at 1/2 and
-    the cap keeps label 1 in any block order."""
+    """Labels 1 and 4 pool the same three weights, so they tie at 1/2 and the
+    cap keeps label 1 in any block order."""
     low, high = _bits(1, 4), _bits(4, 4)
     blocks = [{high: 0.1, low: 0.2}, {high: 0.2, low: 0.7}, {high: 0.7, low: 0.1}]
     pooled = qsci_module._pool([blocks[i] for i in order])
@@ -602,9 +645,24 @@ def test_tie_break_independent_of_block_order(order):
     assert qsci_module._select(pooled, 4, None, 1, None).configurations == (low,)
 
 
+def test_equal_counts_tie_however_they_split():
+    """Labels 1 and 4 both have 3 of 20 counts, split 3 + 0 and 1 + 2, so they
+    tie and the cap keeps label 1."""
+    low, high, top = _bits(1, 4), _bits(4, 4), _bits(8, 4)
+    blocks = [
+        SamplingDistribution.from_dict({low: 0.3, high: 0.1, top: 0.6}, n_shots=10),
+        SamplingDistribution.from_dict({high: 0.2, top: 0.8}, n_shots=10),
+    ]
+    for order in (blocks, blocks[::-1]):
+        pooled = qsci_module._pool(order)
+        assert pooled[low] == pooled[high] == 3 / 20
+        assert qsci_module._select(pooled, 4, None, 2, None).configurations == (low, top)
+
+
 def test_failed_run_keeps_the_samples(monkeypatch):
-    """B2: a run that fails after sampling keeps the pool, ``in_sector_mass``
-    and ``rejected``, and clears the solve outputs rather than keep the last run's."""
+    """A run that fails after sampling keeps the pool, ``in_sector_mass`` and
+    ``rejected`` and clears the solve outputs; one that fails while sampling
+    clears every output rather than keep the last run's."""
 
     def build(n_roots):
         # The (1, 0) sector of two qubits holds one configuration.
@@ -631,10 +689,11 @@ def test_failed_run_keeps_the_samples(monkeypatch):
     assert second.energies is None and second.coefficients is None
     assert second.configurations is None
 
-    # A sampler output failing validation (T1: the full-register check) clears them too.
+    # A sampler output failing the full-register check.
     third = build(1)
     third.run()
     monkeypatch.setattr(third.engine, "run", lambda *args, **kwargs: [{(1,): 1.0}])
     with pytest.raises(ValueError, match="full register"):
         third.run()
     assert third.energies is None and third.in_sector_mass is None
+    assert third.distribution is None and third.rejected is None
