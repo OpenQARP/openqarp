@@ -173,6 +173,7 @@ class Runnable(Protocol):
 | A released `PauliShadow` swept by default raises, keeps the same dataset object, and the dataset still reads the estimate `run()` returned | the contract: object identity; the estimate before `release()` | `tests/test_algorithms/test_primitives/test_shadows/test_base.py` |
 | `build(params={"a": 0})` then the default sweep over a ∈ {0, π/2, π} is cos a | analytic | `tests/test_engines/test_compiled_circuits.py` |
 | `build(params={"a": 0})` then `build(params={"a": π}, rebuild=False)`: `run()` is −1; an equal binding reuses the same objects | analytic; object identity | same |
+| `build()` unbound, then `build(params={"a": π}, rebuild=False)`: new objects and `run()` is −1; the same on a structured engine's bound stream, and a default sweep after it binds the swept value | analytic; object identity; the Born probabilities of the bound ket | same; `tests/test_engines/test_structured_execution.py` |
 | After `build(params={"a": 0})`, `run({"a": π})` and `run_gradient({"a": π})` raise `ValueError` naming `a` | the contract | same |
 | `build([a, b])` (Z0 and X0 over `Ry(θ)`), a sweep over `[a]`, then `run({θ})` is `[cos θ, sin θ]` | analytic | same |
 | `build([a, b])`, `run_gradient`, a default sweep, `run_gradient` again: no new shift plan, gradient `[−sin θ, cos θ]`; after `batch_run([a], rebuild=True)` the gradient still holds | analytic; the plan counter | same |
