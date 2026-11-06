@@ -128,18 +128,19 @@ All notable changes to OpenQARP are recorded here. The format follows
   `follow_imports = skip` and `follow_imports_for_stubs = True` for `qarpx`.
 - The `qarpx` ABI is 15.  An editable checkout reinstalls after pulling,
   or `import qarp` refuses the old build.
-- `ShadowEstimate.delta` is HKP's failure-probability bound at the
-  estimate's `n_batches`, `min(1, 2 e^{-K/2})`, instead of the `delta` that
-  was requested: an explicit `n_batches`, or a family estimated with
-  `expval_many`, changed the count without changing the field.  At
-  `n_batches=1` the formula exceeds 1, so the field reports 1.  An exact
-  constant reports 0 and `n_batches=1`.  An estimate from `expval_many`
-  carries its own bound, at most `delta / M`, where it carried the family's
-  `delta`; the family's joint bound is `min(1, sum(r.delta for r in
-  results))`.  `expval` and `expval_many` check `delta` even when
-  `n_batches` is given, and reject `n_batches < 1` for a constant too.
-  `n_batches_for` adds a batch where float rounding of the log left the
-  bound a few ulp above `delta / M`.
+- `ShadowEstimate.delta` is an upper bound on the failure probability at
+  the estimate's `n_batches`, today HKP's `min(1, 2 e^{-K/2})`, instead of
+  the `delta` that was requested: an explicit `n_batches`, or a family
+  estimated with `expval_many`, changed the count without changing the
+  field.  At `n_batches=1` the formula exceeds 1, so the field reports 1.
+  An exact constant reports 0 and `n_batches=1`.  An estimate from
+  `expval_many` carries its own bound, at most `delta / M`, where it
+  carried the family's `delta`; the family's joint bound is
+  `min(1, sum(r.delta for r in results))`.  `expval` and `expval_many`
+  check `delta` even when `n_batches` is given, and reject `n_batches < 1`
+  for a constant too.  The `n_batches` that `expval` and `expval_many`
+  derive from `delta` can be one higher, where float rounding of the log
+  left the bound a few ulp above `delta / M`.
 
 ### Removed
 

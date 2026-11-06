@@ -67,8 +67,6 @@ a `0.x` minor with whatever else breaks then.
   `pauli_engine_plan.md` adds the member and makes `StateVector.consumes` a
   property, so a third-party engine that dispatches on `consumes` adapts.
 
-## Additive, no window needed
-
 - **Shadow error bar from a certified variance.**  `ShadowEstimate.error`
   puts the empirical `V_hat` where HKP Theorem 1 needs the true variance.
   On an observable driven by rare outcomes `V_hat` is usually 0, and so is
@@ -79,7 +77,12 @@ a `0.x` minor with whatever else breaks then.
   failure bound the half-width already earns: Chebyshev gives each batch
   mean `1/34`, so a median of `K` fails at most `P[Bin(K, 1/34) >=
   ceil(K/2)]`, `2.9e-2` at `K = 1` and `4.8e-5` at `K = 8` against HKP's
-  1 and 0.037.  Both change the reported values; §18 oracles for each.
+  1 and 0.037.  Both change the reported values: `error` widens, and
+  `delta` stops being HKP's bound, so a public field changes meaning.
+  §18 oracles for each.
+
+## Additive, no window needed
+
 - **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
   and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
   at 12 threads is slow on its own.  Repeat the Threads measurements of

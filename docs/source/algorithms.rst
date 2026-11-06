@@ -563,7 +563,8 @@ The estimator uses median-of-means; each :code:`expval` returns a
 half-width :math:`\varepsilon = \sqrt{34\,\hat{V}/N}` of Huang–Kueng–Preskill
 Theorem 1 — the :math:`\varepsilon` for which
 :math:`\Pr[\,|\text{value} - \text{true}| > \varepsilon\,] \le \delta`, where
-:code:`delta` is HKP's bound :math:`\min(1, 2e^{-K/2})` at the batch count :math:`K` used,
+:code:`delta` is an upper bound on the failure probability at the batch count
+:math:`K` used, today HKP's :math:`\min(1, 2e^{-K/2})`,
 :math:`\hat{V}` the empirical single-setting variance and :math:`N` the per-batch
 size.  It is a worst-case bound carrying the paper's own deliberately loose
 constant 34, so it typically sits several times above the scatter you observe

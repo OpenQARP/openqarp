@@ -26,7 +26,7 @@ dataset actually achieves — with ``V_hat`` the empirical single-setting varian
 
     eps = sqrt(34 * V_hat / N),
 
-for which ``Pr[|o_hat - tr(O rho)| >= eps] <= delta``.  It is the paper's own
+for which ``Pr[|o_hat - tr(O rho)| > eps] <= delta``.  It is the paper's own
 constant and its own failure probability.
 
 That promise attaches to the *true* single-setting variance ``sigma^2``; what

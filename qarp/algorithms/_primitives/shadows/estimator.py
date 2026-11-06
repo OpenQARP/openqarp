@@ -25,17 +25,18 @@ class ShadowEstimate(NamedTuple):
     ``error`` is the ``eps = sqrt(34 * V_hat / N)`` of arXiv:2002.08953 Theorem 1
     (``V_hat`` the empirical single-setting variance, ``N`` the per-batch size) —
     the half-width for which ``Pr[|value - true| > error] <= delta``, where
-    ``delta`` is HKP's bound ``min(1, 2 e^{-K/2})`` at ``K = n_batches``, whether
-    ``K`` was passed or derived from a requested ``delta``.  An exact constant
-    takes no median: it reports ``delta = 0`` and ``n_batches = 1``.  That promise
-    holds for the *true* variance ``sigma^2``; ``V_hat`` is a plug-in for it, so
-    the reported bar inherits whatever error that estimate carries (and HKP's own
-    Remark that the constant 34 is a loose worst case).
+    ``delta`` is an upper bound on that failure probability at ``K = n_batches``,
+    whether ``K`` was passed or derived from a requested ``delta``; today it is
+    HKP's ``min(1, 2 e^{-K/2})``.  An exact constant takes no median: it reports
+    ``delta = 0`` and ``n_batches = 1``.  That promise holds for the *true*
+    variance ``sigma^2``; ``V_hat`` is a plug-in for it, so the reported bar
+    inherits whatever error that estimate carries (and HKP's own Remark that the
+    constant 34 is a loose worst case).
     """
 
     value: float
     error: float  # HKP Theorem-1 half-width sqrt(34 * V_hat / N) at failure probability delta
-    delta: float  # HKP failure bound at n_batches, min(1, 2 e^{-K/2}); 0 when exact
+    delta: float  # upper bound on the failure probability at n_batches (today HKP's); 0 when exact
     n_batches: int
     ensemble_only: bool  # True on a shot-exact dataset (V_hat is ensemble spread only)
 
@@ -110,7 +111,20 @@ class ShadowEstimator:
         n_batches: int | None = None,
     ) -> ShadowEstimate:
         """Median-of-means estimate of ``<observable>`` (sum-inside for a
-        multi-term operator)."""
+        multi-term operator).
+
+        Args:
+            observable: a Pauli string or a Hermitian ``QubitOperator``.
+            delta: target failure probability in (0, 1).  Sets the batch count
+                unless ``n_batches`` is given, and is checked either way.
+            n_batches: batch count overriding the one derived from ``delta``;
+                at least 1.
+
+        Raises:
+            ValueError: if ``delta`` is outside (0, 1), ``n_batches`` is below 1
+                or exceeds the number of settings, or the observable is not
+                Hermitian or acts on a qubit the dataset lacks.
+        """
         check_delta(delta)
         if n_batches is not None and n_batches < 1:
             raise ValueError(f"n_batches must be >= 1, got {n_batches}")
