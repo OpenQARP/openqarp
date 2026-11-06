@@ -158,10 +158,10 @@ def test_gpu_column_global_phase_and_barrier_cancel_exactly():
     block = SimpleBlock(1)
     block.rz(0, 0.37)
     block.gphase(0.41)
-    block.barrier()
     block.build()
+    commands = [*block.flatten(), qx.Command(qx.GateType.Barrier, 0)]
     provider = qx.CudaqSimulator().make_transition_column_provider(
-        block.flatten(), 1, [([(0, "X")], 1 + 0j)], 2
+        commands, 1, [([(0, "X")], 1 + 0j)], 2
     )
     expected = np.array([[0, np.exp(0.37j)], [np.exp(-0.37j), 0]])
     actual = provider.columns(np.array([0, 1], dtype=np.uint64))

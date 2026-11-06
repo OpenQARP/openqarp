@@ -648,7 +648,8 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         if (!batch.reference_labels.empty()) {
             cuda_check(cudaMemsetAsync(
                            sampled_target_deltas_, 0,
-                           batch.detail::HostProtocol::checked_bytes(reference_labels.size(), sizeof(int64_t)),
+                           detail::HostProtocol::checked_bytes(
+                               batch.reference_labels.size(), sizeof(int64_t)),
                            stream_),
                        "cudaMemsetAsync(sampled target deltas)");
         }
@@ -864,11 +865,13 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
             cuda_check(cudaMemcpy(
                            result.missing_labels.data(),
                            aggregated_missing_labels_,
-                           result.detail::HostProtocol::checked_bytes(missing_labels.size(), sizeof(uint64_t)),
+                           detail::HostProtocol::checked_bytes(
+                               result.missing_labels.size(), sizeof(uint64_t)),
                            cudaMemcpyDeviceToHost),
                        "cudaMemcpy(aggregated_missing_labels)");
             diagnostics_.aggregated_host_transfer_bytes +=
-                result.detail::HostProtocol::checked_bytes(missing_labels.size(), sizeof(uint64_t));
+                detail::HostProtocol::checked_bytes(
+                    result.missing_labels.size(), sizeof(uint64_t));
             std::sort(
                 result.missing_labels.begin(),
                 result.missing_labels.end());
@@ -991,7 +994,8 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
             if (aggregated_initialized_) {
                 const uint64_t current = aggregated_host_control_.generation & 1U;
                 const std::size_t active_bytes =
-                    aggregated_host_control_.detail::HostProtocol::checked_bytes(active_count, sizeof(uint64_t));
+                    detail::HostProtocol::checked_bytes(
+                        aggregated_host_control_.active_count, sizeof(uint64_t));
                 cuda_check(cudaMemcpy(
                                new_labels[0], aggregated_active_labels_[current],
                                active_bytes, cudaMemcpyDeviceToDevice),
@@ -999,7 +1003,8 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
                 cuda_check(cudaMemcpy(
                                new_populations[0],
                                aggregated_active_populations_[current],
-                               aggregated_host_control_.detail::HostProtocol::checked_bytes(active_count, sizeof(int64_t)),
+                               detail::HostProtocol::checked_bytes(
+                                   aggregated_host_control_.active_count, sizeof(int64_t)),
                                cudaMemcpyDeviceToDevice),
                            "cudaMemcpy(aggregated_active_populations_grow)");
                 aggregated_host_control_.generation = 0;

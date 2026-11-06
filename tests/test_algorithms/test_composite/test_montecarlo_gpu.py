@@ -281,7 +281,7 @@ def test_gpu_bounded_mc_smoke_exact_coefficients_no_circuit_execution(route, mon
     assert m.diagnostics["completed_steps"] == 2
     assert m.diagnostics["actual_shots_executed"] == 0
     assert m.diagnostics["measurement_circuits_executed"] == 0
-    assert m.diagnostics["generated_circuits"] > 0
+    assert m.diagnostics["generated_circuits"] == 0
 
 
 @pytest.mark.parametrize("trajectories", [1, 2])
