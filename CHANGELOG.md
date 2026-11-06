@@ -140,6 +140,10 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `Engine.prepare_structured_qpe`, `StructuredQPEPlan` and the
   `QarpSimulator.simulate_qpe_structured` and `simulate_dosqpe_structured`
   bindings.  Structured execution covers their case for any block.
+- `BlockEncodingBlock.lambda_factor()` and the same method on the LCU
+  projector blocks; read `lambda_norm`, the value they returned.
+  `QubitizationBlock.lambda_factor` is `lambda_norm`, the name its `BE`
+  uses.
 
 ### Fixed
 
@@ -148,6 +152,9 @@ All notable changes to OpenQARP are recorded here. The format follows
   sweep after a bound build used the old values.  `run()` or
   `run_gradient()` naming a bound symbol raises `ValueError` instead of
   dropping its value.
+- `AdaptVQD` stops once the energy changes by less than
+  `convergence_thresh` between iterations, as `AdaptVQE` does; it ignored
+  the argument and ran until the gradient threshold or `max_iter`.
 - `QPEBlock` and `DOSQPEBlock` place a copy of the eigenstate block, so one
   state block can serve two QPE blocks; sharing it corrupted the first.
 - `build(rebuild=False)` and `batch_run(rebuild=False)` reuse a primitive's

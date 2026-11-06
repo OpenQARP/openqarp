@@ -58,7 +58,8 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
             exc_per_iter: Number of operators to add per iteration.
             verbose: Whether to print progress information.
             term_gradient: Gradient formula to use, either "ADAPT-VQD" or "ADAPT-VQE".
-            convergence_thresh: Convergence threshold for the algorithm.
+            convergence_thresh: Stop once the energy changes by less than this
+                between two consecutive iterations.
             gradient_thresh: Threshold for gradient magnitude to include new operators.
             primitive: Algorithm for computing expectation values, overlaps, and transition amplitudes.
             engine: Execution engine for running algorithms.
@@ -325,6 +326,17 @@ class AdaptVQD(AdaptAnsatzMixin, CompositeAlgorithm):
                 exponent_chosen=",".join(str(a) for a in args_added),
                 energy=last_energy,
             )
+        if (
+            len(self.iter_energies) > 1
+            and abs(self.iter_energies[-1] - self.iter_energies[-2]) < self.convergence_thresh
+        ):
+            self.converged = True
+            if self.verbose:
+                print(
+                    f"Energy update is below the {self.convergence_thresh} threshold. "
+                    "Terminating the ADAPT routine."
+                )
+            return
         self.iter += 1
 
     def run(self, *, max_iter: int = 25) -> Tuple[float, Optional[List[float]]]:

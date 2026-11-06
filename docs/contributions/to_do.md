@@ -21,11 +21,6 @@ the same window.
   `Engine.batch_run` return it, but `qarp.__all__` exports only
   `SamplingDictionary`.  Export it next to `SamplingDictionary`, or annotate
   with the public types.
-- **`lambda_factor()` is the last compatibility shim.**
-  `BlockEncodingBlock.lambda_factor` and the projector blocks' copy return
-  `lambda_norm`; `QSVTBlock` is the one caller and `QubitizationBlock` sets
-  an attribute of the same name.  Drop it in the release or keep it for
-  good.
 - **Plan text on the plan-only branches.**  `pauli_engine_plan.md` and
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
   `prepare_structured_qpe`; the counter is 15 and the hook is gone.  Fix when each branch rebases.

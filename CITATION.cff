@@ -41,7 +41,7 @@ identifiers:
     value: "10.5281/zenodo.22755228"
     description: "Concept DOI — always resolves to the latest release"
 repository-code: "https://github.com/OpenQARP/openqarp"
-url: "https://openqarp.github.io/openqarp/"
+url: "https://docs.openqarp.com/"
 license: Apache-2.0
 keywords:
   - quantum computing

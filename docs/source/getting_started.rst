@@ -28,12 +28,12 @@ Open Quantum Application Research Package
    :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
    :alt: CI
 
-.. |coverage| image:: https://img.shields.io/endpoint?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2Fbadges%2Fcoverage.json&labelColor=201B34
+.. |coverage| image:: https://img.shields.io/endpoint?url=https%3A%2F%2Fdocs.openqarp.com%2Fbadges%2Fcoverage.json&labelColor=201B34
    :target: https://github.com/OpenQARP/openqarp/actions/workflows/ci.yml
    :alt: Coverage
 
-.. |docs| image:: https://img.shields.io/website?url=https%3A%2F%2Fopenqarp.github.io%2Fopenqarp%2F&label=docs&up_message=online&up_color=brightgreen&down_color=red&labelColor=201B34
-   :target: https://openqarp.github.io/openqarp/
+.. |docs| image:: https://img.shields.io/website?url=https%3A%2F%2Fdocs.openqarp.com%2F&label=docs&up_message=online&up_color=brightgreen&down_color=red&labelColor=201B34
+   :target: https://docs.openqarp.com/
    :alt: Documentation
 
 .. |arxiv| image:: https://img.shields.io/badge/arXiv-2609.15697-B31B1B?labelColor=201B34
@@ -53,7 +53,7 @@ for real hardware.  The simulator and compiler are written in C++, and you use
 them entirely from Python.
 
 .. image:: https://raw.githubusercontent.com/OpenQARP/openqarp/develop/docs/source/images/block_primitive_engine.svg
-   :target: https://openqarp.github.io/openqarp/source/qarp_philosophy.html
+   :target: https://docs.openqarp.com/source/qarp_philosophy.html
    :alt: Blocks describe circuits, primitives and composites describe what to extract, engines describe how they run.
 
 ----
@@ -247,10 +247,10 @@ is in ``NOTICE``, which the Apache License requires you to carry forward if you
 redistribute OpenQARP or a derivative work; the licenses of the bundled
 third-party components are in ``LICENSES_bundled.txt``.
 
-.. _GitHub Pages: https://openqarp.github.io/openqarp/
-.. _OpenQARP Philosophy: https://openqarp.github.io/openqarp/source/qarp_philosophy.html
-.. _OpenQARP Tutorial: https://openqarp.github.io/openqarp/source/tutorial.html
-.. _Installation Guide: https://openqarp.github.io/openqarp/source/installation.html
+.. _GitHub Pages: https://docs.openqarp.com/
+.. _OpenQARP Philosophy: https://docs.openqarp.com/source/qarp_philosophy.html
+.. _OpenQARP Tutorial: https://docs.openqarp.com/source/tutorial.html
+.. _Installation Guide: https://docs.openqarp.com/source/installation.html
 .. _Examples Directory: https://github.com/OpenQARP/openqarp/tree/main/examples
 .. _Contributing Guidelines: https://github.com/OpenQARP/openqarp/blob/main/CONTRIBUTING.md
 .. _Code of Conduct: https://github.com/OpenQARP/openqarp/blob/main/CODE_OF_CONDUCT.md

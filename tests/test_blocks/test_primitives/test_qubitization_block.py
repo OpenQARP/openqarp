@@ -91,11 +91,11 @@ def test_walk_operator_2_term_lcu():
 # ── Surface API ──────────────────────────────────────────────────────────
 
 
-def test_lambda_factor_matches_be():
+def test_lambda_norm_matches_be():
     H = QubitOperator("X0", 0.7) + QubitOperator("Z0", -0.3)
     qb = QubitizationBlock(H)
-    assert qb.lambda_factor == qb.BE.lambda_norm
-    assert qb.lambda_factor == pytest.approx(1.0)
+    assert qb.lambda_norm == qb.BE.lambda_norm
+    assert qb.lambda_norm == pytest.approx(1.0)
 
 
 def test_unitaries_qubits_attribute():
