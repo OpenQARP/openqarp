@@ -50,6 +50,12 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ### Changed
 
+- `Engine.batch_run` reuses the circuits a prior `build()` compiled, with
+  `rebuild=False` the default, and raises `RuntimeError` for a primitive that
+  has circuits but none compiled: build first, or pass `rebuild=True`, which
+  compiles every primitive afresh.  A sweep after `build()` on an unchanged
+  engine no longer recompiles.  A sweep no longer changes the primitives
+  `run()` and `run_gradient()` evaluate: they stay those of the last `build()`.
 - `Sampler` and `PostSelection.apply` return a `SamplingDistribution`
   instead of a `dict`, and `SamplingDictionary` is a read-only `Mapping`
   alias.  `isinstance(result, dict)` and mutating a result no longer work;
@@ -141,6 +147,11 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ### Fixed
 
+- Circuits compiled by `Engine.build(params=...)` are reused only under the
+  same binding: `build(params=..., rebuild=False)` with new values and a
+  sweep after a bound build used the old values.  `run()` or
+  `run_gradient()` naming a bound symbol raises `ValueError` instead of
+  dropping its value.
 - `AdaptVQD` stops once the energy changes by less than
   `convergence_thresh` between iterations, as `AdaptVQE` does; it ignored
   the argument and ran until the gradient threshold or `max_iter`.
