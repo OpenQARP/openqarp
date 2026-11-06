@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ── Options ──
 option(QARP_WITH_MPI      "Enable MPI support"        OFF)
+option(QARP_WITH_CUDAQ_SEMICLASSICAL "Enable native Monte Carlo CUDA/cuStateVec numerics" OFF)
 option(QARP_WITH_CUDAQ    "Enable CUDA-Q / cuQuantum GPU backend (CudaqSimulator)" OFF)
 option(QARP_BUILD_TESTS   "Build C++ tests"            ON)
 option(QARP_BUILD_PYTHON  "Build Python bindings"     OFF)
@@ -17,6 +18,10 @@ option(QARP_WITH_LAPACKE  "Route Eigen SVD/Schur through LAPACK (EIGEN_USE_LAPAC
 option(QARP_WITH_SYMENGINE "SymEngine symbolic coefficient backend for the operator classes" OFF)
 option(QARP_FETCH_BOOST   "Skip the system Boost lookup and download the pinned headers (auto-fallback when no system Boost)" OFF)
 option(QARP_ENABLE_COVERAGE "Instrument for gcov/lcov coverage (GCC/Clang only; Debug-ish, do NOT ship)" OFF)
+
+if(QARP_WITH_CUDAQ_SEMICLASSICAL AND NOT QARP_WITH_CUDAQ)
+    message(FATAL_ERROR "QARP_WITH_CUDAQ_SEMICLASSICAL requires QARP_WITH_CUDAQ=ON")
+endif()
 
 # Floating-point std::to_chars (shortest round-trip parameter text) is
 # unavailable in Apple's libc++ below macOS 13.3 — fail here, not 120 TUs in.
@@ -43,8 +48,9 @@ if(QARP_ENABLE_COVERAGE)
     if(NOT (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"))
         message(FATAL_ERROR "QARP_ENABLE_COVERAGE needs GCC or Clang, got ${CMAKE_CXX_COMPILER_ID}")
     endif()
-    add_compile_options(--coverage -O0 -g)
-    add_link_options(--coverage)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:--coverage>
+        $<$<COMPILE_LANGUAGE:CXX>:-O0> $<$<COMPILE_LANGUAGE:CXX>:-g>)
+    add_link_options($<$<LINK_LANGUAGE:CXX>:--coverage>)
 endif()
 
 # ── csim (qulacs simulation kernel, vendored) ──
@@ -119,6 +125,8 @@ add_library(qarpx
     # Throwing stubs with available()==false unless QARP_WITH_CUDAQ is set
     # (see below); no CUDA dependency in the default build.
     src/simulator/cudaq_simulator.cpp
+    src/simulator/transition_columns.cpp
+    src/montecarlo/contexts.cpp
 )
 
 target_include_directories(qarpx PUBLIC
@@ -278,6 +286,53 @@ if(QARP_WITH_CUDAQ)
         target_link_libraries(qarpx PUBLIC
             cudaq::cudaq cudaq::cudaq-builder cudaq::cudaq-em-default)
     endif()
+endif()
+
+# ── Optional native Monte Carlo prerequisites ──
+if(QARP_WITH_CUDAQ_SEMICLASSICAL)
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(NOT CMAKE_CUDA_COMPILER)
+        message(FATAL_ERROR "QARP_WITH_CUDAQ_SEMICLASSICAL requires a CUDA compiler")
+    endif()
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 20)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set_target_properties(qarpx PROPERTIES CUDA_STANDARD 20 CUDA_STANDARD_REQUIRED ON CUDA_SEPARABLE_COMPILATION ON CUDA_RESOLVE_DEVICE_SYMBOLS ON
+        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+    find_package(CUDAToolkit REQUIRED)
+    find_path(QARP_CUSTATEVEC_INCLUDE_DIR custatevec.h
+        HINTS "${QARP_CUDAQ_WHEEL_DIR}/cuquantum/include"
+              "${QARP_CUDAQ_WHEEL_DIR}/include" ENV CUQUANTUM_ROOT
+        PATH_SUFFIXES include)
+    find_library(QARP_CUSTATEVEC_LIBRARY NAMES custatevec
+        HINTS "${QARP_CUDAQ_WHEEL_DIR}/cuquantum/lib" ENV CUQUANTUM_ROOT
+        PATH_SUFFIXES lib lib64)
+    if(NOT QARP_CUSTATEVEC_INCLUDE_DIR OR NOT QARP_CUSTATEVEC_LIBRARY)
+        message(FATAL_ERROR "Native Monte Carlo requires development cuStateVec; set "
+            "QARP_CUSTATEVEC_INCLUDE_DIR and QARP_CUSTATEVEC_LIBRARY")
+    endif()
+    include(CMakePushCheckState)
+    include(CheckCXXSourceCompiles)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_INCLUDES "${QARP_CUSTATEVEC_INCLUDE_DIR}")
+    set(CMAKE_REQUIRED_LIBRARIES "${QARP_CUSTATEVEC_LIBRARY}" CUDA::cudart)
+    unset(QARP_CUSTATEVEC_HAS_BATCHED_MATRIX CACHE)
+    check_cxx_source_compiles("#include <custatevec.h>
+        int main() { auto volatile f = &custatevecApplyMatrixBatched; return f == nullptr; }"
+        QARP_CUSTATEVEC_HAS_BATCHED_MATRIX)
+    cmake_pop_check_state()
+    if(NOT QARP_CUSTATEVEC_HAS_BATCHED_MATRIX)
+        message(FATAL_ERROR "cuStateVec must declare and link custatevecApplyMatrixBatched")
+    endif()
+    target_sources(qarpx PRIVATE src/simulator/transition_columns.cu
+        src/montecarlo/complete_evolution.cu src/montecarlo/request_evolution.cu)
+    target_compile_definitions(qarpx PRIVATE QARP_WITH_CUDAQ_SEMICLASSICAL)
+    target_include_directories(qarpx PRIVATE "${QARP_CUSTATEVEC_INCLUDE_DIR}")
+    target_link_libraries(qarpx PRIVATE CUDA::cudart "${QARP_CUSTATEVEC_LIBRARY}")
+    get_filename_component(_qarp_custatevec_libdir "${QARP_CUSTATEVEC_LIBRARY}" DIRECTORY)
+    list(APPEND _qarp_cudaq_rpath "${_qarp_custatevec_libdir}")
+    message(STATUS "qarpx: native GPU Monte Carlo numerics enabled")
 endif()
 
 # ── LAPACK (optional) ──

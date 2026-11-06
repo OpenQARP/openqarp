@@ -7,6 +7,7 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 nanobind_add_module(qarpx_pymod
     bindings.cpp
     bindings_operators.cpp
+    bindings_montecarlo.cpp
     ../src/emit/pennylane_emitter.cpp
     ../src/absorb/pennylane_absorber.cpp
     ../src/emit/pytket_emitter.cpp

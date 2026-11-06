@@ -23,3 +23,5 @@ from .qmegs import QMEGS, get_overlaps
 from .qse import QSE
 from .qite import QITE
 from .shor import Shor
+
+from .aggregated_montecarlo import AggregatedMonteCarlo, ResidentEvolutionConfig

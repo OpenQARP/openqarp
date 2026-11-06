@@ -582,6 +582,16 @@ How circuits run.
   engine runs **rebase → route → re-rebase → simulate**; both rebase passes are skipped when no
   gate set is set. `compile_for_device(block, device)` is the standalone, non-executing helper (a
   Python wrapper with `(block, device)` and `(commands, n_qubits, device)` forms).
+- **Stateful Monte Carlo ownership.** `AggregatedMonteCarlo` obtains its
+  simulator through `Engine._resident_simulator(n_qubits)`, implemented by
+  `CudaqEngine`, without a host statevector-width cap. Batched transformed
+  columns, CSR compaction and sector gathering belong to the simulator layer.
+  `qarpx::montecarlo` owns resident walker evolution, transport and result
+  records. The engine's simulator lends opaque lifetime-safe resource leases; a
+  lease prevents reconfiguration, and a use guard serializes access with
+  simulator runs. Leases remain valid after simulator move/destruction. Native
+  MC executes no primitives; engines lacking the resident capability raise
+  `CapabilityError`.
 - **Routing defaults to SABRE, correctness-first.** `RouterKind.Sabre` — DAG front-layer SABRE
   with lookahead + decay heuristics and reverse-traversal initial-mapping search (skipped when an
   explicit `initial_mapping` is supplied), with a portfolio guarantee of never using more SWAPs
@@ -626,6 +636,13 @@ How circuits run.
 - **CUDA-Q is build-gated.** Off unless `QARP_WITH_CUDAQ=ON`; CPU-only builds compile a throwing
   stub with `available()==false`. Backend + precision are chosen by the `CUDAQ_DEFAULT_SIMULATOR`
   env var (read once per process), not `cudaq::set_target`.
+- **Native Monte Carlo is separately build-gated.**
+  `QARP_WITH_CUDAQ_SEMICLASSICAL` defaults OFF and requires `QARP_WITH_CUDAQ`,
+  CUDA C++20 and development cuStateVec with batched matrix support. Disabled
+  builds expose host records and `montecarlo_available() == False`; numerical
+  evolution factories and `CudaqSimulator.make_transition_column_provider` raise
+  `CapabilityError`. The column factory uses the same gate and
+  `montecarlo_available()` probe, including for consumers outside MC.
 - **`CapabilityError` is the engine-capability exception.** An engine that cannot honor a
   request (true mid-circuit measurement, `initial_state`, `n_shots=EXACT`, device
   capacity / routing / rebase failures at compile, an undeclared gradient method, …) raises
@@ -643,6 +660,13 @@ How circuits run.
   prime stride keeps `QarpEngine.batch_run`'s per-set `+i` offsets from colliding: set 0
   draws `run()`'s seeds, and each later set steps every circuit's seed by its index.
   `CudaqEngine`'s sweep seeds each circuit once and draws every set from that stream.
+- **Resident walker seeds are event-keyed.** Native MC uses Philox streams keyed
+  by root seed, trajectory, step and event. Host proposal destinations use a
+  local NumPy Generator derived from the same root and trajectory with a
+  separate proposal tag. Neither stream uses executed-circuit prime-stride seeds
+  or mutates a process-wide RNG. Repeated explicit seeds reproduce a trajectory
+  within one backend/configuration; CPU and GPU tapes need not match.
+  `seed=None` generates a fresh root seed recorded in diagnostics.
 - **`initial_state` support is declared, and enforced in validation.** A primitive carrying
   `initial_state` is rejected in `Engine._validate_primitive` unless the *primitive* declares
   `accepts_initial_state` **and** the engine sets `supports_initial_state` — both guards live
