@@ -222,7 +222,6 @@ class AdaptVQE(AdaptAnsatzMixin, CompositeAlgorithm):
                 self.pool_indices.pop(argmax)
         wfn = self._ansatz_wfn()
         symbols = wfn.symbols
-        assert symbols is not None  # the ansatz holds at least one selected excitation
         symbol_values_ordered = np.array([self.ansatz_parameters_dict[symb] for symb in symbols])
         vqe = VQE(
             self.hamiltonian,

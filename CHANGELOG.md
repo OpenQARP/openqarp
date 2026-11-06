@@ -91,6 +91,11 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `is_built` is a read-only property on raw `qx` blocks, as on the Python
   blocks.  `b.is_built()` and `qx.Block.is_built(b)` become `b.is_built`.
 - `build()` on a raw `qx` block returns the block instead of `None`.
+- `block.symbols` is a tuple on every block that has a registry, and reading
+  it before the block has one raises `RuntimeError` where it returned `None`:
+  build the block, or declare its symbols in the constructor.  A
+  `block.symbols is None` probe for built-ness is `not block.is_built`, and
+  code that narrowed the `Optional` can stop.
 - A gate method, or `set_commands` with any command, called on a block
   that holds other blocks (composite, controlled, conditional) raises
   `TypeError`; the gate was recorded and never run.  Add it to a block it

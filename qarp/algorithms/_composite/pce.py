@@ -514,9 +514,8 @@ class PCE(CompositeAlgorithm):
 
         if not ket.symbols:
             raise ValueError(
-                "Cannot build PCE: ket has no parameters to optimize "
-                "(symbols is None or empty). Pass a parameterized ansatz, "
-                "not a bare state-preparation block."
+                "Cannot build PCE: ket has no parameters to optimize. "
+                "Pass a parameterized ansatz, not a bare state-preparation block."
             )
         if initial_parameters is None:
             self.initial_parameters = np.random.uniform(0, 2 * np.pi, len(ket.symbols))
@@ -579,7 +578,6 @@ class PCE(CompositeAlgorithm):
         """
 
         symbols = self.ket.symbols
-        assert symbols is not None  # checked non-empty at construction
 
         def f(x):
             symbol_map = dict(zip(symbols, x, strict=True))
@@ -627,7 +625,6 @@ class PCE(CompositeAlgorithm):
         """
 
         symbols = self.ket.symbols
-        assert symbols is not None  # checked non-empty at construction
 
         def f(x):
             symbol_map = dict(zip(symbols, x, strict=True))

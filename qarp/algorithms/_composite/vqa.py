@@ -84,9 +84,8 @@ class VQA(CompositeAlgorithm):
         # Validate ket symbols and set initial parameters
         if not self.ket.symbols:
             raise ValueError(
-                f"Cannot build {name}: ket has no parameters to optimize "
-                "(symbols is None or empty). Pass a parameterized ansatz, "
-                "not a bare state-preparation block."
+                f"Cannot build {name}: ket has no parameters to optimize. "
+                "Pass a parameterized ansatz, not a bare state-preparation block."
             )
         if initial_parameters is None:
             self.initial_parameters = np.random.uniform(0, 2 * np.pi, len(self.ket.symbols))
@@ -146,7 +145,6 @@ class VQA(CompositeAlgorithm):
         """
         self.energy_history = []
         symbols = self.ket.symbols
-        assert symbols is not None  # build() published them
 
         def objective(x):
             val = self._real_part(self.engine.run(dict(zip(symbols, x, strict=True)))[0])

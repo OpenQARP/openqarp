@@ -123,7 +123,7 @@ class UCCBlock(CompositeBlockBase):
         return new_object
 
     def build_vanilla(self) -> None:
-        if self.symbols is None:
+        if self._symbols is None:
             raise RuntimeError("Cannot build UCCBlock: no symbols defined")
         tab = TrotterAnsatzBlock(
             n_qubits=self.n_qubits,
