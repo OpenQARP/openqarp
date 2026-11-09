@@ -493,3 +493,6 @@ class SamplingDistribution(Mapping[tuple[int, ...], float]):
         if len(self) > _REPR_ENTRIES:
             body += f", ... ({len(self) - _REPR_ENTRIES} more)"
         return f"{type(self).__name__}({{{body}}})"
+
+
+PrimitiveResult = Union[float, complex, SamplingDistribution]

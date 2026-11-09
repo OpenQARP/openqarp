@@ -20,8 +20,8 @@ import numpy as np
 
 import qarpx as qx
 
-from .._sampling_distribution import pack_bits
-from .._types import Consumes, ExactResult, PrimitiveResult, Shots
+from .._sampling_distribution import PrimitiveResult, pack_bits
+from .._types import Consumes, ExactResult, Shots
 from ..errors import CapabilityError
 from ._runnable import Runnable
 

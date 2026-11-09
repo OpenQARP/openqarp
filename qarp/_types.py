@@ -4,17 +4,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
-from typing import TYPE_CHECKING, Union
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from ._sampling_distribution import SamplingDistribution
 
 # Read-only view of a sampling result: LSB-first bit tuples to probabilities.
 # A SamplingDistribution and a plain dict both satisfy it.
 SamplingDictionary = Mapping[tuple[int, ...], float]
-PrimitiveResult = Union[float, complex, "SamplingDistribution"]
+# PrimitiveResult lives beside SamplingDistribution: that module imports this one,
+# so the alias cannot be defined here.
 
 
 class Shots(Enum):

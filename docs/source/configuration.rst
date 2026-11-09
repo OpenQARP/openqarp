@@ -115,8 +115,7 @@ PrimitiveResult
 One primitive's result: an entry of the list :meth:`~qarp.engines.Engine.run` returns, and of
 each inner list of :meth:`~qarp.engines.Engine.batch_run`.  It is a ``float`` or ``complex``
 expectation value, or a :class:`~qarp.SamplingDistribution` for a sampling primitive.
-Annotate with it; narrow with ``isinstance`` on the concrete types, since ``isinstance``
-against the alias raises ``TypeError`` for a :class:`~qarp.SamplingDistribution`.
+It works with ``isinstance``.
 
 .. code-block:: python
 

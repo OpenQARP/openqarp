@@ -168,6 +168,10 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ### Fixed
 
+- `typing.get_type_hints` resolves annotations that use `PrimitiveResult`,
+  among them `Engine.run` and `Engine.batch_run`, instead of raising
+  `NameError`.  `isinstance(x, qarp.PrimitiveResult)` works for a
+  `SamplingDistribution`.
 - Circuits compiled by `Engine.build(params=...)` are reused only under the
   same binding: `build(params=..., rebuild=False)` with new values and a
   sweep after a bound build used the old values.  `run()` or
