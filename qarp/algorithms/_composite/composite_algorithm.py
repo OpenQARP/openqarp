@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Iterable, Optional, Self, Union
 
 from ... import MPIConfig
-from ..._sampling_distribution import SamplingDistribution
-from ..._types import Consumes, PrimitiveResult
+from ..._sampling_distribution import PrimitiveResult, SamplingDistribution
+from ..._types import Consumes
 from ...engines import Engine, QarpEngine
 from ...errors import CapabilityError
 from .. import PrimitiveAlgorithm

@@ -8,7 +8,8 @@ import numpy as np
 import qarpx as qx
 
 from .. import _blas_threads, _program
-from .._types import Consumes, ExactResult, PrimitiveResult, Shots
+from .._sampling_distribution import PrimitiveResult
+from .._types import Consumes, ExactResult, Shots
 from ..errors import CapabilityError
 from ._engine import (
     Engine,
