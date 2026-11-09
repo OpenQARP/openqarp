@@ -9,8 +9,9 @@ Findings only; the green-light is the reviewer's call. The revision at
 Architecture section after it records the reviewer's positions on the
 design, the revision at `57971d0` is reviewed against both in the third
 pass, the revision at `3c99e80` in the fourth pass, the revision at
-`4225b8c` in the fifth pass, and the implementation at `b2d1b5d` in the
-Gate 2 conformance review at the end.
+`4225b8c` in the fifth pass, the implementation at `b2d1b5d` in the
+Gate 2 conformance review, and the fix-up at `15c7475` in the Gate 2
+re-review at the end.
 
 ## Summary
 
@@ -1593,3 +1594,227 @@ representation scales.
    "public-port" wording must leave it before the merge.
 4. G8 and G9 need a human reading of the plan; both are one-line fixes
    either way.
+
+## Gate 2 re-review at `15c7475`
+
+`15c7475` changes three files after `b2d1b5d`. Plan blob, PR body and every
+other file are unchanged. Same procedure as the `b2d1b5d` round: three
+independent passes (collating reviewer; native and CUDA; Python and tests),
+then each finding re-verified in the tree by the collating reviewer, then
+the draft confirmed by the other two. Priorities are correctness of results,
+then architecture, then speed. The plan sets no performance target
+(plan:91-92), so speed findings are recommendations, not conformance
+failures. Findings, not a verdict.
+
+### Delta
+
+- **G1 fixed.** All five sites now read `detail::HostProtocol::checked_bytes(
+  <object>.<member>, sizeof(T))` (`complete_evolution.cu:651`, :868, :873,
+  :997, :1006). Each byte count sizes the array it touches. A clang
+  CUDA-mode `-fsyntax-only` check, host and device side, with shim CUDA and
+  cuStateVec headers, is clean on all three `.cu` files. The same check
+  reproduces the G1 errors on `b2d1b5d`, and a device-calls-host control
+  errors as it should. The check does not cover nvcc's own front end, the
+  real headers, the separable-compilation device link, or Eigen inside nvcc.
+- **G2 fixed.** `test_montecarlo_gpu.py:284` asserts `generated_circuits == 0`
+  with tracking off (plan:393-394); the tracking-on case still asserts `> 0`
+  (:337-338).
+- **GPhase+Barrier column test.** `SimpleBlock` has no `barrier()` method
+  (probe: `AttributeError`), so at `b2d1b5d` this required `gpu_` case
+  failed before reaching the provider. The rewrite appends
+  `qx.Command(Barrier, 0)` to `flatten()`. The host check accepts it,
+  `dagger()` returns it unchanged and `gate_matrices` skips it
+  (`transition_columns.cu:71`). The expected matrix re-derives:
+  Rz(θ)† X Rz(θ) = [[0, e^{iθ}], [e^{-iθ}, 0]], global phase cancelled. It
+  was a test bug, with no product bug behind it. **Correction to the
+  `b2d1b5d` table:** "Exact complex columns" was marked Present although
+  this case could not run; G2 should have named it.
+- **Still open from `b2d1b5d`:** G1's untick of the Phase 2 and 3 boxes
+  (HEAD plan:1050, :1056), G3 to G13. Each was re-checked by grep or probe.
+
+### Checks run on this Mac
+
+| Check | Result |
+|---|---|
+| pytest, the seven new and touched test files plus `test_montecarlo.py` and `test_montecarlo_unit.py` | 598 passed, 37 skipped (20 `gpu_` MC cases, 17 CUDA-Q-off cases) |
+| ruff, mypy on the two changed test files | clean |
+| clang CUDA syntax check, three `.cu` files, host and device | clean except unused `checked_dimension` (G12) |
+| clang `-Wall -Wextra`, MC-on variants of the CPU-compiled sources | clean except M15 and an unused `unavailable` (`contexts.cpp:7`) |
+| Philox4x32-10 Python port against the three Random123 known-answer vectors | 3/3 |
+| `exact_binomial` port, chi-square against `scipy.stats.binom`, four (n, p) | 4/4 pass |
+| Emulation of the complete-row step kernels on rows from the real `_prepare_complete_row_upload`, ratio of sums against exact diagonalisation, three 6x6 real H | -2.2035 vs -2.1976, -1.3230 vs -1.3200, -2.6018 vs -2.6037 |
+| Plan single tape through the real estimator code | 6; replicas 50/7, 10/3; stderr 40/21; burn-in one 58/9; instantaneous 8 |
+| ctest | not re-run; no CPU-compiled source or C++ test changed |
+
+The ports and the emulation test our reading of the code, not the device
+code. They show the algorithm is right: spawn signs, reference elements,
+numerator, shift order, estimators. The emulation reproduces exact ground
+energies within the statistics. Every GPU numerical claim still needs the
+author's MC-enabled run (plan:1011-1017).
+
+### What re-derives
+
+Signed spawning on both paths (child sign = source sign times -sign H),
+the complete-row cutoffs and the reference-source exception, request weights
+-dt H/(A q) with q = 1/(D-1) and floor plus Binomial(m, frac) per edge
+(unbiased), death and cloning, checked int64 atomics, merge and annihilation
+accounting, shift update after merge, NaN energy at zero reference, the
+projected numerator H_00 N_0 + Σ H_0j N_j with the diagonal counted once on
+each path, missing-row resume with the same `absolute_step` keys,
+capacity bounds, event-key uniqueness, replay idempotence, lock order, every
+estimator and combination oracle, seeds, identity hash, sector sampling and
+both certificates.
+
+### Findings, most severe first
+
+- **M1. Binomial inversion can run away (should-fix, correctness).**
+  `exact_binomial` (`rng.cuh:142-148`) subtracts pmf terms from the uniform
+  until the sample falls below the current mass. When the rounded sum of
+  terms ends below the sample, the mass underflows to 0, the loop runs on
+  to `successes == n` and returns n: every walker spawns or dies, or none
+  does in the complement branch. That costs n iterations on one thread.
+  Two independent host ports, bisected on the Philox uniform grid, give
+  P(return n) per draw 8.3e-15 for (512, .02) and 8.1e-15 for (1000, .01).
+  At the top grid value (512, .02) returns 512; just below the threshold
+  it returns 45. Device `pow` and FMA contraction can move the threshold
+  by a few ulps (GPU). Rare per draw, but a long run makes 1e10 draws, and
+  one event corrupts the trajectory silently. Stopping at underflow is not
+  a fix: the mass first reaches 0 at 279 for (512, .02), and
+  P(X ≥ 279) = 0. Fix: when the mass underflows with the sample still
+  above it, draw a fresh uniform and restart. That conditions on u at or
+  below the rounded total and stays exact up to rounding. In the
+  host-callable test of M2, assert that (512, .02) at the top grid uniform
+  returns a value in the bulk.
+- **M2. The sampler has one oracle-tested branch (should-fix, test).**
+  plan:212-213, :898, :951-958. Every GPU numerical fixture except one runs
+  at probability 0 or 1, which `exact_binomial` short-circuits
+  (`rng.cuh:132-133`) before any draw. The one exception, Binomial(512, .2)
+  (`test_montecarlo_aggregated.py:670`, :696), has mean 102.4 and runs only
+  the per-walker Bernoulli loop. With no oracle: the inversion branch
+  (mean < 16, the branch small-dt spawning uses), the complement branch
+  (p > .5), death and cloning draws (event type 1), and sampled fractional
+  spawning (`request_evolution.cu:58-59`, event type 2). The moment tests
+  also cannot catch a wrong Philox round. Fix: mark `splitmix64`,
+  `PhiloxStream`, `aggregated_event_key` and `exact_binomial` `__host__
+  __device__` behind a qualifier macro, so CPU ctest asserts the Random123
+  known-answer vectors, a pmf check for one inversion and one complement
+  case, and M1. Add GPU fixtures with 0 < p < 1 and mean < 16 for death,
+  cloning and fractional spawning, each against analytic moments.
+- **M3. Per-step cost scales with the whole row cache, mostly on one thread
+  (should-fix, speed).** Each complete-row step launches spawning and
+  reduce over every cached edge, each edge binary-searching the active set
+  (`complete_evolution.cu:767-771`, :789-807). It memsets every cached
+  target (:798-802), and runs `merge_aggregated_populations` and
+  `finalize_aggregated_step` as `<<<1, 1>>>` (:816-831). The merge loops
+  serially over active plus all cached targets (:220-267); finalize does an
+  O(A log R) serial correction loop (:299-306). The cache only grows, also
+  across trajectories, so every step pays for every label visited so far.
+  Fix: visit only active sources' edges through CSR offsets, and replace
+  the serial merge and sums with a parallel merge, reduce-by-key, stream
+  compaction and reduction (CUB or Thrust).
+- **M4. `exact_binomial` is O(n) for mean ≥ 16 (should-fix, speed).**
+  `rng.cuh:149-153` draws one Bernoulli per walker on the label's thread,
+  so the step waits for the largest label, usually the reference. That is
+  linear in the population the aggregation is meant to make cheap, and a
+  1e8-walker label is in reach of a display-GPU watchdog. Exact
+  O(1)-expected samplers (BTRD, BTPE) keep plan:212's "exact binomial".
+- **M5. One advance enqueues every remaining step (should-fix, speed).**
+  `_iterate_resident_impl` calls `advance_aggregated_evolution(remaining)`
+  (`aggregated_montecarlo.py:900`). The native loop enqueues eight kernels
+  and a memset per step for all `max_steps` (`complete_evolution.cu:779-832`),
+  and syncs once. After `NeedsTransitionRows` at step k, the remaining
+  launches return at their status check, but each one still costs a launch.
+  Every row-discovery round therefore costs O(remaining) launches. Fix:
+  advance in bounded chunks and grow the chunk while no rows are missing,
+  or stop on device status (conditional graph node).
+- **M6. Scalar coefficient requests evaluate one column per lower label
+  (should-fix, speed).** `_transition_coefficients` keys each missing pair
+  by `min(source, target)` (`aggregated_montecarlo.py:545`). A source whose
+  m sampled targets lie below it costs m + 1 columns instead of one.
+  Probe: 15 pairs from source 8 in a 16-state register evaluate 9 columns,
+  `[(0,), (1,), …, (8,)]`. On the request route each column is a full
+  statevector evaluation. Fix: group by the requesting source; the
+  Hermitian cache already serves the reverse pair.
+- **M7. Each row upload rebuilds all cache metadata (should-fix, speed).**
+  `refresh_aggregated_device_metadata` (`complete_evolution.cu:1182-1258`)
+  walks the row, target and reference maps in full. It frees, reallocates
+  and re-uploads six device vectors and the target-delta buffer on every
+  upload, and Python uploads once per discovery stop. Incremental discovery
+  costs O(cache) host and PCIe work per upload. Fix: sorted append with
+  capacity growth.
+- **M8. A device-allocation failure during upload leaves host and device
+  caches out of step (low, robustness).** `upload_aggregated_transition_rows`
+  fills `aggregated_rows_` and both host maps (:455-484) before the device
+  calls that can throw (:485-487). The device then lacks the rows, the next
+  advance reports them missing, and the re-upload fails as "immutable".
+  Validation still runs first, as plan:907 asks. Fix: build into locals and
+  commit after the device calls succeed.
+- **M9. The request-path realness error lacks coordinates (low,
+  conformance).** plan:232-234 rejects request coefficients "with
+  source/target coordinates". `_require_real` (`aggregated_montecarlo.py:
+  469-474`, used at :560, :741, :743, :875) reports none, while the
+  complete-row sibling (:476-492) does. Fix: same signature and message,
+  and assert the message (the test at :221-223 checks the type only).
+- **M10. The reference column is evaluated twice on the first trajectory
+  (low, speed).** :871 fetches the reference column for the diagonal only,
+  then :895 fetches it again through the bulk upload. Fix: take `initial`
+  from the uploaded row.
+- **M11. Dense host buffers in the column provider (low, memory and speed).**
+  `ensure_capacity` always allocates a pinned `capacity × 2^n × 16`-byte
+  host buffer (`transition_columns.cu:538`); with a sector the MC path never
+  reads it. Without a sector, `compact_columns` copies the full dense batch
+  to the host and compacts it in a serial host loop (:268-289, :378-380).
+  Fix: allocate lazily, and compact on the device before the copy.
+- **M12. The accounting path duplicates every complete-row edge in the
+  Python scalar cache (low).** :624-626 against the bulk path :677-678
+  (plan:225-227). Histories agree on both paths; the
+  `python_coefficient_cache_entries` diagnostic does not. Drop :624-626, or
+  declare it.
+- **M13. The inversion start mass loses p when p ≪ 1 (low, exactness).**
+  `pow(1 - p, n)` (`rng.cuh:139-140`). The relative error in p is up to
+  2^-53 / p, about 1e-3 at the 1e-14 cutoff, and the sampler returns 0
+  below p ≈ 1e-16. Negligible at realistic populations. Fix:
+  `exp(n * log1p(-p))`.
+- **M14. Variate and edge-visit counters mean different things on the two
+  paths (low, diagnostics).** Complete rows add `edges + 1` per active label
+  (`complete_evolution.cu:160-165`). The sampled path adds 1 per edge and
+  nothing for death (`request_evolution.cu:69-73`). Neither counts the
+  variates drawn. Rename them (binomial calls) or count draws, and document
+  both paths.
+- **M15. Implicit field initialisation in a record constructor (nit).**
+  `TransitionRequest.__init__` aggregate-initialises six of seven fields
+  (`bindings_montecarlo.cpp:208-209`; clang "missing field initializer").
+  An empty `proposal_attempts` on a hand-built record is the plan's design
+  (plan:766-767), as are native-only active-label and edge histories
+  (plan:772-773). Name the seventh initialiser explicitly.
+- **M16. Host proposal overheads (informational).** Counting draws with a
+  `Counter` over a generator (`aggregated_montecarlo.py:728`) is 5 to 7
+  times slower than `np.unique` in two runs, and `sample_labels` itself
+  costs 2 to 3 times the `Counter`. Each request step also makes two pageable D2H copies of the
+  active set and ten pageable H2D copies (`complete_evolution.cu:539-548`,
+  :588-619). Host proposals are the plan's design; pinned staging and
+  `np.unique` are cheap gains.
+
+### Test plan rows changed by this round
+
+Rows not listed keep their `b2d1b5d` status.
+
+| Plan row | Status at `15c7475` |
+|---|---|
+| Exact complex columns | Present, GPU (the GPhase+Barrier case now runs); G10 |
+| No execution or fallback | Partial; G2 fixed, G7 hook spy still absent |
+| RNG and chunking | Partial; M2, one sampler branch and one event type |
+| Resident signed evolution | Present, GPU; deterministic tapes only (p in {0, 1}), so sign and merge arithmetic, not sampling (M2) |
+| Request transport and replay | Present for identity, replay and the weight-2 literal; fractional weights without an oracle (M2); G4a on CPU |
+
+### Suggested reviewer focus
+
+1. M1 and M2 together: one guard line, plus host-callable RNG tests that
+   would have caught it.
+2. The author's MC-enabled build and GPU run on the head, and the plan
+   boxes G1 asked to untick: the delta makes the profile compile, but there
+   is still no GPU evidence on the PR.
+3. G3 to G13, unchanged since `b2d1b5d`.
+4. M3 to M7, if the PR is meant to scale: per-step cost now follows the
+   cache size, the largest label and the number of discovery rounds, not
+   the active set.
