@@ -33,6 +33,13 @@ def _dist():
     return SamplingDistribution(_OUTCOMES, _PROBS, 3)
 
 
+def test_primitive_result_is_exported_from_qarp():
+    from qarp import _types
+
+    assert qarp.PrimitiveResult is _types.PrimitiveResult
+    assert "PrimitiveResult" in qarp.__all__
+
+
 # ── reading like a dict ─────────────────────────────────────────────────
 
 

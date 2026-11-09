@@ -47,6 +47,9 @@ All notable changes to OpenQARP are recorded here. The format follows
   `parameter_map`).  It works with `isinstance`.
 - `qx.__with_symengine__`: whether the build has symbolic coefficients.
 - A `ConditionalBlock` with only an `else_body`: pass `then_body=None`.
+- `qarp.PrimitiveResult`, returned by `PrimitiveAlgorithm.run` and the
+  element type of `Engine.run` and `Engine.batch_run`: a `float`, a
+  `complex` or a `SamplingDistribution`.
 
 ### Changed
 

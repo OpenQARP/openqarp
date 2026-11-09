@@ -16,11 +16,6 @@ the same window.
 - **`CHANGELOG.md` carries each PR's lines.**  Every PR into `develop`
   before the release adds its entries under `[Unreleased]`; the release PR
   only moves them.
-- **`PrimitiveResult` is a public annotation without an export.**
-  `qarp/_types.py` defines it and `PrimitiveAlgorithm.run`, `Engine.run` and
-  `Engine.batch_run` return it, but `qarp.__all__` exports only
-  `SamplingDictionary`.  Export it next to `SamplingDictionary`, or annotate
-  with the public types.
 - **Plan text on the plan-only branches.**  `pauli_engine_plan.md` and
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
   `prepare_structured_qpe`; the counter is 15 and the hook is gone.  Fix when each branch rebases.
