@@ -1,16 +1,74 @@
 # Review of #20 implementation — QSCI, Phase 1, second pass
 
-Code review of `feature/qsci` at `acad366`, which answers `qsci_implementation_review.md`:
-`qarp/algorithms/_composite/qsci.py` and its tests. Gates and plan conformance are out of scope.
-Every snippet below was run against `acad366` with an editable install built from it (Python
-3.12, OpenMP on), and its output is pasted as printed.
+Code review of `feature/qsci` at `acad366`, which answers `qsci_implementation_review.md`, and of
+`bc00479`, which answers this review: `qarp/algorithms/_composite/qsci.py` and its tests. Gates
+and plan conformance are out of scope. Every snippet below was run against `acad366` with an
+editable install built from it (Python 3.12, OpenMP on), and its output is pasted as printed. The
+checks marked "at `bc00479`" were run on a copy of that commit. Line numbers refer to `acad366`.
 
 Mutation runs apply one change at a time to a copy of `qsci.py` and run `test_qsci.py` against
-it. The tests in the appendix pass on `acad366` where they pin behaviour that is already right, and
-fail where they pin B1, B3, B4 and B5. The fix sketches below were applied together to the copy.
-With them, the 56 existing tests and the 8 new ones all pass (64 of 64).
+it.
 
-## Summary
+## What to do at `bc00479`
+
+1. **B3: replace the padding with the check, and add `verify_roots: bool = True`.** The diff in
+   [B3](#the-fix-against-bc00479) applies to `bc00479` as is.
+   - Remove `_EIGSH_PAD` and the padded `k`.
+   - Add `_missed_root`. Turn the sparse branch of `_eigensolve` into a loop: one seeded
+     generator, a fresh start vector for every ARPACK call, the QR as now, and one more root
+     while `_missed_root` finds a skipped copy. Skip the check when `n_roots == 1` or
+     `verify_roots` is off.
+   - Add `verify_roots` to `QSCI.__init__` after `n_roots`, store it, and pass it to
+     `_eigensolve`. Its docstring says what turning it off risks.
+   - Add the four tests in the [appendix](#appendix-tests-to-add-at-bc00479).
+   - Correct the docstring of `test_sparse_path_degenerate_roots`. With the seeded start, its claim
+     that "without guard roots ARPACK skips a copy on these seeds" no longer holds: the three roots
+     share one fourfold level, and the unpadded solve gets both seeds right. The test now guards the
+     QR, the seed and the residual. Replacement:
+
+     ```
+         """Qubits 8 and 9 are idle, so every level is at least fourfold degenerate and
+         the three roots share one level.  XYZ is complex: eigs leaves its copies
+         non-orthonormal."""
+     ```
+   - `verify_roots` is new public API. Declare it under "Deviations from plan" in the PR, and
+     fold it into `qsci_plan.md`: the API sketch, the solver bullet (it still says plain
+     `eigsh(which="SA")`), the test table and the Deviations log.
+   - The "Solve" paragraph of `docs/source/algorithms.rst` describes the ARPACK path. Add that,
+     with `n_roots > 1`, one extra single-root solve checks for a skipped copy of a degenerate
+     level and re-solves if it finds one, and that `verify_roots=False` turns this off.
+2. **A3: correct the `primitive` docstring.** The current text is wrong in two directions;
+   [A3](#a3-changing-the-seed-after-build-takes-effect-only-in-place) gives the replacement.
+3. **Optional:** `test_blocks_share_the_seed_state` still reads `algorithm.engine._primitives`.
+
+With the diff, the tests and the docstring applied to a copy of `bc00479`, all 67 tests pass and
+ruff, `ruff format` and mypy are clean. Each of these mutants fails at least one test:
+
+| Mutant | Fails |
+|---|---|
+| Check never runs | `test_sparse_path_ring_degenerate_roots`, `test_sparse_path_eightfold_level`, `test_verify_roots_sets_the_extra_solve[True-2-2]`, `test_window_inside_a_level_is_not_a_miss` |
+| Check runs but never retries | `test_sparse_path_ring_degenerate_roots`, `test_sparse_path_eightfold_level` |
+| Check reuses its own solve's start vector | `test_sparse_path_eightfold_level` |
+| Check also runs at `n_roots == 1` | `test_verify_roots_sets_the_extra_solve[True-1-1]` |
+| Tolerance sign flipped, so a copy at exactly `top` counts as a miss | `test_window_inside_a_level_is_not_a_miss`, in 0.2 s on its own. In the full suite `test_sparse_path_degenerate_roots` runs first and re-solves up to `k = dim - 2`, so the run hangs rather than fails |
+| `verify_roots` not passed to `_eigensolve` | `test_verify_roots_sets_the_extra_solve[False-2-1]` |
+| No QR | `test_sparse_path_degenerate_roots[XYZ-0]` |
+| Unseeded generator | both cases of `test_sparse_path_degenerate_roots`, `test_window_inside_a_level_is_not_a_miss` |
+
+Everything else in this review is fixed at `bc00479`:
+
+| Item | At `bc00479` | Check |
+|---|---|---|
+| B1. Equal counts split differently still tie by rounding | Fixed: integer counts when every block has the same `n_shots` | Turning the count path off fails `test_equal_counts_tie_however_they_split` |
+| B3. The sparse path skips copies of a degenerate level | Padded by 4 roots, seeded, QR; misses on many-fold levels are silent | Action 1 |
+| B4. `_solve` makes up roots | Fixed | Removing the check fails `test_solve_refuses_more_roots_than_configurations` |
+| B5. A failed sample keeps the previous `distribution` | Fixed | Removing the clear fails `test_failed_run_keeps_the_samples` |
+| A3. A seed change after `build()` takes effect only in place | Documented, but the wording is inaccurate | Action 2 |
+| T4. Four mutants pass all 56 tests | Fixed: each of the four fails a test | Mutants rerun |
+| Minor: review labels in test docstrings | Fixed | |
+| Minor: a test reads `engine._primitives` | Open | Action 3 |
+
+## At `acad366`
 
 All 56 tests pass. ruff, `ruff format` and mypy are clean on both files, and branch coverage of
 `qsci.py` is 99.1% (only the verbose print and the non-`Mapping` sampler output are uncovered).
@@ -27,23 +85,15 @@ All eleven mutants from the first review now fail a test.
 | T3. No regressions for B1 or B2 | Fixed; the B1 test covers only the permuted case |
 | Minor items | Fixed (Sampler message, Hermiticity and threshold docstrings, shared seed) |
 
-New:
-
-**Bugs**
+New at `acad366`:
 
 - **B3.** Above the dense cutoff, the solver skips copies of a degenerate level and returns the
   next level instead.
 - **B1 (reopened).** Equal counts split differently across blocks still pool to unequal weights.
 - **B4.** `_solve` makes up roots when `n_roots` exceeds the number of configurations.
 - **B5.** A run that fails while sampling keeps the previous run's `distribution`.
-
-**Design**
-
 - **A3.** After `build()`, an in-place edit of `primitive.initial_state` reaches the samplers, but
   assigning a new array does not.
-
-**Tests**
-
 - **T4.** Four mutants pass all 56 tests.
 
 Minor items are at the end.
@@ -52,10 +102,13 @@ Minor items are at the end.
 
 ### B3. The sparse path skips copies of a degenerate level
 
+**At `bc00479`:** padded by four roots, seeded, with a QR. Misses on many-fold levels are
+silent. Action 1 replaces the padding with the check.
+
 Above `_DENSE_EIGH_MAX_DIM`, `_eigensolve` calls ARPACK with `k = n_roots` (`qsci.py:616`).
 ARPACK grows its search space from one starting vector, and it can miss copies of a degenerate level
 at the edge of the requested window. It then returns the next level in their place. The returned
-pairs are true eigenpairs, so the residual stays at 1e-15 and no check notices. The starting
+pairs are true eigenpairs, so the residual stays near 1e-15 and no check notices. The starting
 vector is random on each call, so the result also changes from run to run.
 
 The periodic 8-site Hubbard ring at half filling (dimension 4900) has a twofold fifth level:
@@ -107,10 +160,10 @@ a twofold ground level, and `n_roots=2` comes back wrong in 14 of 30 calls. Dege
 levels are common in QSCI targets: lattice symmetry, and degenerate orbitals such as N₂'s π
 pair.
 
-`n_roots=1` always gets the energy right: 0 wrong in 120 calls across the cases here, real and
-complex. The vector is a valid ground state, but on a degenerate level it is a different one each
-run. On the ring at U = 4 with (4, 3) electrons, ten runs give overlaps down to 0.2 and
-occupations that differ by up to 0.21, and Phase 3 reads those occupations.
+`n_roots=1` got the energy right in all 120 calls across the cases here, real and complex. The
+vector is a valid ground state, but on a degenerate level it is a different one each run. On the
+ring at U = 4 with (4, 3) electrons, ten runs give overlaps down to 0.2 and occupations that
+differ by up to 0.21, and Phase 3 reads those occupations.
 
 - **Real input.** With an operator on 9 of 11 qubits, so that every level is eightfold degenerate,
   8 roots at dimension 2048 come out wrong in 9 of 10 runs.
@@ -122,106 +175,288 @@ The first review's check on the Hubbard 3×2 lattice (dimension 400, 6 roots, cu
 called that spectrum degenerate, but it isn't. Its lowest seven levels are distinct at U = 1, 2, 4
 and 8, so that check could not catch this.
 
-There are three separate problems here: missed copies, non-orthonormal vectors on the complex
-path, and vectors that change from run to run. Each has a fix with no tunable constant:
+There are three separate problems here, with one fix each:
 
-- **Different vectors each run.** Pass a seeded `v0`. It has to be `v0`, not `rng=`: scipy drops
-  `rng` when it hands complex input to `eigs` (`scipy/sparse/linalg/_eigen/arpack/arpack.py:1663`
-  in scipy 1.18.1). Seeding makes results reproducible, not right: a fixed `v0` that misses a
-  copy misses it every time.
-- **Non-orthonormal vectors.** Take a QR of the returned vectors and diagonalise `H` in that basis
-  (a k×k `eigh`). This brings every case here to 1e-14. It costs 0.17 s for 245k × 24.
-- **Missed copies, for `n_roots > 1` only.** Check for a missed copy, and if there is one, ask
-  for one more root and solve again:
-  - The returned vectors `V` span an invariant subspace. Shifting it up by more than the spectral
-    width leaves the rest of the spectrum lowest.
-  - One single-root solve on `H + σ V V†` then finds the lowest level outside `span(V)`. If that
-    level is below the last returned energy, a copy was missed.
-  - The check relies only on a single-root solve finding the lowest level, which is what
-    `n_roots=1` already relies on. Multiplicity doesn't enter.
+- **Different vectors each run.** Seed the start vector, and pass it as `v0`, not `rng=`: scipy
+  drops `rng` when it hands complex input to `eigs`
+  (`scipy/sparse/linalg/_eigen/arpack/arpack.py:1663` in scipy 1.18.1). Seeding makes results
+  reproducible, not right: a fixed start that misses a copy misses it every time.
+- **Non-orthonormal vectors.** Take a QR of the returned vectors. The vectors that come back off
+  orthonormal lie inside degenerate levels, so the QR keeps them eigenvectors: across the 50
+  random models below, residuals and orthonormality stay below 1e-13. It costs 0.17 s for
+  245k × 24.
+- **Missed copies, for `n_roots > 1`.** Check for a skipped copy and re-solve with one more root
+  until there is none. `bc00479` does the first two. For the third it pads instead, which is
+  where this review and `bc00479` differ.
 
-```python
-def _missed_root(
-    matrix: scipy.sparse.csr_matrix, vectors: NDArray, top: float, v0: NDArray
-) -> bool:
-    """True if an eigenvalue below ``top`` lies outside ``span(vectors)``.
+#### The options
 
-    ``span(vectors)`` is invariant, so shifting it above the spectral width leaves
-    the rest of the spectrum lowest: one single-root solve decides.
-    """
-    shift = 2.0 * float(abs(matrix).sum(axis=1).max())
-    deflated = scipy.sparse.linalg.LinearOperator(
-        matrix.shape,
-        matvec=lambda x: matrix @ x + shift * (vectors @ (vectors.conj().T @ x)),
-        dtype=matrix.dtype,
-    )
-    lowest = scipy.sparse.linalg.eigsh(deflated, k=1, which="SA", v0=v0)[0][0]
-    return bool(lowest < top - 1e-8 * max(1.0, abs(top)))
-...
-    else:
-        # Seeded so a degenerate level gets the same basis every run; scipy drops
-        # rng= for complex input, so starts go in as v0.  Each ARPACK call draws a
-        # fresh start: a start already used cannot reach the copy its solve missed.
-        rng = np.random.default_rng(0)
-        for k in range(n_roots, dim - 1):
-            _, vectors = scipy.sparse.linalg.eigsh(
-                matrix, k=k, which="SA", v0=rng.uniform(-1.0, 1.0, dim)
-            )
-            # eigs (complex input) does not orthogonalise within an eigenspace.
-            basis, _ = np.linalg.qr(vectors)
-            energies, ritz = scipy.linalg.eigh(basis.conj().T @ (matrix @ basis))
-            energies, vectors = energies[:n_roots], basis @ ritz[:, :n_roots]
-            if n_roots == 1 or not _missed_root(
-                matrix, vectors, energies[-1], rng.uniform(-1.0, 1.0, dim)
-            ):
-                break
-```
+Four ways to handle missed copies were compared. All seed the start and take the QR.
 
-Use one seeded generator and draw a fresh start vector for every ARPACK call. The reason:
+- **Flag off.** Ask for `n_roots` roots. This is what `verify_roots=False` runs.
+- **Padding.** Ask for `n_roots + 4` and keep the lowest `n_roots`. This is `bc00479`.
+- **Padding + warning.** Padding, then the check below, warning on a miss without re-solving.
+- **Check + retry.** Ask for `n_roots`, check, and on a miss re-solve with one more root. This is
+  the fix.
+
+The check: the returned vectors `V` span an invariant subspace, so shifting it up by at least the
+spectral width, `H + σ V V†`, leaves the rest of the spectrum lowest. One single-root solve then
+finds the lowest level outside `span(V)`. If that level is below the last returned energy, a copy
+was skipped. The check relies only on a single-root solve finding the lowest level, which is what
+`n_roots=1` already relies on, and the multiplicity doesn't enter. `σ` is twice the largest
+absolute row sum (Gershgorin), which is at least the spectral width.
+
+#### Correctness
+
+Ten random models each of five kinds, all at dimension 4096 with a dense reference: fourfold real
+and complex (`n_roots=4`), eight- or sixteenfold real and complex (`n_roots=8`), and complex with
+no built-in degeneracy (`n_roots=6`), where three of the ten still have a twofold level. Then the
+three physical cases above: the ring at U = 1 (`n_roots=6`), the 4×2 lattice at U = 2
+(`n_roots=2`), and the ring at U = 4 with (4, 3) electrons (`n_roots=4`). Each option ran on the
+same matrices, against the same reference:
+
+| | Flag off | Padding | Padding + warning | Check + retry |
+|---|---|---|---|---|
+| Real fourfold | 1 of 10 | 7 of 10 | 7 of 10 | 10 of 10 |
+| Complex fourfold | 3 of 10 | 8 of 10 | 8 of 10 | 10 of 10 |
+| Real eight- or sixteenfold | 2 of 10 | 10 of 10 | 10 of 10 | 10 of 10 |
+| Complex eight- or sixteenfold | 5 of 10 | 8 of 10 | 8 of 10 | 10 of 10 |
+| Complex, no built-in degeneracy | 10 of 10 | 10 of 10 | 10 of 10 | 10 of 10 |
+| **Random models** | **21 of 50** | **43 of 50** | **43 of 50** | **50 of 50** |
+| Physical cases | 1 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| A miss is reported | never | never | all 7, no false alarm | none to report |
+
+Residuals and orthonormality are below 1e-13 everywhere, wrong answers included. The misses are
+true eigenpairs of the wrong level, so only a comparison or the check can tell. Ten `n_roots=1`
+runs on the U = 4 ring return the same vector.
+
+The check needs a fresh start vector:
 
 - In exact arithmetic, the space ARPACK searches from a start vector `v` meets each eigenspace in
   one direction only: the projection of `v` onto it. A copy is missed when `v` barely reaches it.
-- A solve started from a vector already used inherits that blind spot. With the solve's `v0`
-  reused for the check, the check passed wrong answers in 7 of 10 real and 7 of 10 complex
-  fourfold models.
-- A loop that appends the vector the check found and rechecks with the same start goes blind the
-  same way.
-- A fresh draw per call avoids all of this, and one seed keeps the result the same on every run.
+- A solve started from a vector already used inherits that blind spot. Over 100 random models
+  at dimension 2048 (11 qubits, 30 2-local terms, seeds 0 to 24 of four kinds: real and complex,
+  with 9 active qubits and `n_roots=4` or 8 active and `n_roots=8`), a check started from its own
+  solve's vector passed wrong roots on 30, and a fresh start on none.
+  `test_sparse_path_eightfold_level` is one of the 30.
+- One seeded generator, drawn once per ARPACK call, avoids this and keeps every run identical.
 
-The shift is twice the largest absolute row sum (Gershgorin), so it exceeds the spectral width.
+#### Cost
+
+Wall time of `_eigensolve` on two 4×3 Hubbard matrices at U = 4, all options on the same matrix and
+seed. Open lattice, (4, 4), dimension 245k, median of three runs:
+
+| `n_roots` | Flag off | Padding | Padding + warning | Check + retry |
+|---|---|---|---|---|
+| 1 | 1.00 s | 0.99 s | 0.98 s | 0.99 s |
+| 2 | 1.24 s | 2.07 s | 4.04 s | 2.98 s |
+| 4 | 1.68 s | 2.05 s | 4.29 s | 3.85 s |
+| 6 | 1.98 s | 5.21 s | 7.21 s | 4.29 s |
+| 8 | 1.98 s | 2.79 s | 5.18 s | 4.58 s |
+
+Periodic lattice, (5, 5), dimension 627k, with twofold levels, one run:
+
+| `n_roots` | Flag off | Padding | Padding + warning | Check + retry |
+|---|---|---|---|---|
+| 1 | 1.82 s | 1.86 s | 1.81 s | 1.82 s |
+| 2 | 2.90 s | 8.74 s | 12.12 s | 6.16 s |
+| 4 | 5.04 s | 7.86 s | 13.89 s | 11.32 s |
+| 6 | 8.56 s | 27.64 s | 30.44 s | 15.32 s |
+| 8 | 7.91 s | 13.31 s | 19.68 s | 13.84 s |
+
+On both matrices every option returned the same energies, and check + retry never re-solved:
+one main solve and one check at every `n_roots > 1`.
+
+- **`n_roots=1` costs nothing extra.** No option pads or checks there.
+- **Padding alone is often faster than check + retry**, in 5 of the 8 cases with `n_roots > 1`
+  here, but not always (245k at `n_roots` 6, 627k at 2 and 6), and its misses are silent.
+- **Padding + warning is never the best choice.** It is slower than check + retry in all 8 cases
+  with `n_roots > 1`, because it pays for the check on top of a bigger main solve. Where padding
+  misses a copy, it only warns; check + retry returns the right roots.
+- **Check + retry costs one extra single-root solve on the deflated matrix** per run with
+  `n_roots > 1` when nothing is missed. That solve is slower than a plain `n_roots=1` solve, 1.7
+  to 3.7 times here: 1.7 to 2.6 s at 245k, and 3.3 to 6.8 s at 627k. On a degenerate level it also
+  re-solves, one more root at a time, each with its check: the two rings needed one retry each
+  and the 4×2 lattice none. The random degenerate models needed up to five, and those without
+  built-in degeneracy never retried, so there were no false alarms. At dimension 2048, eightfold
+  levels with `n_roots=8` needed up to 12. Growing `k` faster per retry would cut the count.
+- The author's timings at 627k (same matrix) and at 854k (4×3 open, (6, 6)) agree: the check
+  about doubles an excited-state solve at that size, and padding alone is faster in 6 of 8 runs.
+
+#### Decision
+
+Check + retry, on by default, with `verify_roots=False` to turn it off. OpenQARP ranks
+correctness, then architecture, then speed:
+
+- **Correctness.** Check + retry is the only option that got all 53 cases right. Padding misses 7
+  of 50 silently, and padding + warning only reports them.
+- **Architecture.** One helper and a loop behind the existing `_eigensolve` signature, plus one
+  keyword. The keyword is new public API, so it goes through the plan (action 1).
+- **Speed.** The cost is one extra single-root solve on the deflated matrix, 1.7 to 3.7 times a
+  plain `n_roots=1` solve, only when `n_roots > 1`, and the keyword removes it for users who accept
+  the risk. It also lets benchmarks time the bare solve.
+
+For later phases:
+
+- **Phase 2** builds the matrix-free sigma. The check's matvec is already matrix-free, but the
+  Gershgorin shift reads the matrix. Two shifts need no matrix. Twice the sum of the absolute
+  non-identity Pauli coefficients is at least the spectral width; the identity term only moves
+  the spectrum, and a larger shift slows the check. Tighter still, `σ = top - energies[0]` plus a
+  margin: every shifted root then only has to clear `top`, which is all the check needs.
+- **Phase 3** recovery averages ground-state occupancies, which come from the `n_roots=1` path,
+  and returns the roots of one batch. With `n_roots > 1`, only the returned batch needs the check.
+  The planned Davidson solver revisits the question.
+
+#### The fix against `bc00479`
+
+```diff
+--- a/qarp/algorithms/_composite/qsci.py
++++ b/qarp/algorithms/_composite/qsci.py
+@@ -36,10 +36,6 @@
+ # Dense ``eigh`` up to this subspace dimension, ARPACK ``eigsh`` above it.
+ _DENSE_EIGH_MAX_DIM = 2000
+ 
+-# Guard roots ARPACK computes and discards when n_roots > 1: started from one
+-# vector, it can skip a copy of a degenerate level at the edge of the window.
+-_EIGSH_PAD = 4
+-
+ # External distributions only: exact sampling prunes probabilities <= 1e-12,
+ # so a primitive's own result can legitimately fall short by more than this.
+ _MASS_TOL = 1e-10
+@@ -93,16 +89,21 @@
+             a ``QubitOperator`` it is optional and asserts a Jordan-Wigner
+             occupation basis; ``None`` means no sector filter.
+         n_roots: Number of lowest eigenpairs to return.  On a degenerate level
+-            the vectors are some orthonormal basis of it.  Above a subspace
+-            dimension of 2000 the solver is ARPACK, which can skip a copy of a
+-            degenerate level and return the next level instead.  For
+-            ``n_roots > 1`` it computes 4 extra roots and discards them, which
+-            covers low degeneracies; a level with many copies can still be
+-            skipped, so request more roots than needed and keep the lowest.
++            the vectors are some orthonormal basis of it.
++        verify_roots: Above a subspace dimension of 2000 the solver is ARPACK,
++            which can skip a copy of a degenerate level and return the next
++            level instead.  With ``n_roots > 1``, ``True`` runs one extra
++            single-root solve that detects a skipped copy, and re-solves with
++            one more root until none is skipped.  ``False`` saves that solve,
++            but a skipped copy then goes unnoticed: the energies and vectors
++            can be wrong without any warning.
+         primitive: A ``Sampler`` measuring every qubit in register order; a
+             default ``Sampler()`` when ``ket`` is given.  Must be ``None`` with
+-            ``distribution``.  ``build()`` copies it once per block, so a later
+-            change to ``primitive`` takes effect only after a rebuild.
++            ``distribution``.  It is copied at construction, so later changes
++            to the caller's object never reach a run.  ``build()`` gives each
++            block a copy of ``self.primitive`` sharing its ``initial_state``: an
++            in-place edit of that array reaches the next ``run()``; a new array,
++            or any other change to ``self.primitive``, only the next ``build()``.
+         engine: Execution engine for ``ket``.
+         verbose: Print a one-line summary after each run.
+ 
+@@ -137,6 +138,7 @@
+         prob_threshold: Optional[float] = None,
+         n_electrons: Optional[tuple[int, int]] = None,
+         n_roots: int = 1,
++        verify_roots: bool = True,
+         primitive: Optional[PrimitiveAlgorithm] = None,
+         engine: Optional[Engine] = None,
+         verbose: bool = False,
+@@ -208,6 +210,7 @@
+         self.max_subspace_dim = max_subspace_dim
+         self.prob_threshold = prob_threshold
+         self.n_roots = n_roots
++        self.verify_roots = verify_roots
+         self.verbose = verbose
+         self.energies: Optional[NDArray[np.float64]] = None
+         self.coefficients: Optional[NDArray] = None
+@@ -331,7 +334,7 @@
+         if len(set(sorted_labels)) != len(sorted_labels):
+             raise ValueError("configurations contain duplicates")
+         matrix = _hermitian_real(_subspace_matrix(qubit_hamiltonian, sorted_labels))
+-        energies, vectors = _eigensolve(matrix, self.n_roots)
++        energies, vectors = _eigensolve(matrix, self.n_roots, self.verify_roots)
+         coefficients = np.empty_like(vectors)
+         coefficients[order] = vectors
+         return energies, coefficients
+@@ -621,16 +624,34 @@
+     if float(np.abs(matrix.data.imag).max()) <= 1e-14 * scale:
+         return matrix.real.tocsr()
+     return matrix
++
++
++def _missed_root(
++    matrix: scipy.sparse.csr_matrix, vectors: NDArray, top: float, v0: NDArray
++) -> bool:
++    """True if an eigenvalue below ``top`` lies outside ``span(vectors)``.
++
++    ``span(vectors)`` is invariant, so shifting it above the spectral width leaves
++    the rest of the spectrum lowest: one single-root solve decides.
++    """
++    shift = 2.0 * float(abs(matrix).sum(axis=1).max())  # at least the spectral width
++    deflated = scipy.sparse.linalg.LinearOperator(
++        matrix.shape,
++        matvec=lambda x: matrix @ x + shift * (vectors @ (vectors.conj().T @ x)),
++        dtype=matrix.dtype,
++    )
++    lowest = scipy.sparse.linalg.eigsh(deflated, k=1, which="SA", v0=v0)[0][0]
++    return bool(lowest < top - 1e-8 * max(1.0, abs(top)))
+ 
+ 
+ def _eigensolve(
+-    matrix: scipy.sparse.csr_matrix, n_roots: int
++    matrix: scipy.sparse.csr_matrix, n_roots: int, verify: bool = True
+ ) -> tuple[NDArray[np.float64], NDArray]:
+     """Lowest ``n_roots`` eigenpairs, ascending: dense ``eigh`` or ARPACK ``eigsh``.
+ 
+     ARPACK refuses ``n_roots >= dim - 1`` for complex matrices, so that goes dense
+-    regardless of size.  Above the cutoff, the ``_EIGSH_PAD`` guard roots reduce,
+-    not remove, the chance of skipping a copy of a degenerate level.
++    regardless of size.  Above the cutoff, ``verify`` re-solves with one more root
++    while ``_missed_root`` finds a skipped copy of a degenerate level.
+     """
+     dim = matrix.shape[0]
+     if n_roots > dim:
+@@ -641,14 +662,21 @@
+     if dim <= _DENSE_EIGH_MAX_DIM or n_roots >= dim - 1:
+         energies, vectors = scipy.linalg.eigh(matrix.toarray(), subset_by_index=[0, n_roots - 1])
+     else:
+-        # dim - 2 is the largest k ARPACK takes for complex input.
+-        k = n_roots if n_roots == 1 else min(n_roots + _EIGSH_PAD, dim - 2)
+-        # A fixed start, so the same input gives the same roots.
+-        v0 = np.random.default_rng(0).standard_normal(dim)
+-        energies, vectors = scipy.sparse.linalg.eigsh(matrix, k=k, which="SA", v0=v0)
+-        order = np.argsort(energies)[:n_roots]
+-        # Complex input goes to eigs, whose copies of a degenerate level are not
+-        # orthonormal.
+-        vectors, _ = np.linalg.qr(vectors[:, order])
+-        energies = energies[order]
++        # One seeded generator, a fresh start per ARPACK call: the same input gives
++        # the same roots, and a start already used cannot reach the copy its solve
++        # missed.  dim - 2 is the largest k ARPACK takes for complex input.
++        rng = np.random.default_rng(0)
++        for k in range(n_roots, dim - 1):
++            energies, vectors = scipy.sparse.linalg.eigsh(
++                matrix, k=k, which="SA", v0=rng.standard_normal(dim)
++            )
++            order = np.argsort(energies)[:n_roots]
++            # Complex input goes to eigs, whose copies of a degenerate level are not
++            # orthonormal.
++            vectors, _ = np.linalg.qr(vectors[:, order])
++            energies = energies[order]
++            if n_roots == 1 or not verify:
++                break
++            if not _missed_root(matrix, vectors, energies[-1], rng.standard_normal(dim)):
++                break
+     return np.asarray(energies, dtype=np.float64), vectors
+```
+
 `dim - 2` is the largest `k` ARPACK takes for complex input. The sparse branch only runs when
-`n_roots <= dim - 2`, so the first pass is always valid.
+`n_roots <= dim - 2`, so the first pass is always valid. If the check still reports a skipped copy
+at `k = dim - 2`, the loop ends and returns that pass; getting there would need every smaller `k`
+to miss.
 
-On the copy:
+#### Options that don't work as well
 
-- **Physical cases.** All three come out right, with vectors orthonormal to 1e-14: the ring at
-  U = 1 with `n_roots=6`, the ring at U = 4 with (4, 3) electrons and `n_roots=4`, and the 4×2
-  lattice with `n_roots=2`. acad366 gets the first one wrong.
-- **Random models.** Ten each of five kinds, all at dimension 4096 with a dense reference: fourfold
-  real and complex (`n_roots=4`), eight- or sixteenfold real and complex (`n_roots=8`), and
-  nondegenerate complex (`n_roots=6`). All 50 come out right, orthonormal to 1e-14. On acad366
-  only 1, 4, 2 and 1 of 10 of the degenerate kinds are right. Its nondegenerate complex vectors
-  are off orthonormal by up to 6e-2.
-- **Reproducibility.** Ten `n_roots=1` runs on the U = 4 ring return the same vector.
-- **Cost, at dimension 245k (4×3 open Hubbard, (4, 4)).** `n_roots=1` is unchanged at 1.2 s
-  against 0.9 s, because the check is skipped there. `n_roots=6` goes from 2.5 s to 4.2 s.
-- **Rounds.** Across the 50 random models, the loop needed up to five rounds on fourfold levels
-  (k from 4 to 8) and on eight- or sixteenfold ones (k from 8 to 12). It never retried on the
-  nondegenerate ones, so there were no false alarms. Each round is cheap at these dimensions. At
-  large dimensions, growing `k` by more than one per round would cut the count.
-
-If the retry loop is more code than wanted, the minimum is to keep the check and warn, naming the
-level. That is what the user needs in order to rerun with more roots. Either way, the
-`n_roots` docstring should say two things. On a degenerate level, the vectors are some orthonormal
-basis of it. And `_DENSE_EIGH_MAX_DIM` is the exact fallback.
-
-Options that don't work as well:
-
-- **Padding `k`.** It is a heuristic, and it isn't sufficient: on a sixteenfold level, padding by
-  4 plus the QR step is still wrong in 3 of 30 runs. It also costs most where it helps least.
-  At dimension 245k, `n_roots=1` padded to 5 takes 1.9 s instead of 1.0 s. It adds no Krylov
-  memory up to `n_roots=5`, because scipy's default `ncv = max(2k + 1, 20)` stays at 20. At
-  `n_roots=10` the memory grows by about a third.
 - **A larger `ncv` alone.** It helps real input partly: the ring at `n_roots=6` goes from 23 to 3
   wrong in 30. It doesn't help complex input, where orthonormality errors reach 1.0.
 - **Raise `_DENSE_EIGH_MAX_DIM`.** This is exact, but dense `eigh` takes 4.8 s at dimension 4900
@@ -232,6 +467,8 @@ Options that don't work as well:
   accepted.
 
 ### B1 (reopened). Equal counts split differently across blocks still tie by rounding
+
+**At `bc00479`:** fixed as sketched. `test_equal_counts_tie_however_they_split` pins it.
 
 `math.fsum` makes each key's total exactly rounded, so the total no longer depends on block order.
 But the inputs are already-rounded `count / n_shots` floats. When two keys have the same total
@@ -289,6 +526,8 @@ path. The existing `test_block_pooling` still gets `fl(1/3)` (64 / 192).
 
 ### B4. `_solve` makes up roots
 
+**At `bc00479`:** fixed as sketched.
+
 The zero-matrix shortcut in `_eigensolve` (`qsci.py:610`) returns `np.zeros(n_roots)` and
 `np.eye(dim, n_roots)` without checking `n_roots <= dim`:
 
@@ -319,6 +558,9 @@ the top of `_eigensolve` covers both:
 ```
 
 ### B5. A failed sample keeps the previous `distribution`
+
+**At `bc00479`:** fixed: block mode clears `distribution`, and
+`test_failed_run_keeps_the_samples` asserts it.
 
 `run()` clears the solve outputs, `in_sector_mass` and `rejected`, then assigns
 `self.distribution = self._sample()` (`qsci.py:246`). If `_sample` raises, `distribution` keeps
@@ -365,6 +607,26 @@ pin the choice: its third case asserts `energies` and `in_sector_mass`, not `dis
 ## Design
 
 ### A3. Changing the seed after `build()` takes effect only in place
+
+**At `bc00479`:** documented, but the new text is wrong in two directions. "``build()`` copies it
+once per block, so a later change to ``primitive`` takes effect only after a rebuild" misses that
+an in-place edit of `qsci.primitive.initial_state` reaches the next `run()` with no rebuild, and
+that a change to the caller's own object never reaches a run, even after a rebuild, because the
+constructor copied it. A new array assigned to `qsci.primitive.initial_state` does need a rebuild,
+and so does any other change to `qsci.primitive`: a new `n_shots` keeps the old shot count until
+`build()`. All four were checked on a copy of `bc00479`. This wording matches them:
+
+```
+        primitive: A ``Sampler`` measuring every qubit in register order; a
+            default ``Sampler()`` when ``ket`` is given.  Must be ``None`` with
+            ``distribution``.  It is copied at construction, so later changes
+            to the caller's object never reach a run.  ``build()`` gives each
+            block a copy of ``self.primitive`` sharing its ``initial_state``: an
+            in-place edit of that array reaches the next ``run()``; a new array,
+            or any other change to ``self.primitive``, only the next ``build()``.
+```
+
+At `acad366`:
 
 `CompositeAlgorithm.__init__` deep-copies the primitive (`composite_algorithm.py:43`), so the
 caller's array is cut off at construction. The new deepcopy memo (`qsci.py:221`) makes every block
@@ -413,6 +675,8 @@ seeds differ by ordinal, so the block samples are not correlated.
 
 ### T4. Four mutants pass all 56 tests
 
+**At `bc00479`:** fixed: each of the four mutants fails a test.
+
 | Mutant | What it shows | A test that fails on it |
 |---|---|---|
 | drop shift 32 from `_parity` (`:482`) | No int64-path test has a Z or Y above bit 15; bits 32–62 are ignored | 60 qubits, occupied 20, 35, 50: `Z20 + 0.5 Z35 + 0.25 Z50` gives −1.75 (the mutant gives −0.25) |
@@ -423,15 +687,17 @@ seeds differ by ordinal, so the block samples are not correlated.
 The B1 regression kills an exact revert of `_pool` to the `067c595` accumulator. It doesn't kill
 `sum(weights)` in place of `fsum(weights)`, because Python 3.12's built-in `sum` of floats is
 compensated. A random search over 200k lists of 3 to 6 positive weights found no order
-dependence, so that mutant is effectively equivalent. `fsum` stays the right call because it is guaranteed
-exactly rounded.
+dependence, so that mutant is effectively equivalent. `fsum` stays the right call because it is
+guaranteed exactly rounded.
 
 ## Minor
 
 - The new tests' docstrings and section header carry review labels ("B1:", "T1:",
   "Implementation review regressions (qsci_implementation_review.md)"). That records how each test
   came about. The constraint alone says it: "equal weights tie on the label in any block order".
-- `test_blocks_share_the_seed_state` reads `algorithm.engine._primitives`.
+  Fixed at `bc00479`.
+- `test_blocks_share_the_seed_state` reads `algorithm.engine._primitives`. Still open at
+  `bc00479`.
 
 ## What checks out
 
@@ -448,125 +714,92 @@ exactly rounded.
   with the cutoff patched to 1, the 3 lowest energies match dense to within 1e-10 in 10 of 10
   runs, and the vectors are orthonormal to 1e-14.
 
-## Appendix: tests for B1, B3–B5 and T4
+## Appendix: tests to add at `bc00479`
 
-On `acad366`, the B1, B3, B4 and B5 tests fail and the two T4 tests pass. B3 has two tests here:
-degenerate roots and reproducibility. The degenerate test fails in at least one parametrisation in
-10 of 10 runs. Each T4 mutant fails at least one of these tests. With the fix sketches, all pass.
+They go in `test_qsci.py`, before `# ── Build, pooling and run-state edge cases`, with two blank
+lines around each. The file already has `_sector_configurations`, `_uniform` and every import they
+need. All four pass with the fix, and the mutant table above lists what each one catches. The ring
+test takes about 5 s.
 
 ```python
-import itertools
-
-import numpy as np
-import pytest
-import scipy.linalg
-
-from qarp import SamplingDistribution
-from qarp.algorithms import QSCI, Sampler
-from qarp.algorithms._composite import qsci as qsci_module
-from qarp.blocks import ComputationalBasisStateBlock
-from qarp.endianness import bits_to_label
-from qarp.operators import FermionOperator, QubitOperator
-from qarp.operators.models import fermi_hubbard
-
-
-def _sector(n_qubits, n_alpha, n_beta):
-    return [
-        bits
-        for bits in itertools.product((0, 1), repeat=n_qubits)
-        if sum(bits[0::2]) == n_alpha and sum(bits[1::2]) == n_beta
-    ]
-
-
-def test_equal_counts_tie_however_they_split():
-    # 10 shots per block: label 1 has 3 counts in block 0, label 4 has 1 + 2.
-    low, high, top = (1, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)
-    blocks = [
-        SamplingDistribution.from_dict({low: 0.3, high: 0.1, top: 0.6}, n_shots=10),
-        SamplingDistribution.from_dict({high: 0.2, top: 0.8}, n_shots=10),
-    ]
-    for order in (blocks, blocks[::-1]):
-        pooled = qsci_module._pool(order)
-        assert pooled[low] == pooled[high] == 3 / 20
-        assert qsci_module._select(pooled, 4, None, 2, None).configurations == (low, top)
-
-
-def test_parity_above_16_bits():
-    # 60 qubits stays on the int64 path; every Z acts on an occupied qubit.
-    occupied = tuple(int(q in (20, 35, 50)) for q in range(60))
-    hamiltonian = QubitOperator("Z20") + QubitOperator("Z35", 0.5) + QubitOperator("Z50", 0.25)
-    energies, _ = QSCI(hamiltonian, distribution={occupied: 1.0}).build().run()
-    assert energies[0] == pytest.approx(-1.75, abs=1e-12)
-
-
-def test_solve_rows_follow_a_non_involutive_order():
-    hamiltonian = fermi_hubbard([2], 1.0, 4.0)
-    sector = _sector(4, 1, 1)
+def test_sparse_path_ring_degenerate_roots():
+    # The periodic 8-site ring at U = 4 with (4, 3) electrons: dimension 3920 is
+    # above the dense cutoff, and the lowest four roots are two twofold levels.
+    hamiltonian = fermi_hubbard([8], 1.0, 4.0, periodic=True)
+    configurations = _sector_configurations(16, 4, 3)
     algorithm = QSCI(
-        hamiltonian, distribution={b: 0.25 for b in sector}, n_electrons=(1, 1), n_roots=2
+        hamiltonian, distribution=_uniform(configurations), n_electrons=(4, 3), n_roots=4
     ).build()
-    shuffled = [sector[i] for i in (1, 2, 0, 3)]  # its argsort is a 4-cycle
-    energies, coefficients = algorithm._solve(shuffled)
-    index = [bits_to_label(b) for b in shuffled]
-    block = hamiltonian.sparse_matrix(4).toarray()[np.ix_(index, index)]
-    np.testing.assert_allclose(block @ coefficients, coefficients * energies, atol=1e-10)
+    energies, _ = algorithm.run()
+    index = [bits_to_label(bits) for bits in configurations]
+    block = hamiltonian.sparse_matrix(16)[index][:, index].toarray()
+    np.testing.assert_allclose(energies, scipy.linalg.eigvalsh(block)[:4], atol=1e-10)
 
 
-def test_failed_sample_clears_every_output(monkeypatch):
-    algorithm = QSCI(
-        FermionOperator("0^ 0"),
-        ket=ComputationalBasisStateBlock([1, 0]),
-        primitive=Sampler(n_shots=100),
-        n_electrons=(1, 0),
-    ).build()
-    algorithm.run()
-    monkeypatch.setattr(algorithm.engine, "run", lambda *args, **kwargs: [{(1,): 1.0}])
-    with pytest.raises(ValueError, match="full register"):
-        algorithm.run()
-    assert algorithm.rejected is None
-    assert algorithm.distribution is None
-
-
-def test_solve_refuses_more_roots_than_configurations():
-    # X0 projects to zero on one configuration, which reaches the zero-matrix shortcut.
-    algorithm = QSCI(QubitOperator("X0"), distribution={(0, 0): 1.0}, n_roots=2).build()
-    with pytest.raises(ValueError, match="exceeds"):
-        algorithm._solve([(0, 0)])
-    with pytest.raises(ValueError, match="exceeds"):
-        algorithm._solve([])
-
-
-@pytest.mark.parametrize("letters", ["XZ", "XYZ"])
-def test_sparse_path_degenerate_roots(letters):
-    # 2-local terms on qubits 0-8 of 11: every level is 8-fold degenerate, and
-    # dim 2048 is above the dense cutoff.  Oracle: eigvalsh of sparse_matrix().
-    rng = np.random.default_rng(3)
+def test_sparse_path_eightfold_level():
+    # 2-local terms on qubits 0-7 of 11: every level is eightfold degenerate, at
+    # dimension 2048.  The check must start fresh: from the solve's own start it
+    # misses a copy on this seed.
+    rng = np.random.default_rng(10)
     hamiltonian = QubitOperator()
     for _ in range(30):
-        i, j = sorted(rng.choice(9, 2, replace=False))
-        a, b = rng.choice(list(letters), 2)
+        i, j = sorted(rng.choice(8, 2, replace=False))
+        a, b = rng.choice(list("XZ"), 2)
         hamiltonian += QubitOperator(f"{a}{i} {b}{j}", float(rng.normal()))
     configurations = list(itertools.product((0, 1), repeat=11))
-    algorithm = QSCI(
-        hamiltonian, distribution={b: 1 / 2048 for b in configurations}, n_roots=8
-    ).build()
-    energies, coefficients = algorithm.run()
-    reference = scipy.linalg.eigvalsh(hamiltonian.sparse_matrix(11).toarray())[:8]
-    np.testing.assert_allclose(energies, reference, atol=1e-10)
-    np.testing.assert_allclose(coefficients.conj().T @ coefficients, np.eye(8), atol=1e-10)
+    algorithm = QSCI(hamiltonian, distribution=_uniform(configurations), n_roots=8).build()
+    energies, _ = algorithm.run()
+    dense = hamiltonian.sparse_matrix(11).toarray()
+    np.testing.assert_allclose(energies, scipy.linalg.eigvalsh(dense)[:8], atol=1e-10)
 
 
-def test_sparse_path_is_reproducible():
-    # A twofold ground level above the dense cutoff: any basis of it is valid,
-    # but two runs must return the same one.
-    sector = _sector(16, 3, 3)
+@pytest.mark.parametrize(
+    ("verify_roots", "n_roots", "n_solves"), [(True, 2, 2), (False, 2, 1), (True, 1, 1)]
+)
+def test_verify_roots_sets_the_extra_solve(monkeypatch, verify_roots, n_roots, n_solves):
+    # The open 4-site chain at (2, 2) is nondegenerate, so the check finds nothing
+    # and never re-solves; a single root is never checked.
+    calls = []
+    eigsh = scipy.sparse.linalg.eigsh
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs["k"])
+        return eigsh(*args, **kwargs)
+
+    monkeypatch.setattr(qsci_module, "_DENSE_EIGH_MAX_DIM", 1)
+    monkeypatch.setattr(qsci_module.scipy.sparse.linalg, "eigsh", counting)
+    configurations = _sector_configurations(8, 2, 2)
     algorithm = QSCI(
-        fermi_hubbard([4, 2], 1.0, 2.0, periodic=True),
-        distribution={b: 1 / len(sector) for b in sector},
-        n_electrons=(3, 3),
-        n_roots=2,
+        fermi_hubbard([4], 1.0, 4.0),
+        distribution=_uniform(configurations),
+        n_electrons=(2, 2),
+        n_roots=n_roots,
+        verify_roots=verify_roots,
     ).build()
-    _, first = algorithm.run()
-    _, second = algorithm.run()
-    np.testing.assert_array_equal(first, second)
+    algorithm.run()
+    assert len(calls) == n_solves
+
+
+def test_window_inside_a_level_is_not_a_miss(monkeypatch):
+    # Three roots of a fourfold level: the fourth copy lies outside the window at
+    # exactly the top root, which the check must accept without re-solving.
+    rng = np.random.default_rng(2)
+    hamiltonian = QubitOperator()
+    for _ in range(30):
+        i, j = sorted(rng.choice(8, 2, replace=False))
+        a, b = rng.choice(list("XZ"), 2)
+        hamiltonian += QubitOperator(f"{a}{i} {b}{j}", float(rng.normal()))
+    calls = []
+    eigsh = scipy.sparse.linalg.eigsh
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs["k"])
+        assert len(calls) <= 2, "re-solved"
+        return eigsh(*args, **kwargs)
+
+    monkeypatch.setattr(qsci_module, "_DENSE_EIGH_MAX_DIM", 1)
+    monkeypatch.setattr(qsci_module.scipy.sparse.linalg, "eigsh", counting)
+    configurations = list(itertools.product((0, 1), repeat=10))
+    QSCI(hamiltonian, distribution=_uniform(configurations), n_roots=3).build().run()
+    assert calls == [3, 1]
 ```
