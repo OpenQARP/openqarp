@@ -391,8 +391,9 @@ def test_solve_refuses_more_roots_than_configurations():
 
 @pytest.mark.parametrize(("letters", "seed"), [("XZ", 2), ("XYZ", 0)])
 def test_sparse_path_degenerate_roots(monkeypatch, letters, seed):
-    """Qubits 8 and 9 are idle, so every level is at least fourfold degenerate;
-    without guard roots ARPACK skips a copy on these seeds.  XYZ is complex."""
+    """Qubits 8 and 9 are idle, so every level is at least fourfold degenerate and
+    the three roots share one level.  XYZ is complex: eigs leaves its copies
+    non-orthonormal."""
     rng = np.random.default_rng(seed)
     hamiltonian = QubitOperator()
     for _ in range(30):
@@ -613,6 +614,100 @@ def test_zero_projected_hamiltonian_on_sparse_path():
     zero_energies, zero_vectors = qsci_module._eigensolve(stored_zero, 2)
     np.testing.assert_array_equal(zero_energies, np.zeros(2))
     np.testing.assert_allclose(zero_vectors.T @ zero_vectors, np.eye(2))
+
+
+def test_sparse_path_ring_degenerate_roots():
+    # The periodic 8-site ring at U = 4 with (4, 3) electrons: dimension 3920 is
+    # above the dense cutoff, and the lowest four roots are two twofold levels.
+    hamiltonian = fermi_hubbard([8], 1.0, 4.0, periodic=True)
+    configurations = _sector_configurations(16, 4, 3)
+    algorithm = QSCI(
+        hamiltonian, distribution=_uniform(configurations), n_electrons=(4, 3), n_roots=4
+    ).build()
+    energies, _ = algorithm.run()
+    index = [bits_to_label(bits) for bits in configurations]
+    block = hamiltonian.sparse_matrix(16)[index][:, index].toarray()
+    np.testing.assert_allclose(energies, scipy.linalg.eigvalsh(block)[:4], atol=1e-10)
+
+
+def test_sparse_path_eightfold_level():
+    # 2-local terms on qubits 0-7 of 11: every level is eightfold degenerate, at
+    # dimension 2048.  The check must start fresh: from the solve's own start it
+    # misses a copy on this seed.
+    rng = np.random.default_rng(10)
+    hamiltonian = QubitOperator()
+    for _ in range(30):
+        i, j = sorted(rng.choice(8, 2, replace=False))
+        a, b = rng.choice(list("XZ"), 2)
+        hamiltonian += QubitOperator(f"{a}{i} {b}{j}", float(rng.normal()))
+    configurations = list(itertools.product((0, 1), repeat=11))
+    algorithm = QSCI(hamiltonian, distribution=_uniform(configurations), n_roots=8).build()
+    energies, _ = algorithm.run()
+    dense = hamiltonian.sparse_matrix(11).toarray()
+    np.testing.assert_allclose(energies, scipy.linalg.eigvalsh(dense)[:8], atol=1e-10)
+
+
+@pytest.mark.parametrize(
+    ("verify_roots", "n_roots", "n_solves"), [(True, 2, 2), (False, 2, 1), (True, 1, 1)]
+)
+def test_verify_roots_sets_the_extra_solve(monkeypatch, verify_roots, n_roots, n_solves):
+    # The open 4-site chain at (2, 2) is nondegenerate, so the check finds nothing
+    # and never re-solves; a single root is never checked.
+    calls = []
+    eigsh = scipy.sparse.linalg.eigsh
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs["k"])
+        return eigsh(*args, **kwargs)
+
+    monkeypatch.setattr(qsci_module, "_DENSE_EIGH_MAX_DIM", 1)
+    monkeypatch.setattr(qsci_module.scipy.sparse.linalg, "eigsh", counting)
+    configurations = _sector_configurations(8, 2, 2)
+    algorithm = QSCI(
+        fermi_hubbard([4], 1.0, 4.0),
+        distribution=_uniform(configurations),
+        n_electrons=(2, 2),
+        n_roots=n_roots,
+        verify_roots=verify_roots,
+    ).build()
+    algorithm.run()
+    assert len(calls) == n_solves
+
+
+def test_missed_root_retries_are_capped(monkeypatch):
+    # A check that always fires must stop at the cap, not climb to k = dim - 2.
+    monkeypatch.setattr(qsci_module, "_DENSE_EIGH_MAX_DIM", 1)
+    monkeypatch.setattr(qsci_module, "_MAX_ROOT_RETRIES", 2)
+    monkeypatch.setattr(qsci_module, "_missed_root", lambda *args: True)
+    algorithm = QSCI(
+        fermi_hubbard([4], 1.0, 4.0),
+        distribution=_uniform(_sector_configurations(8, 2, 2)),
+        n_electrons=(2, 2),
+        n_roots=2,
+    ).build()
+    with pytest.raises(RuntimeError, match="after 2 retries"):
+        algorithm.run()
+
+
+def test_window_inside_a_level_is_not_a_miss():
+    """Three copies of a fourfold level: the fourth lies outside the window at
+    exactly the top root, which is not a miss; two copies and the next level are.
+    Exact eigenvectors, because whether ARPACK's own solve misses depends on the
+    platform's BLAS."""
+    rng = np.random.default_rng(2)
+    hamiltonian = QubitOperator()
+    for _ in range(30):
+        i, j = sorted(rng.choice(8, 2, replace=False))
+        a, b = rng.choice(list("XZ"), 2)
+        hamiltonian += QubitOperator(f"{a}{i} {b}{j}", float(rng.normal()))
+    matrix = qsci_module._hermitian_real(
+        qsci_module._subspace_matrix(hamiltonian, list(range(1 << 10)))
+    )
+    values, vectors = scipy.linalg.eigh(matrix.toarray())
+    assert values[3] - values[0] < 1e-10 < values[4] - values[3]  # one fourfold level
+    v0 = np.random.default_rng(0).standard_normal(matrix.shape[0])
+    assert not qsci_module._missed_root(matrix, vectors[:, :3], values[2], v0)
+    assert qsci_module._missed_root(matrix, vectors[:, [0, 1, 4]], values[4], v0)
 
 
 # ── Build, pooling and run-state edge cases ──────────────────────────────

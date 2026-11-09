@@ -2856,7 +2856,10 @@ ties broken by ascending LSB label. Out-of-sector samples raise a
 **Solve.** The subspace Hamiltonian is built by walking Pauli terms, so no
 :math:`2^n` object is formed. Up to 2000 configurations it is diagonalized
 densely with ``scipy.linalg.eigh``, and above that with ARPACK's ``eigsh``, for
-the ``n_roots`` lowest eigenpairs. ``run()`` returns ``(energies,
+the ``n_roots`` lowest eigenpairs. ARPACK can skip a copy of a degenerate level,
+so with ``n_roots > 1`` one extra single-root solve checks for a skipped copy,
+and the solve is repeated with one more root if it finds one;
+``verify_roots=False`` turns the check off. ``run()`` returns ``(energies,
 coefficients)``, as ``QSE`` does, and sets ``energies``, ``coefficients`` (row
 ``i`` is the amplitude on ``configurations[i]``), ``configurations``,
 ``distribution`` (the pooled samples before any filter or cut, normalized to

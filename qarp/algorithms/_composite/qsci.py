@@ -36,9 +36,9 @@ from .composite_algorithm import CompositeAlgorithm
 # Dense ``eigh`` up to this subspace dimension, ARPACK ``eigsh`` above it.
 _DENSE_EIGH_MAX_DIM = 2000
 
-# Guard roots ARPACK computes and discards when n_roots > 1: started from one
-# vector, it can skip a copy of a degenerate level at the edge of the window.
-_EIGSH_PAD = 4
+# Re-solves allowed after the missed-root check fires.  Each one grows ARPACK's k,
+# and with it its memory.
+_MAX_ROOT_RETRIES = 30
 
 # External distributions only: exact sampling prunes probabilities <= 1e-12,
 # so a primitive's own result can legitimately fall short by more than this.
@@ -93,16 +93,22 @@ class QSCI(CompositeAlgorithm):
             a ``QubitOperator`` it is optional and asserts a Jordan-Wigner
             occupation basis; ``None`` means no sector filter.
         n_roots: Number of lowest eigenpairs to return.  On a degenerate level
-            the vectors are some orthonormal basis of it.  Above a subspace
-            dimension of 2000 the solver is ARPACK, which can skip a copy of a
-            degenerate level and return the next level instead.  For
-            ``n_roots > 1`` it computes 4 extra roots and discards them, which
-            covers low degeneracies; a level with many copies can still be
-            skipped, so request more roots than needed and keep the lowest.
+            the vectors are orthonormal but otherwise arbitrary.
+        verify_roots: Above a subspace dimension of 2000 the solver is ARPACK,
+            which can skip a copy of a degenerate level and return the next
+            level instead.  With ``n_roots > 1``, ``True`` runs one extra
+            single-root solve that detects a skipped copy, and re-solves with
+            one more root until none is skipped, raising ``RuntimeError``
+            after 30 re-solves.  ``False`` saves that solve, but a skipped
+            copy then goes unnoticed: the energies and vectors can be wrong
+            without any warning.
         primitive: A ``Sampler`` measuring every qubit in register order; a
             default ``Sampler()`` when ``ket`` is given.  Must be ``None`` with
-            ``distribution``.  ``build()`` copies it once per block, so a later
-            change to ``primitive`` takes effect only after a rebuild.
+            ``distribution``.  It is copied at construction, so later changes
+            to the caller's object never reach a run.  ``build()`` gives each
+            block a copy of ``self.primitive`` sharing its ``initial_state``: an
+            in-place edit of that array reaches the next ``run()``; a new array,
+            or any other change to ``self.primitive``, only the next ``build()``.
         engine: Execution engine for ``ket``.
         verbose: Print a one-line summary after each run.
 
@@ -137,6 +143,7 @@ class QSCI(CompositeAlgorithm):
         prob_threshold: Optional[float] = None,
         n_electrons: Optional[tuple[int, int]] = None,
         n_roots: int = 1,
+        verify_roots: bool = True,
         primitive: Optional[PrimitiveAlgorithm] = None,
         engine: Optional[Engine] = None,
         verbose: bool = False,
@@ -208,6 +215,7 @@ class QSCI(CompositeAlgorithm):
         self.max_subspace_dim = max_subspace_dim
         self.prob_threshold = prob_threshold
         self.n_roots = n_roots
+        self.verify_roots = verify_roots
         self.verbose = verbose
         self.energies: Optional[NDArray[np.float64]] = None
         self.coefficients: Optional[NDArray] = None
@@ -331,7 +339,7 @@ class QSCI(CompositeAlgorithm):
         if len(set(sorted_labels)) != len(sorted_labels):
             raise ValueError("configurations contain duplicates")
         matrix = _hermitian_real(_subspace_matrix(qubit_hamiltonian, sorted_labels))
-        energies, vectors = _eigensolve(matrix, self.n_roots)
+        energies, vectors = _eigensolve(matrix, self.n_roots, self.verify_roots)
         coefficients = np.empty_like(vectors)
         coefficients[order] = vectors
         return energies, coefficients
@@ -623,14 +631,32 @@ def _hermitian_real(matrix: scipy.sparse.csr_matrix) -> scipy.sparse.csr_matrix:
     return matrix
 
 
+def _missed_root(
+    matrix: scipy.sparse.csr_matrix, vectors: NDArray, top: float, v0: NDArray
+) -> bool:
+    """True if an eigenvalue below ``top`` lies outside ``span(vectors)``.
+
+    ``span(vectors)`` is invariant, so shifting it above the spectral width leaves
+    the rest of the spectrum lowest: one single-root solve decides.
+    """
+    shift = 2.0 * float(abs(matrix).sum(axis=1).max())  # at least the spectral width
+    deflated = scipy.sparse.linalg.LinearOperator(
+        matrix.shape,
+        matvec=lambda x: matrix @ x + shift * (vectors @ (vectors.conj().T @ x)),
+        dtype=matrix.dtype,
+    )
+    lowest = scipy.sparse.linalg.eigsh(deflated, k=1, which="SA", v0=v0)[0][0]
+    return bool(lowest < top - 1e-8 * max(1.0, abs(top)))
+
+
 def _eigensolve(
-    matrix: scipy.sparse.csr_matrix, n_roots: int
+    matrix: scipy.sparse.csr_matrix, n_roots: int, verify: bool = True
 ) -> tuple[NDArray[np.float64], NDArray]:
     """Lowest ``n_roots`` eigenpairs, ascending: dense ``eigh`` or ARPACK ``eigsh``.
 
     ARPACK refuses ``n_roots >= dim - 1`` for complex matrices, so that goes dense
-    regardless of size.  Above the cutoff, the ``_EIGSH_PAD`` guard roots reduce,
-    not remove, the chance of skipping a copy of a degenerate level.
+    regardless of size.  Above the cutoff, ``verify`` re-solves with one more root
+    while ``_missed_root`` finds a skipped copy of a degenerate level.
     """
     dim = matrix.shape[0]
     if n_roots > dim:
@@ -641,14 +667,27 @@ def _eigensolve(
     if dim <= _DENSE_EIGH_MAX_DIM or n_roots >= dim - 1:
         energies, vectors = scipy.linalg.eigh(matrix.toarray(), subset_by_index=[0, n_roots - 1])
     else:
-        # dim - 2 is the largest k ARPACK takes for complex input.
-        k = n_roots if n_roots == 1 else min(n_roots + _EIGSH_PAD, dim - 2)
-        # A fixed start, so the same input gives the same roots.
-        v0 = np.random.default_rng(0).standard_normal(dim)
-        energies, vectors = scipy.sparse.linalg.eigsh(matrix, k=k, which="SA", v0=v0)
-        order = np.argsort(energies)[:n_roots]
-        # Complex input goes to eigs, whose copies of a degenerate level are not
-        # orthonormal.
-        vectors, _ = np.linalg.qr(vectors[:, order])
-        energies = energies[order]
+        # One seeded generator, a fresh start per ARPACK call: the same input gives
+        # the same roots, and a start already used cannot reach the copy its solve
+        # missed.  dim - 2 is the largest k ARPACK takes for complex input.
+        rng = np.random.default_rng(0)
+        for k in range(n_roots, min(n_roots + _MAX_ROOT_RETRIES, dim - 2) + 1):
+            energies, vectors = scipy.sparse.linalg.eigsh(
+                matrix, k=k, which="SA", v0=rng.standard_normal(dim)
+            )
+            order = np.argsort(energies)[:n_roots]
+            # Complex input goes to eigs, whose copies of a degenerate level are not
+            # orthonormal.
+            vectors, _ = np.linalg.qr(vectors[:, order])
+            energies = energies[order]
+            if n_roots == 1 or not verify:
+                break
+            if not _missed_root(matrix, vectors, energies[-1], rng.standard_normal(dim)):
+                break
+        else:
+            raise RuntimeError(
+                f"QSCI: ARPACK still skips a copy of a degenerate level after "
+                f"{k - n_roots} retries.  Pass verify_roots=False to accept that risk, or "
+                f"keep at most {_DENSE_EIGH_MAX_DIM} configurations for the exact dense solver."
+            )
     return np.asarray(energies, dtype=np.float64), vectors
