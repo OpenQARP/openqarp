@@ -21,5 +21,6 @@ from .montecarlo import MonteCarlo, WalkerState
 from .mmqcels import MMQCELS
 from .qmegs import QMEGS, get_overlaps
 from .qse import QSE
+from .qsci import QSCI
 from .qite import QITE
 from .shor import Shor
