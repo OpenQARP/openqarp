@@ -196,8 +196,7 @@ def diagonal_pauli_vector(
         pairs = diag.reshape(-1, 2, half)
         low = pairs[:, 0, :].copy()
         pairs[:, 0, :] += pairs[:, 1, :]
-        pairs[:, 1, :] *= -1
-        pairs[:, 1, :] += low
+        np.subtract(low, pairs[:, 1, :], out=pairs[:, 1, :])
         half *= 2
     return diag
 
@@ -242,7 +241,7 @@ class StateVector(PrimitiveAlgorithm):
         # Z-only observables evaluate as one vector pass over their diagonal.
         # Built on first use (_diagonal_at), never at build: CudaqEngine's
         # expectation path contracts on device and never reads it.
-        self._diagonal: bool = False
+        self._z_only: bool = False
         self._diag: Optional[np.ndarray] = None
         # Pauli-sum list in the simulator observable format, built once here
         # rather than per evaluation: for a 2000-term operator the conversion
@@ -302,17 +301,21 @@ class StateVector(PrimitiveAlgorithm):
             Target.EXPECTATION_VALUE,
             Target.TRANSITION_AMPLITUDE,
         )
-        self._diagonal = contracts_operator and _is_z_only(self.operator)
+        self._z_only = contracts_operator and _is_z_only(self.operator)
         self._diag = None
-        if self._diagonal:
+        if self._z_only:
             # A non-numeric coefficient fails here, not at the first run.
-            for coeff in self.operator.terms.values():
-                complex(coeff)
+            for term, coeff in self.operator.terms.items():
+                try:
+                    complex(coeff)
+                except TypeError as err:
+                    raise TypeError(
+                        f"StateVector: Z-only operator term {term} has non-numeric "
+                        f"coefficient {coeff!r}"
+                    ) from err
         self._observable = (
             qx.qubit_operator_to_observable(self.operator)
-            if contracts_operator
-            and not self._diagonal
-            and isinstance(self.operator, QubitOperator)
+            if contracts_operator and not self._z_only and isinstance(self.operator, QubitOperator)
             else None
         )
 
@@ -385,7 +388,7 @@ class StateVector(PrimitiveAlgorithm):
             ket_c = np.ascontiguousarray(ket_sv, dtype=np.complex128)
             return complex(transition(bra_c, ket_c, n_qubits, self._observable))
 
-        diag = self._diagonal_at(n_qubits) if self._diagonal else None
+        diag = self._diagonal_at(n_qubits) if self._z_only else None
 
         def sv(idx: int) -> np.ndarray:
             # initial_state seeds ket-side circuits only: index 0 always, and

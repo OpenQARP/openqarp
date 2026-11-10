@@ -173,7 +173,7 @@ All notable changes to OpenQARP are recorded here. The format follows
   in O(n·2^n) with float64 storage for real coefficients, and later runs
   reuse it; `CudaqEngine`'s expectation path never builds it.  At 20 qubits
   and 435 terms a build drops from 1.7 s to under a millisecond and the
-  diagonal takes 24 ms.
+  diagonal takes 24 ms on a laptop.
 - `typing.get_type_hints` resolves annotations that use `PrimitiveResult`,
   among them `Engine.run` and `Engine.batch_run`, instead of raising
   `NameError`.  `isinstance(x, qarp.PrimitiveResult)` works for a

@@ -359,8 +359,8 @@ def _z_operator(rng, op_width, n_terms, *, constant=False, complex_index=None):
     return op
 
 
-# (n_terms, constant, op_width, n_qubits): term counts below, at and above
-# n_qubits, the full Z-subset basis, and padding qubits beyond the operator.
+# (n_terms, constant, op_width, n_qubits): sparse operators, the full Z-subset
+# basis, and padding qubits beyond the operator.
 _DIAG_CASES = [
     (2, False, 6, 6),
     (5, False, 6, 6),
@@ -388,7 +388,7 @@ def test_diagonal_pauli_vector_real_matches_dense_float64(n_terms, constant, op_
     np.testing.assert_allclose(d, _dense_diagonal(op, n_qubits).real, rtol=0, atol=1e-12)
 
 
-@pytest.mark.parametrize("n_terms", [2, 9], ids=["T-lt-n", "T-gt-n"])
+@pytest.mark.parametrize("n_terms", [2, 9])
 def test_diagonal_pauli_vector_complex_coefficient_matches_dense(n_terms):
     from qarp.algorithms._primitives.state_vector import diagonal_pauli_vector
 
@@ -400,7 +400,7 @@ def test_diagonal_pauli_vector_complex_coefficient_matches_dense(n_terms):
     np.testing.assert_allclose(d, _dense_diagonal(op, n_qubits), rtol=0, atol=1e-12)
 
 
-@pytest.mark.parametrize("n_terms", [1, 4], ids=["T-lt-n", "T-gt-n"])
+@pytest.mark.parametrize("n_terms", [1, 4])
 def test_diagonal_pauli_vector_rejects_qubit_beyond_width(n_terms):
     from qarp.algorithms._primitives.state_vector import diagonal_pauli_vector
 
@@ -411,12 +411,34 @@ def test_diagonal_pauli_vector_rejects_qubit_beyond_width(n_terms):
         diagonal_pauli_vector(op, 3)
 
 
+@pytest.mark.parametrize(
+    "spec, n_qubits, want",
+    [
+        ([("Z0", 1.0)], 2, [1, -1, 1, -1]),
+        (
+            [("Z0 Z1", 0.7), ("Z2", -1.3), ("", 0.25)],
+            3,
+            [-0.35, -1.75, -1.75, -0.35, 2.25, 0.85, 0.85, 2.25],
+        ),
+    ],
+    ids=["Z0-n2", "ZZ-Z-const-n3"],
+)
+def test_diagonal_pauli_vector_lsb_anchors(spec, n_qubits, want):
+    """Hand-computed diagonals: entry k has qubit q at bit q of k."""
+    from qarp.algorithms._primitives.state_vector import diagonal_pauli_vector
+
+    op = QubitOperator()
+    for label, coeff in spec:
+        op += QubitOperator(label, coeff)
+    np.testing.assert_allclose(diagonal_pauli_vector(op, n_qubits), want, rtol=0, atol=1e-12)
+
+
 def test_state_vector_symbolic_diagonal_coefficient_fails_at_build():
     import sympy
 
     op = QubitOperator("Z0", sympy.Symbol("a")) + QubitOperator("Z1", 0.5)
     sv = StateVector(operator=op, ket=HnBlock(2).build())
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="non-numeric coefficient"):
         sv.build()
 
 
@@ -424,7 +446,7 @@ def test_state_vector_diagonal_at_recomputes_per_width():
     op = QubitOperator("Z0 Z1", 0.7) + QubitOperator("Z2", -1.3) + QubitOperator("", 0.25)
     sv = StateVector(operator=op, ket=HnBlock(3).build())
     sv.build()
-    assert sv._diagonal is True
+    assert sv._z_only is True
     assert sv._diag is None
 
     d3 = sv._diagonal_at(3)
