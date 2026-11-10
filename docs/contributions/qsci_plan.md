@@ -349,8 +349,8 @@ never at module scope.
 | **R1** The arbitrary-width build forced onto the two-site Hubbard model | analytic, `(U − √(U² + 16t²)) / 2` | `…::test_wide_build_matches_closed_form` |
 | **R2** QSCI's own exact-sampling pool, short of unit mass before normalisation, replays through `distribution=` with identical configurations and energy | analytic, ⟨Z0⟩ = +1 on the all-zero state | `…::test_exact_sampling_output_is_reusable` |
 | **R3** An identically zero projected Hamiltonian above the dense cutoff, and a matrix with an explicitly stored zero | analytic: zero eigenvalues, orthonormal columns, zero residual | `…::test_zero_projected_hamiltonian_on_sparse_path` |
-| Sparse path on degenerate levels (Deviations log): three roots inside a fourfold level, real and complex, with residuals, orthonormality and the same vectors on a second run; the 8-site ring at U = 4, (4, 3), four roots over two twofold levels at dimension 3920; eight roots of an eightfold level | dense `eigvalsh` of `sparse_matrix()` | `…::test_sparse_path_degenerate_roots`, `…::test_sparse_path_ring_degenerate_roots`, `…::test_sparse_path_eightfold_level` |
-| The missed-root check (Deviations log): one extra single-root solve with `n_roots > 1`, none with `verify_roots=False` or one root; on exact eigenvectors, a window inside a fourfold level is not a miss, and two copies plus the next level are | call count; dense `eigh` | `…::test_verify_roots_sets_the_extra_solve`, `…::test_window_inside_a_level_is_not_a_miss` |
+| Sparse path on degenerate levels (Deviations log): three roots inside a fourfold level, real and complex, with residuals, orthonormality and the same vectors on a second run; the 8-site ring at U = 4, (4, 3), four roots over two twofold levels at dimension 3920; eight roots of an eightfold level, real and complex | dense `eigvalsh` of `sparse_matrix()` | `…::test_sparse_path_degenerate_roots`, `…::test_sparse_path_ring_degenerate_roots`, `…::test_sparse_path_eightfold_level` |
+| The missed-root check (Deviations log): one extra single-root solve with `n_roots > 1`, none with `verify_roots=False` or one root; on exact eigenvectors, a window inside a fourfold level is not a miss, and two copies plus the next level are; a check that always fires raises after the cap | call count; dense `eigh`; contract | `…::test_verify_roots_sets_the_extra_solve`, `…::test_window_inside_a_level_is_not_a_miss`, `…::test_missed_root_retries_are_capped` |
 | **P2** ENPT2 equals the brute-force sum over configurations outside the subspace of `abs((Hc)_a)² / (E − H_aa)`: from a non-Hartree-Fock multi-determinant reference, so singles contribute, and on the complete subspace, where both are zero. A determinant missing from the FOIS shows up as a missing contribution | dense matrix, independent of the connectivity generator | `…::test_pt2_matches_dense_brute_force` |
 | **P2** H2 from a Hartree-Fock-only subspace, augmented with `fois_configurations`, returns the FCI energy; `QSCI(expand_fois=True)` produces the same basis after the selection cap | pyscf `fci.FCI` and the independently generated FOIS | `…::test_fois_augmentation` |
 | **P2** Sigma build equals the Phase 1 Pauli-walk build's matrix-vector product on random vectors | Phase 1 build, itself validated against pyscf and analytic energies | `…::test_sigma_build_matches_pauli_walk` |
@@ -586,7 +586,7 @@ Deviations from the plan, folded back here.
   a degenerate level and return the next level, with clean residuals. With
   `n_roots > 1`, one extra single-root solve on `H + σVV†` detects a skipped copy,
   and the solve repeats with one more root until none is found, raising after 30
-  re-solves. Starts are seeded
-  and vectors get a QR. `verify_roots=False` skips the check, which costs about
-  one extra solve. Phase 2's matrix-free shift: twice the sum of absolute
+  re-solves. Starts are seeded and vectors get a QR. `verify_roots=False` skips
+  the check and its cost: one single-root solve on the deflated matrix, up to about
+  four times a plain one. Phase 2's matrix-free shift: twice the sum of absolute
   non-identity Pauli coefficients.

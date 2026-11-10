@@ -99,9 +99,10 @@ class QSCI(CompositeAlgorithm):
             level instead.  With ``n_roots > 1``, ``True`` runs one extra
             single-root solve that detects a skipped copy, and re-solves with
             one more root until none is skipped, raising ``RuntimeError``
-            after 30 re-solves.  ``False`` saves that solve, but a skipped
-            copy then goes unnoticed: the energies and vectors can be wrong
-            without any warning.
+            after 30 re-solves.  A level less than ``1e-8 * max(1, |top|)``
+            below the top root counts as the top root's level.  ``False``
+            saves that solve, but a skipped copy then goes unnoticed: the
+            energies and vectors can be wrong without any warning.
         primitive: A ``Sampler`` measuring every qubit in register order; a
             default ``Sampler()`` when ``ket`` is given.  Must be ``None`` with
             ``distribution``.  It is copied at construction, so later changes
@@ -656,7 +657,8 @@ def _eigensolve(
 
     ARPACK refuses ``n_roots >= dim - 1`` for complex matrices, so that goes dense
     regardless of size.  Above the cutoff, ``verify`` re-solves with one more root
-    while ``_missed_root`` finds a skipped copy of a degenerate level.
+    while ``_missed_root`` finds a skipped copy of a degenerate level, and raises
+    after ``_MAX_ROOT_RETRIES`` re-solves.
     """
     dim = matrix.shape[0]
     if n_roots > dim:
@@ -687,7 +689,7 @@ def _eigensolve(
         else:
             raise RuntimeError(
                 f"QSCI: ARPACK still skips a copy of a degenerate level after "
-                f"{k - n_roots} retries.  Pass verify_roots=False to accept that risk, or "
-                f"keep at most {_DENSE_EIGH_MAX_DIM} configurations for the exact dense solver."
+                f"{k - n_roots} re-solves.  Pass verify_roots=False to accept that risk, or "
+                f"set max_subspace_dim <= {_DENSE_EIGH_MAX_DIM} for the exact dense solver."
             )
     return np.asarray(energies, dtype=np.float64), vectors

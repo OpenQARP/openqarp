@@ -2858,10 +2858,11 @@ ties broken by ascending LSB label. Out-of-sector samples raise a
 densely with ``scipy.linalg.eigh``, and above that with ARPACK's ``eigsh``, for
 the ``n_roots`` lowest eigenpairs. ARPACK can skip a copy of a degenerate level,
 so with ``n_roots > 1`` one extra single-root solve checks for a skipped copy,
-and the solve is repeated with one more root if it finds one;
-``verify_roots=False`` turns the check off. ``run()`` returns ``(energies,
-coefficients)``, as ``QSE`` does, and sets ``energies``, ``coefficients`` (row
-``i`` is the amplitude on ``configurations[i]``), ``configurations``,
+and the solve is repeated with one more root while it finds one, raising
+``RuntimeError`` after 30 re-solves; ``verify_roots=False`` turns the check
+off. ``run()`` returns ``(energies, coefficients)``, as ``QSE`` does, and sets
+``energies``, ``coefficients`` (row ``i`` is the amplitude on
+``configurations[i]``), ``configurations``,
 ``distribution`` (the pooled samples before any filter or cut, normalized to
 unit total mass so they can be passed straight back as ``distribution=``),
 ``in_sector_mass`` and ``rejected``.

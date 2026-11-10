@@ -630,15 +630,17 @@ def test_sparse_path_ring_degenerate_roots():
     np.testing.assert_allclose(energies, scipy.linalg.eigvalsh(block)[:4], atol=1e-10)
 
 
-def test_sparse_path_eightfold_level():
+@pytest.mark.parametrize(("letters", "seed"), [("XZ", 10), ("XYZ", 0)])
+def test_sparse_path_eightfold_level(letters, seed):
     # 2-local terms on qubits 0-7 of 11: every level is eightfold degenerate, at
     # dimension 2048.  The check must start fresh: from the solve's own start it
-    # misses a copy on this seed.
-    rng = np.random.default_rng(10)
+    # misses a copy on the XZ seed.  XYZ is complex, so the check's projector
+    # needs the conjugate.
+    rng = np.random.default_rng(seed)
     hamiltonian = QubitOperator()
     for _ in range(30):
         i, j = sorted(rng.choice(8, 2, replace=False))
-        a, b = rng.choice(list("XZ"), 2)
+        a, b = rng.choice(list(letters), 2)
         hamiltonian += QubitOperator(f"{a}{i} {b}{j}", float(rng.normal()))
     configurations = list(itertools.product((0, 1), repeat=11))
     algorithm = QSCI(hamiltonian, distribution=_uniform(configurations), n_roots=8).build()
@@ -685,7 +687,7 @@ def test_missed_root_retries_are_capped(monkeypatch):
         n_electrons=(2, 2),
         n_roots=2,
     ).build()
-    with pytest.raises(RuntimeError, match="after 2 retries"):
+    with pytest.raises(RuntimeError, match="after 2 re-solves"):
         algorithm.run()
 
 
