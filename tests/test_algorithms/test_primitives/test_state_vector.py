@@ -341,6 +341,106 @@ def test_diag_fast_path_matches_pauli_expectation():
     assert complex(np.vdot(ket, d * ket)) == pytest.approx(pauli_expectation(ket, ket, op, n))
 
 
+def _dense_diagonal(op, n_qubits):
+    return np.diag(np.asarray(op.sparse_matrix(n_qubits).toarray(), dtype=complex))
+
+
+def _z_operator(rng, op_width, n_terms, *, constant=False, complex_index=None):
+    """``n_terms`` distinct Z-strings on qubits ``< op_width``, coefficients
+    complex-typed; only the term at ``complex_index`` has an imaginary part."""
+    masks = rng.choice(np.arange(1, 1 << op_width), size=n_terms, replace=False)
+    op = QubitOperator()
+    for i, mask in enumerate(masks):
+        term = tuple((q, "Z") for q in range(op_width) if (int(mask) >> q) & 1)
+        imag = float(rng.normal()) if i == complex_index else 0.0
+        op += QubitOperator(term, complex(float(rng.normal()), imag))
+    if constant:
+        op += QubitOperator("", complex(float(rng.normal()), 0.0))
+    return op
+
+
+# (n_terms, constant, op_width, n_qubits): term counts below, at and above
+# n_qubits, the full Z-subset basis, and padding qubits beyond the operator.
+_DIAG_CASES = [
+    (2, False, 6, 6),
+    (5, False, 6, 6),
+    (5, True, 6, 6),
+    (6, False, 6, 6),
+    (63, True, 6, 6),
+    (2, False, 3, 6),
+    (7, True, 3, 6),
+]
+
+
+@pytest.mark.parametrize(
+    "n_terms, constant, op_width, n_qubits",
+    _DIAG_CASES,
+    ids=[f"T{t}{'+c' if c else ''}-w{w}-n{n}" for t, c, w, n in _DIAG_CASES],
+)
+def test_diagonal_pauli_vector_real_matches_dense_float64(n_terms, constant, op_width, n_qubits):
+    from qarp.algorithms._primitives.state_vector import diagonal_pauli_vector
+
+    rng = np.random.default_rng(100 + n_terms + op_width)
+    op = _z_operator(rng, op_width, n_terms, constant=constant)
+    d = diagonal_pauli_vector(op, n_qubits)
+    assert d.dtype == np.float64
+    assert d.shape == (1 << n_qubits,)
+    np.testing.assert_allclose(d, _dense_diagonal(op, n_qubits).real, rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("n_terms", [2, 9], ids=["T-lt-n", "T-gt-n"])
+def test_diagonal_pauli_vector_complex_coefficient_matches_dense(n_terms):
+    from qarp.algorithms._primitives.state_vector import diagonal_pauli_vector
+
+    rng = np.random.default_rng(7 + n_terms)
+    n_qubits = 4
+    op = _z_operator(rng, n_qubits, n_terms, constant=True, complex_index=1)
+    d = diagonal_pauli_vector(op, n_qubits)
+    assert d.dtype == np.complex128
+    np.testing.assert_allclose(d, _dense_diagonal(op, n_qubits), rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("n_terms", [1, 4], ids=["T-lt-n", "T-gt-n"])
+def test_diagonal_pauli_vector_rejects_qubit_beyond_width(n_terms):
+    from qarp.algorithms._primitives.state_vector import diagonal_pauli_vector
+
+    op = QubitOperator("Z3", 1.0)
+    for q in range(n_terms - 1):
+        op += QubitOperator(f"Z{q}", 0.5)
+    with pytest.raises(ValueError):
+        diagonal_pauli_vector(op, 3)
+
+
+def test_state_vector_symbolic_diagonal_coefficient_fails_at_build():
+    import sympy
+
+    op = QubitOperator("Z0", sympy.Symbol("a")) + QubitOperator("Z1", 0.5)
+    sv = StateVector(operator=op, ket=HnBlock(2).build())
+    with pytest.raises(TypeError):
+        sv.build()
+
+
+def test_state_vector_diagonal_at_recomputes_per_width():
+    op = QubitOperator("Z0 Z1", 0.7) + QubitOperator("Z2", -1.3) + QubitOperator("", 0.25)
+    sv = StateVector(operator=op, ket=HnBlock(3).build())
+    sv.build()
+    assert sv._diagonal is True
+    assert sv._diag is None
+
+    d3 = sv._diagonal_at(3)
+    np.testing.assert_allclose(d3, _dense_diagonal(op, 3).real, rtol=0, atol=1e-12)
+    assert sv._diagonal_at(3) is d3
+
+    d5 = sv._diagonal_at(5)
+    assert d5.shape == (32,)
+    np.testing.assert_allclose(d5, _dense_diagonal(op, 5).real, rtol=0, atol=1e-12)
+    assert sv._diag is d5
+    assert sv._diagonal_at(5) is d5
+
+    with pytest.raises(ValueError):
+        sv._diagonal_at(2)
+
+
 # ── Circuit-valued (Block) operators: ⟨bra|U|ket⟩ via vdot(sv(bra), sv(ket∘U)) ─
 
 

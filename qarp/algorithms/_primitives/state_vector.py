@@ -146,6 +146,13 @@ def _operator_width(operator: QubitOperator) -> int:
     return max((q + 1 for term in operator.terms for q, _ in term), default=0)
 
 
+def _is_z_only(operator) -> bool:
+    """True for a ``QubitOperator`` whose every term is ``Z`` / identity."""
+    return isinstance(operator, QubitOperator) and all(
+        p == "Z" for term in operator.terms for _, p in term
+    )
+
+
 def diagonal_pauli_vector(
     operator: Optional[QubitOperator],
     n_qubits: int,
@@ -155,31 +162,43 @@ def diagonal_pauli_vector(
     Returns the vector ``d`` with ``operator == diag(d)`` when every Pauli
     term is built from ``Z`` / identity only (e.g. Ising / MaxCut cost
     Hamiltonians).  Returns ``None`` if any term contains ``X`` or ``Y``.
+    ``d`` is float64 when every coefficient is real, complex128 otherwise.
+    It is the Walsh–Hadamard transform of the coefficients placed at their
+    Z-masks: O(n·2^n) time and about two vectors of peak memory for any
+    term count.
 
-    Precomputing ``d`` once turns every subsequent expectation into a single
-    ``⟨bra| d·ket⟩`` pass instead of a per-term sweep — the dominant cost of
-    QAOA-style objective evaluations at larger qubit counts.
+    Raises:
+        ValueError: a term acts on a qubit ``>= n_qubits``.
     """
-    if operator is None:
+    if operator is None or not _is_z_only(operator):
         return None
-    for term, _ in operator.terms.items():
-        if any(p != "Z" for _, p in term):
-            return None
 
-    dim = 1 << n_qubits
-    idx = np.arange(dim, dtype=np.int64)
-    diag = np.zeros(dim, dtype=complex)
+    masks, coeffs = [], []
     for term, coeff in operator.terms.items():
         z_mask = 0
         for q, _ in term:
+            if q >= n_qubits:
+                raise ValueError(
+                    f"diagonal_pauli_vector: term acts on qubit {q} but n_qubits is {n_qubits}"
+                )
             z_mask |= 1 << q
-        m = idx & z_mask
-        m = m ^ (m >> 16)
-        m = m ^ (m >> 8)
-        m = m ^ (m >> 4)
-        m = m ^ (m >> 2)
-        m = m ^ (m >> 1)
-        diag += coeff * (1.0 - 2.0 * (m & 1).astype(np.float64))
+        masks.append(z_mask)
+        coeffs.append(complex(coeff))
+    values: np.ndarray = np.asarray(coeffs, dtype=np.complex128)
+    if not values.imag.any():
+        values = values.real
+
+    dim = 1 << n_qubits
+    diag = np.zeros(dim, dtype=values.dtype)
+    np.add.at(diag, np.asarray(masks, dtype=np.int64), values)
+    half = 1
+    while half < dim:
+        pairs = diag.reshape(-1, 2, half)
+        low = pairs[:, 0, :].copy()
+        pairs[:, 0, :] += pairs[:, 1, :]
+        pairs[:, 1, :] *= -1
+        pairs[:, 1, :] += low
+        half *= 2
     return diag
 
 
@@ -220,8 +239,10 @@ class StateVector(PrimitiveAlgorithm):
         super().__init__(ket=ket, bra=bra, operator=operator, n_shots=None)
         self.initial_state = initial_state
         self.result: Optional[Union[complex, float]] = None
-        # Z-only observables cache their diagonal at build (see
-        # diagonal_pauli_vector) so run_from_amplitudes is one vector pass per call.
+        # Z-only observables evaluate as one vector pass over their diagonal.
+        # Built on first use (_diagonal_at), never at build: CudaqEngine's
+        # expectation path contracts on device and never reads it.
+        self._diagonal: bool = False
         self._diag: Optional[np.ndarray] = None
         # Pauli-sum list in the simulator observable format, built once here
         # rather than per evaluation: for a 2000-term operator the conversion
@@ -281,15 +302,16 @@ class StateVector(PrimitiveAlgorithm):
             Target.EXPECTATION_VALUE,
             Target.TRANSITION_AMPLITUDE,
         )
-        self._diag = (
-            diagonal_pauli_vector(self.operator, self._eval_n_qubits)
-            if contracts_operator
-            else None
-        )
+        self._diagonal = contracts_operator and _is_z_only(self.operator)
+        self._diag = None
+        if self._diagonal:
+            # A non-numeric coefficient fails here, not at the first run.
+            for coeff in self.operator.terms.values():
+                complex(coeff)
         self._observable = (
             qx.qubit_operator_to_observable(self.operator)
             if contracts_operator
-            and self._diag is None
+            and not self._diagonal
             and isinstance(self.operator, QubitOperator)
             else None
         )
@@ -309,6 +331,18 @@ class StateVector(PrimitiveAlgorithm):
         ):
             circuits.append(self.bra)
         return circuits
+
+    def _diagonal_at(self, n_qubits: int) -> Optional[np.ndarray]:
+        """The Z-only operator's diagonal at ``n_qubits``, cached for the last width.
+
+        An engine may compile onto a device wider than ket and operator;
+        padding qubits stay |0⟩, so the observable extends as identity.
+        """
+        diag = self._diag
+        if diag is None or diag.size != 1 << n_qubits:
+            diag = diagonal_pauli_vector(self.operator, n_qubits)
+            self._diag = diag
+        return diag
 
     def run(self, results: list) -> Union[complex, float]:
         """Convenience entry point: evaluate the build-time compiled circuits.
@@ -351,12 +385,7 @@ class StateVector(PrimitiveAlgorithm):
             ket_c = np.ascontiguousarray(ket_sv, dtype=np.complex128)
             return complex(transition(bra_c, ket_c, n_qubits, self._observable))
 
-        # An engine may compile onto a device wider than ket and operator;
-        # padding qubits stay |0⟩, so the observable extends as identity and
-        # the build-time diagonal must be re-evaluated at the simulated width.
-        diag = self._diag
-        if diag is not None and diag.size != 2**n_qubits:
-            diag = diagonal_pauli_vector(self.operator, n_qubits)
+        diag = self._diagonal_at(n_qubits) if self._diagonal else None
 
         def sv(idx: int) -> np.ndarray:
             # initial_state seeds ket-side circuits only: index 0 always, and

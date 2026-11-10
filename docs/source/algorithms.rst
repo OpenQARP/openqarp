@@ -154,7 +154,8 @@ contraction ``⟨bra|H|ket⟩`` runs in C++ (``QarpSimulator.transition``): the
 Pauli terms are grouped by their X/Y flip pattern and the whole sum is
 evaluated in one pass over the two statevectors, so a 2000-term molecular
 Hamiltonian at 20 qubits costs about 0.1 s on a laptop.  Z-only observables
-(Ising / MaxCut costs) use a cached diagonal instead.  A simulator that only
+(Ising / MaxCut costs) use a diagonal instead, built at the first
+evaluation and cached.  A simulator that only
 provides ``statevector`` (the GPU engine's host path, third-party backends)
 falls back to the numpy sweep ``qarp.algorithms._primitives.state_vector.pauli_expectation``
 with the same result.
