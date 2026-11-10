@@ -397,12 +397,142 @@ def test_state_vector_falls_back_without_transition(monkeypatch):
 
 
 def test_state_vector_diagonal_operator_keeps_diag_path():
-    """Z-only observables keep the build-time diagonal; no observable list."""
+    """Z-only observables take the diagonal path, no observable list; the
+    diagonal itself is built on the first run, not at build."""
     op = QubitOperator(((0, "Z"), (1, "Z")), 1.0) + QubitOperator(((2, "Z"),), 0.5)
     sv = StateVector(operator=op, ket=_hadamard_all(3))
     sv.build()
-    assert sv._diag is not None
+    assert sv._z_only is True
     assert sv._observable is None
+    assert sv._diag is None
+    engine = QarpEngine()
+    engine.build([sv])
+    engine.run()
+    assert sv._diag is not None
+    assert sv._diag.shape == (8,)
+
+
+def _ry_cx_ladder(n_qubits, rng):
+    blk = SimpleBlock(n_qubits, name="ry-cx")
+    for q in range(n_qubits):
+        blk.ry(q, float(rng.uniform(0.2, 2.9)))
+    for q in range(n_qubits - 1):
+        blk.cx(q, q + 1)
+    return blk.build()
+
+
+def _random_z_operator(rng, n_qubits, n_terms):
+    masks = rng.choice(np.arange(1, 1 << n_qubits), size=n_terms, replace=False)
+    op = QubitOperator("", float(rng.normal()))
+    for mask in masks:
+        term = tuple((q, "Z") for q in range(n_qubits) if (int(mask) >> q) & 1)
+        op += QubitOperator(term, float(rng.normal()))
+    return op
+
+
+def _counting_diagonal(monkeypatch):
+    from qarp.algorithms._primitives import state_vector as sv_mod
+
+    calls = []
+    real = sv_mod.diagonal_pauli_vector
+    monkeypatch.setattr(
+        sv_mod,
+        "diagonal_pauli_vector",
+        lambda *a, **k: calls.append(1) or real(*a, **k),
+    )
+    return calls
+
+
+def test_state_vector_diagonal_built_once_on_first_run(monkeypatch):
+    """prim.build() + engine.build() compute no diagonal; the first run
+    computes it once and later runs reuse it."""
+    calls = _counting_diagonal(monkeypatch)
+    rng = np.random.default_rng(21)
+    n_qubits = 5
+    op = _random_z_operator(rng, n_qubits, 12)
+    ket = _ry_cx_ladder(n_qubits, rng)
+
+    sv = StateVector(operator=op, ket=ket)
+    sv.build()
+    engine = QarpEngine()
+    engine.build([sv])
+    assert calls == []
+    assert sv._diag is None
+
+    psi = np.asarray(qx.QarpSimulator().statevector(ket.flatten(), n_qubits))
+    want = _dense(psi, psi, op, n_qubits)
+    assert engine.run()[0] == pytest.approx(want, rel=RTOL, abs=RTOL)
+    assert len(calls) == 1
+    assert engine.run()[0] == pytest.approx(want, rel=RTOL, abs=RTOL)
+    assert len(calls) == 1
+
+
+def test_state_vector_rebuild_drops_stale_diagonal(monkeypatch):
+    """A rebuild after the operator changes evaluates the new operator."""
+    calls = _counting_diagonal(monkeypatch)
+    rng = np.random.default_rng(22)
+    n_qubits = 4
+    ket = _ry_cx_ladder(n_qubits, rng)
+    psi = np.asarray(qx.QarpSimulator().statevector(ket.flatten(), n_qubits))
+
+    sv = StateVector(operator=_random_z_operator(rng, n_qubits, 6), ket=ket)
+    engine = QarpEngine()
+    engine.build([sv])
+    assert calls == []
+    engine.run()
+    assert len(calls) == 1
+
+    op2 = _random_z_operator(rng, n_qubits, 3)
+    sv.operator = op2
+    engine.build([sv])
+    assert len(calls) == 1
+    assert sv._diag is None
+    assert engine.run()[0] == pytest.approx(_dense(psi, psi, op2, n_qubits), rel=RTOL, abs=RTOL)
+    assert len(calls) == 2
+
+
+def _one_qubit(*gates):
+    blk = SimpleBlock(1, name="k")
+    for name, *args in gates:
+        getattr(blk, name)(0, *args)
+    return blk.build()
+
+
+def test_state_vector_diagonal_on_wider_device(monkeypatch):
+    """A 1-qubit ket compiled onto a 4-qubit device: the diagonal is built
+    once at the device width, padding qubits stay |0>, ⟨Z0⟩ = cos θ."""
+    from qarp.devices import Device, get_nearest_neighbour_architecture
+
+    calls = _counting_diagonal(monkeypatch)
+    sv = StateVector(operator=QubitOperator("Z0", 1.0), ket=_one_qubit(("rx", 0.7)))
+    engine = QarpEngine(device=Device(4, architecture=get_nearest_neighbour_architecture(2, 2)))
+    engine.build([sv])
+    for _ in range(2):
+        assert complex(engine.run()[0]) == pytest.approx(np.cos(0.7), abs=1e-12)
+    assert sv._diag.size == 16
+    assert len(calls) == 1
+
+
+def test_state_vector_real_diagonal_in_transition_amplitude():
+    """⟨+|Z|−⟩ = ⟨+|+⟩ = 1 through a float64 diagonal."""
+    sv = StateVector(
+        bra=_one_qubit(("h",)), operator=QubitOperator("Z0", 1.0), ket=_one_qubit(("x",), ("h",))
+    )
+    engine = QarpEngine()
+    engine.build([sv])
+    assert sv.target is Target.TRANSITION_AMPLITUDE
+    assert complex(engine.run()[0]) == pytest.approx(1.0, abs=1e-12)
+    assert sv._diag.dtype == np.float64
+
+
+def test_state_vector_complex_diagonal_in_expectation():
+    """(0.3+0.4i) Z0 on Ry(θ)|0⟩ gives (0.3+0.4i) cos θ through a complex128 diagonal."""
+    coeff = 0.3 + 0.4j
+    sv = StateVector(operator=QubitOperator("Z0", coeff), ket=_one_qubit(("ry", 0.7)))
+    engine = QarpEngine()
+    engine.build([sv])
+    assert complex(engine.run()[0]) == pytest.approx(coeff * np.cos(0.7), abs=1e-12)
+    assert sv._diag.dtype == np.complex128
 
 
 def test_h2_vqe_reaches_fci_through_the_kernel(h2_ev):
