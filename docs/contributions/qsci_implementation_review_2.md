@@ -1,15 +1,253 @@
 # Review of #20 implementation — QSCI, Phase 1, second pass
 
-Code review of `feature/qsci` at `acad366`, which answers `qsci_implementation_review.md`, and of
-`bc00479`, which answers this review: `qarp/algorithms/_composite/qsci.py` and its tests. Gates
-and plan conformance are out of scope. Every snippet below was run against `acad366` with an
-editable install built from it (Python 3.12, OpenMP on), and its output is pasted as printed. The
-checks marked "at `bc00479`" were run on a copy of that commit. Line numbers refer to `acad366`.
+Code review of `feature/qsci` at `acad366`, which answers `qsci_implementation_review.md`, of
+`bc00479`, which answers this review, and of `7c21812`, which answers its action list:
+`qarp/algorithms/_composite/qsci.py` and its tests. Gates and plan conformance are out of scope.
+Every snippet below was run against `acad366` with an editable install built from it (Python
+3.12, OpenMP on), and its output is pasted as printed. The checks marked "at `bc00479`" or "at
+`7c21812`" were run on a copy of that commit. Line numbers refer to `acad366`.
 
 Mutation runs apply one change at a time to a copy of `qsci.py` and run `test_qsci.py` against
 it.
 
+## What to do at `7c21812`
+
+`7c21812` does every action listed for [`bc00479`](#what-to-do-at-bc00479) except the optional
+third. It departs from the review's text in three places, and all three are improvements
+([below](#departures-from-the-review)). Items 1 and 2, one test and five text fixes, are applied
+on the branch on top of `7c21812`; the [diff](#the-fixes-against-7c21812) is at the end of this
+section. With them:
+- `test_qsci.py` passes 69 tests, under both Accelerate and OpenBLAS;
+- `tests/test_docs` passes;
+- ruff, `ruff format` and mypy are clean on the whole tree.
+
+Nothing else blocks the green light. Items 3 and 4 are optional and left to the author.
+
+1. **Applied: test the check on complex input.** The only complex sparse test with
+   `n_roots > 1` is `test_sparse_path_degenerate_roots[XYZ-0]`, and there the check never fires.
+   So a projector without the conjugate, `vectors @ (vectors.T @ x)`, passes all 68 tests.
+   `test_sparse_path_eightfold_level` gains an XYZ case, and its row of the plan's test table says
+   "real and complex". With the check off, that case is wrong by 2e-2. With it, the result is right
+   to 4e-14 after 7 re-solves, and the conjugate-free mutant fails it.
+2. **Applied: text.**
+   - The `_eigensolve` docstring and the "Solve" paragraph of `algorithms.rst` don't mention the
+     cap or the `RuntimeError`.
+   - The `RuntimeError` message reads "after 1 retries" when one re-solve was made. It also says
+     "keep at most 2000 configurations" without naming the knob, which is `max_subspace_dim`. It
+     now says "re-solves", as the docstring does, and the cap test's `match` changed with it.
+   - The `verify_roots` docstring doesn't say that a level less than `1e-8 * max(1, |top|)`
+     below the top root counts as the top root's level. On a level split by 2e-9, ARPACK can
+     return the upper copy, and the check accepts it, with the energy wrong by 2e-9.
+   - In the plan's Deviations entry, "`verify_roots=False` skips the check, which costs about
+     one extra solve" reads as if skipping costs a solve. It also understates the check, which is
+     one single-root solve on the deflated matrix, 1.7 to 3.7 times a plain one
+     ([Cost](#cost)). There is also a stray line break mid-paragraph.
+   - The plan's test table doesn't list `test_missed_root_retries_are_capped`.
+3. **Optional:** grow `k` by doubling the extra roots, capped at `max(30, n_roots)`, instead of
+   one root per re-solve. It changes nothing up to two re-solves and helps only on very
+   degenerate levels ([below](#very-degenerate-levels-optional-faster-growth-of-k)).
+4. **Optional, carried over:** `test_blocks_share_the_seed_state` still reads
+   `algorithm.engine._primitives`.
+
+### Departures from the review
+
+- **A cap of 30 re-solves, then `RuntimeError`.** The review's loop returned its last pass
+  silently at `k = dim - 2`. The cap bounds the cost and turns that silent answer into an error.
+  `range(n_roots, min(n_roots + 30, dim - 2) + 1)` is never empty, since the sparse branch needs
+  `n_roots <= dim - 2`, and `k - n_roots` counts the re-solves whichever bound binds. The cap
+  also makes the tolerance-sign mutant fail in finite time, where it used to hang the suite.
+- **`test_window_inside_a_level_is_not_a_miss` calls `_missed_root` on exact eigenvectors.** The
+  review's version counted `eigsh` calls through `QSCI.run`. That version passes under Accelerate
+  (`[3, 1]`) but fails under OpenBLAS (`[3, 1, 4, 1]`): there ARPACK at `k = 3` really does skip a
+  copy on that seed, and the check rightly re-solves. The rewrite doesn't depend on the BLAS,
+  adds the positive case (two copies and the next level are a miss), and still fails the
+  tolerance-sign mutant on its own. The [appendix](#appendix-tests-to-add-at-bc00479) keeps the
+  review's version as the record.
+- **New `test_missed_root_retries_are_capped`.** It fails when the raise is removed, when the
+  cap is ignored and `k` runs to `dim - 2`, and when the range stops one short.
+
+### Measured at `7c21812`
+
+**Breadth.** The loop draws the same start vectors as the reviewed sketch, and none of these cases
+needs more than 5 re-solves, so the cap never binds. The results are the sketch's: 50 of 50
+random models and 3 of 3 physical cases.
+
+**A physical case for the check.** This is the Heisenberg ring on the qubit path with no sector
+filter. The reference is the union of the dense spectra of the weight sectors:
+
+| Ring | `n_roots` | Check off | Check on |
+|---|---|---|---|
+| 12 sites, dim 4096 | 4, 16 | right | right |
+| 12 sites | 12 | wrong by 1.1 | right to 9e-14 |
+| 14 sites, dim 16384 | 4, 12, 16 | wrong by 0.8 to 1.0 | right to 2e-13 |
+
+**Near-degenerate levels.** Fourfold levels were split by δ from 1e-12 to 1e-2, with 6 roots,
+real and complex, 5 seeds each. Nothing raised, one run in 100 re-solved once, and residuals and
+orthonormality stayed below 3e-12. Energies were right to 6e-13, except where the splitting falls
+below the tolerance (item 2).
+
+**Mutants.** Each change below is applied alone to `7c21812`, against the full `test_qsci.py`:
+
+| Mutant | Fails at `7c21812` |
+|---|---|
+| Check never runs | `ring_degenerate_roots`, `eightfold_level`, `verify_roots_sets_the_extra_solve[True-2-2]`, `missed_root_retries_are_capped` |
+| Check runs but never retries | `ring_degenerate_roots`, `eightfold_level`, `missed_root_retries_are_capped` |
+| Check reuses its own solve's start vector | `eightfold_level` |
+| Check also runs at `n_roots == 1` | `verify_roots_sets_the_extra_solve[True-1-1]` |
+| Tolerance sign flipped | both `degenerate_roots` cases, `window_inside_a_level_is_not_a_miss` |
+| `verify_roots` not passed to `_eigensolve` | `verify_roots_sets_the_extra_solve[False-2-1]` |
+| No QR | `degenerate_roots[XYZ-0]` |
+| Unseeded generator | both `degenerate_roots` cases |
+| Check against the lowest root, not the top | `ring_degenerate_roots`, `eightfold_level` |
+| No raise at the cap; cap ignored; cap one short | `missed_root_retries_are_capped` |
+| **Projector without the conjugate** | **nothing (item 1); with the fix, `eightfold_level[XYZ-0]`** |
+| Shift of one row sum instead of two | nothing, and no test is needed: the shift only has to lift `span(V)` above the lowest level outside it. One row sum does that whenever that level lies in the lower half of the spectrum; two always do |
+
+Under OpenBLAS the same mutants are caught, some by more tests, and the same two survive. Which
+ARPACK solves miss differs between the two BLAS builds, but no mutant's detection depends on it.
+
+### Very degenerate levels: optional, faster growth of `k`
+
+With 64 or more copies of a level and `n_roots` close to the multiplicity, the check needs many
+re-solves, and it can reach the cap. Three ways to grow `k` were compared, on 2-local XZ models at
+dimension 4096 (64-fold) and 8192 (128-fold), 3 seeds each:
+
+- **+1 per re-solve, cap 30:** the committed loop, which allows 30 re-solves.
+- **Doubling, extra roots capped at 30:** `k = n_roots + 1, + 2, + 4, …, + 30`, about 6 re-solves.
+- **Doubling, extra roots capped at `max(30, n_roots)`.**
+
+| Level × `n_roots` | +1, cap 30 (committed) | Doubling, cap 30 | Doubling, cap `max(30, n_roots)` | Dense `eigh` |
+|---|---|---|---|---|
+| 64 × 32 | right, 0.5–1.6 s | raises on 1 | right, 0.4–0.7 s | 3.8 s |
+| 64 × 64 | raises on 1; others 2.1 and 6.1 s | raises on 1 | raises on 1; others 1.2 and 1.4 s | 3.7 s |
+| 128 × 64 | raises on 1; others 2.3 and 4.5 s | raises on 1 | right, 1.8–3.8 s | 30 s |
+| 128 × 128 | raises on 2, after 65 and 919 s; other 58 s | raises on 3 | right, 14–166 s | 30 s |
+
+Up to `n_roots = 30` the last two variants are the same, so every extra raise of the cap-30
+column comes at 32 roots or more. In 50 more runs with 24 to 32 roots on 32- and 64-fold levels,
+real and complex, with and without 1-local fields, the committed loop needed up to 24 re-solves.
+Doubling with a cap of `max(30, n_roots)` raised on the same 2 runs, and was never more than 0.3 s
+slower. The physical cases above need at most two re-solves, and both make the same first two.
+
+So doubling with a cap of `max(30, n_roots)` raises no more often anywhere here, and on the
+hardest cases it raises less and finishes up to 4 times sooner. Its cost is memory above 30
+roots: `k` reaches twice `n_roots`, about 1.6 times ARPACK's basis at `n_roots = 128`. It doesn't
+remove the limit either, since 64 × 64 seed 2 raises under all three. That limit is the method's:
+a solve from one start vector meets each eigenspace in one direction, so asking for every copy of
+a 64-fold level is a block solver's job, the Davidson solver planned for Phase 3. Levels this
+degenerate need six or more idle qubits or very high symmetry, which QSCI's chemistry targets don't
+have. Doubling is an optional improvement, not needed for merge.
+
+One related case: on 2-local XZ terms on 6 of 12 qubits, with no fields, seed 3 at
+`n_roots = 32` raised scipy's `ArpackNoConvergence` in a re-solve at `k = 35`, where the first solve
+at `k = 32` had converged. It may depend on the model. It is the same regime, with the same
+answer (Davidson), so no change now.
+
+### The fixes against `7c21812`
+
+```diff
+--- a/docs/contributions/qsci_plan.md
++++ b/docs/contributions/qsci_plan.md
+@@ -350,6 +350,6 @@ never at module scope.
+ | **R2** QSCI's own exact-sampling pool, short of unit mass before normalisation, replays through `distribution=` with identical configurations and energy | analytic, ⟨Z0⟩ = +1 on the all-zero state | `…::test_exact_sampling_output_is_reusable` |
+ | **R3** An identically zero projected Hamiltonian above the dense cutoff, and a matrix with an explicitly stored zero | analytic: zero eigenvalues, orthonormal columns, zero residual | `…::test_zero_projected_hamiltonian_on_sparse_path` |
+-| Sparse path on degenerate levels (Deviations log): three roots inside a fourfold level, real and complex, with residuals, orthonormality and the same vectors on a second run; the 8-site ring at U = 4, (4, 3), four roots over two twofold levels at dimension 3920; eight roots of an eightfold level | dense `eigvalsh` of `sparse_matrix()` | `…::test_sparse_path_degenerate_roots`, `…::test_sparse_path_ring_degenerate_roots`, `…::test_sparse_path_eightfold_level` |
+-| The missed-root check (Deviations log): one extra single-root solve with `n_roots > 1`, none with `verify_roots=False` or one root; on exact eigenvectors, a window inside a fourfold level is not a miss, and two copies plus the next level are | call count; dense `eigh` | `…::test_verify_roots_sets_the_extra_solve`, `…::test_window_inside_a_level_is_not_a_miss` |
++| Sparse path on degenerate levels (Deviations log): three roots inside a fourfold level, real and complex, with residuals, orthonormality and the same vectors on a second run; the 8-site ring at U = 4, (4, 3), four roots over two twofold levels at dimension 3920; eight roots of an eightfold level, real and complex | dense `eigvalsh` of `sparse_matrix()` | `…::test_sparse_path_degenerate_roots`, `…::test_sparse_path_ring_degenerate_roots`, `…::test_sparse_path_eightfold_level` |
++| The missed-root check (Deviations log): one extra single-root solve with `n_roots > 1`, none with `verify_roots=False` or one root; on exact eigenvectors, a window inside a fourfold level is not a miss, and two copies plus the next level are; a check that always fires raises after the cap | call count; dense `eigh`; contract | `…::test_verify_roots_sets_the_extra_solve`, `…::test_window_inside_a_level_is_not_a_miss`, `…::test_missed_root_retries_are_capped` |
+ | **P2** ENPT2 equals the brute-force sum over configurations outside the subspace of `abs((Hc)_a)² / (E − H_aa)`: from a non-Hartree-Fock multi-determinant reference, so singles contribute, and on the complete subspace, where both are zero. A determinant missing from the FOIS shows up as a missing contribution | dense matrix, independent of the connectivity generator | `…::test_pt2_matches_dense_brute_force` |
+ | **P2** H2 from a Hartree-Fock-only subspace, augmented with `fois_configurations`, returns the FCI energy; `QSCI(expand_fois=True)` produces the same basis after the selection cap | pyscf `fci.FCI` and the independently generated FOIS | `…::test_fois_augmentation` |
+@@ -587,6 +587,6 @@ Deviations from the plan, folded back here.
+   `n_roots > 1`, one extra single-root solve on `H + σVV†` detects a skipped copy,
+   and the solve repeats with one more root until none is found, raising after 30
+-  re-solves. Starts are seeded
+-  and vectors get a QR. `verify_roots=False` skips the check, which costs about
+-  one extra solve. Phase 2's matrix-free shift: twice the sum of absolute
++  re-solves. Starts are seeded and vectors get a QR. `verify_roots=False` skips
++  the check and its cost: one single-root solve on the deflated matrix, up to about
++  four times a plain one. Phase 2's matrix-free shift: twice the sum of absolute
+   non-identity Pauli coefficients.
+--- a/docs/source/algorithms.rst
++++ b/docs/source/algorithms.rst
+@@ -2859,8 +2859,9 @@ densely with ``scipy.linalg.eigh``, and above that with ARPACK's ``eigsh``, for
+ the ``n_roots`` lowest eigenpairs. ARPACK can skip a copy of a degenerate level,
+ so with ``n_roots > 1`` one extra single-root solve checks for a skipped copy,
+-and the solve is repeated with one more root if it finds one;
+-``verify_roots=False`` turns the check off. ``run()`` returns ``(energies,
+-coefficients)``, as ``QSE`` does, and sets ``energies``, ``coefficients`` (row
+-``i`` is the amplitude on ``configurations[i]``), ``configurations``,
++and the solve is repeated with one more root while it finds one, raising
++``RuntimeError`` after 30 re-solves; ``verify_roots=False`` turns the check
++off. ``run()`` returns ``(energies, coefficients)``, as ``QSE`` does, and sets
++``energies``, ``coefficients`` (row ``i`` is the amplitude on
++``configurations[i]``), ``configurations``,
+ ``distribution`` (the pooled samples before any filter or cut, normalized to
+ unit total mass so they can be passed straight back as ``distribution=``),
+--- a/qarp/algorithms/_composite/qsci.py
++++ b/qarp/algorithms/_composite/qsci.py
+@@ -100,7 +100,8 @@ class QSCI(CompositeAlgorithm):
+             single-root solve that detects a skipped copy, and re-solves with
+             one more root until none is skipped, raising ``RuntimeError``
+-            after 30 re-solves.  ``False`` saves that solve, but a skipped
+-            copy then goes unnoticed: the energies and vectors can be wrong
+-            without any warning.
++            after 30 re-solves.  A level less than ``1e-8 * max(1, |top|)``
++            below the top root counts as the top root's level.  ``False``
++            saves that solve, but a skipped copy then goes unnoticed: the
++            energies and vectors can be wrong without any warning.
+         primitive: A ``Sampler`` measuring every qubit in register order; a
+             default ``Sampler()`` when ``ket`` is given.  Must be ``None`` with
+@@ -657,5 +658,6 @@ def _eigensolve(
+     ARPACK refuses ``n_roots >= dim - 1`` for complex matrices, so that goes dense
+     regardless of size.  Above the cutoff, ``verify`` re-solves with one more root
+-    while ``_missed_root`` finds a skipped copy of a degenerate level.
++    while ``_missed_root`` finds a skipped copy of a degenerate level, and raises
++    after ``_MAX_ROOT_RETRIES`` re-solves.
+     """
+     dim = matrix.shape[0]
+@@ -688,6 +690,6 @@ def _eigensolve(
+             raise RuntimeError(
+                 f"QSCI: ARPACK still skips a copy of a degenerate level after "
+-                f"{k - n_roots} retries.  Pass verify_roots=False to accept that risk, or "
+-                f"keep at most {_DENSE_EIGH_MAX_DIM} configurations for the exact dense solver."
++                f"{k - n_roots} re-solves.  Pass verify_roots=False to accept that risk, or "
++                f"set max_subspace_dim <= {_DENSE_EIGH_MAX_DIM} for the exact dense solver."
+             )
+     return np.asarray(energies, dtype=np.float64), vectors
+--- a/tests/test_algorithms/test_composite/test_qsci.py
++++ b/tests/test_algorithms/test_composite/test_qsci.py
+@@ -631,13 +631,15 @@ def test_sparse_path_ring_degenerate_roots():
+ 
+ 
+-def test_sparse_path_eightfold_level():
++@pytest.mark.parametrize(("letters", "seed"), [("XZ", 10), ("XYZ", 0)])
++def test_sparse_path_eightfold_level(letters, seed):
+     # 2-local terms on qubits 0-7 of 11: every level is eightfold degenerate, at
+     # dimension 2048.  The check must start fresh: from the solve's own start it
+-    # misses a copy on this seed.
+-    rng = np.random.default_rng(10)
++    # misses a copy on the XZ seed.  XYZ is complex, so the check's projector
++    # needs the conjugate.
++    rng = np.random.default_rng(seed)
+     hamiltonian = QubitOperator()
+     for _ in range(30):
+         i, j = sorted(rng.choice(8, 2, replace=False))
+-        a, b = rng.choice(list("XZ"), 2)
++        a, b = rng.choice(list(letters), 2)
+         hamiltonian += QubitOperator(f"{a}{i} {b}{j}", float(rng.normal()))
+     configurations = list(itertools.product((0, 1), repeat=11))
+@@ -686,5 +688,5 @@ def test_missed_root_retries_are_capped(monkeypatch):
+         n_roots=2,
+     ).build()
+-    with pytest.raises(RuntimeError, match="after 2 retries"):
++    with pytest.raises(RuntimeError, match="after 2 re-solves"):
+         algorithm.run()
+ 
+```
+
 ## What to do at `bc00479`
+
+Done at `7c21812`, apart from the optional item 3, which is item 4 above.
 
 1. **B3: replace the padding with the check, and add `verify_roots: bool = True`.** The diff in
    [B3](#the-fix-against-bc00479) applies to `bc00479` as is.
