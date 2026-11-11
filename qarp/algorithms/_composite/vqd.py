@@ -136,8 +136,8 @@ class VQD(CompositeAlgorithm):
             if not ket.symbols:
                 raise ValueError(
                     "Cannot build VQD: at least one ket has no parameters to "
-                    "optimize (symbols is None or empty). Pass parameterized "
-                    "ansatz blocks, not bare state-preparation blocks."
+                    "optimize. Pass parameterized ansatz blocks, not bare "
+                    "state-preparation blocks."
                 )
             ket_symbols.append(ket.symbols)
         if initial_parameters is None:
@@ -190,7 +190,6 @@ class VQD(CompositeAlgorithm):
     def _parameter_map(self, theta: Iterable[float]) -> Dict[Any, float]:
         """Ket ``iter``'s symbols bound to ``theta``, positionally."""
         symbols = self.kets[self.iter].symbols
-        assert symbols is not None  # checked non-empty at construction
         return dict(zip(symbols, np.array(theta), strict=True))
 
     def objective(self, theta: Iterable[float]):

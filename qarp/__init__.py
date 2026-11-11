@@ -33,7 +33,7 @@ _check_qarpx_abi(_qarpx)
 
 from ._config import config
 from ._types import Consumes, ExactResult, SamplingDictionary, Shots
-from ._sampling_distribution import SamplingDistribution
+from ._sampling_distribution import PrimitiveResult, SamplingDistribution
 
 EXACT = Shots.EXACT
 from ._postselection import PostSelected, PostSelection
@@ -46,6 +46,7 @@ __all__ = [
     "MPIConfig",
     "PostSelected",
     "PostSelection",
+    "PrimitiveResult",
     "SamplingDictionary",
     "SamplingDistribution",
     "Shots",

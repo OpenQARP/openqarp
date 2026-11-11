@@ -9,9 +9,15 @@ import math
 
 import numpy as np
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from qarp.algorithms import PauliKernel, ShadowDataset
-from qarp.algorithms._primitives.shadows._estimators import median_of_means, n_batches_for
+from qarp.algorithms._primitives.shadows._estimators import (
+    achieved_delta,
+    median_of_means,
+    n_batches_for,
+)
 from qarp.algorithms._primitives.shadows.estimator import _decompose
 from qarp.errors import CapabilityError
 from qarp.operators import QubitOperator
@@ -24,6 +30,34 @@ def test_n_batches_derivation():
     assert n_batches_for(0.05, 10) == math.ceil(2 * math.log(2 * 10 / 0.05))  # union bound
     assert n_batches_for(0.05, 10) > n_batches_for(0.05, 1)
     assert n_batches_for(0.5, 1) >= 1
+
+
+def test_achieved_delta_inverts_n_batches_for():
+    # HKP Theorem 1: K = ceil(2 ln(2/delta)) batches fail with probability at most
+    # 2 e^{-K/2} <= delta; the ceiling costs under one batch, so never below delta/sqrt(e).
+    for delta in (0.5, 0.05, 1e-3):
+        k = n_batches_for(delta, 1)
+        assert delta * math.exp(-0.5) < achieved_delta(k) <= delta
+    assert achieved_delta(1) == 1.0  # HKP's 2 e^{-1/2} exceeds 1, capped
+    assert achieved_delta(8) == pytest.approx(2 * math.exp(-4))
+    with pytest.raises(ValueError):
+        achieved_delta(0)
+
+
+@pytest.mark.property
+# delta = 2M e^{-K/2} exactly: the rounded log gives K, whose float bound is one ulp over.
+@example(delta=2 * 3 * math.exp(-7 / 2), n_observables=3)
+@given(
+    delta=st.floats(min_value=1e-12, max_value=1.0, exclude_max=True),
+    n_observables=st.integers(min_value=1, max_value=10**6),
+)
+def test_n_batches_for_meets_the_union_bound(delta, n_observables):
+    # HKP Theorem 1 over M observables: the smallest K with 2 e^{-K/2} <= delta/M,
+    # so one batch fewer would miss; rel absorbs the rounding of e^{-1/2}.
+    k = n_batches_for(delta, n_observables)
+    per_observable = delta / n_observables
+    assert achieved_delta(k) <= per_observable
+    assert achieved_delta(k) > per_observable * math.exp(-0.5) * (1 - 1e-12)
 
 
 # --- median-of-means ------------------------------------------------------------
@@ -162,6 +196,60 @@ def test_expval_many_union_bound_batches():
     assert joint[0].n_batches == n_batches_for(0.05, len(obs))
     assert marginal[0].n_batches == n_batches_for(0.05, 1)
     assert joint[0].n_batches > marginal[0].n_batches
+
+
+def test_estimate_delta_is_the_achieved_failure_probability():
+    est = _all_z_zero_dataset(n_settings=200).estimator()
+    # An explicit batch count overrides the requested delta; the field reports
+    # what that count achieves (HKP: 2 e^{-K/2}), not what was asked for.
+    assert est.expval("Z0", delta=0.05, n_batches=1).delta == 1.0
+    assert est.expval("Z0", n_batches=20).delta == pytest.approx(2 * math.exp(-10))
+    # The derived count: K = ceil(2 ln 40) = 8, within the requested delta.
+    r = est.expval("Z0", delta=0.05)
+    assert r.n_batches == 8
+    assert r.delta == pytest.approx(2 * math.exp(-4))
+    assert r.delta <= 0.05
+    # An exact constant takes no median and cannot fail, whatever count was passed.
+    for n_batches in (None, 20):
+        c = est.expval(5.0 * QubitOperator(""), n_batches=n_batches)
+        assert (c.delta, c.n_batches) == (0.0, 1)
+
+
+def test_expval_many_delta_is_achieved_per_estimate():
+    est = _all_z_zero_dataset(n_settings=200).estimator()
+    obs = [QubitOperator("Z0"), QubitOperator("Z1")]
+    # Joint (union bound, M = 2): K = ceil(2 ln 80) = 9, each field at most delta/M.
+    joint = est.expval_many(obs, delta=0.05)
+    assert [r.delta for r in joint] == pytest.approx([2 * math.exp(-4.5)] * 2)
+    assert all(r.delta <= 0.05 / len(obs) for r in joint)
+    # Marginal: K = ceil(2 ln 40) = 8, each field within delta but their sum is not.
+    marginal = est.expval_many(obs, delta=0.05, marginal=True)
+    assert [r.delta for r in marginal] == pytest.approx([2 * math.exp(-4)] * 2)
+    assert all(r.delta <= 0.05 for r in marginal)
+    assert sum(r.delta for r in marginal) > 0.05
+    # An explicit count overrides delta for every estimate and reports what it achieves.
+    forced = est.expval_many(obs, delta=0.05, n_batches=4)
+    assert [r.n_batches for r in forced] == [4, 4]
+    assert [r.delta for r in forced] == pytest.approx([2 * math.exp(-2)] * 2)
+    # A constant in the family stays exact; the rest keep the joint count.
+    const, z0 = est.expval_many([2.0 * QubitOperator(""), QubitOperator("Z0")], delta=0.05)
+    assert (const.delta, const.n_batches) == (0.0, 1)
+    assert (z0.n_batches, z0.delta) == (9, pytest.approx(2 * math.exp(-4.5)))
+
+
+def test_delta_checked_with_explicit_n_batches():
+    est = _all_z_zero_dataset(n_settings=200).estimator()
+    for delta in (0.0, 1.0, 7.0, -1.0):
+        with pytest.raises(ValueError, match="delta must be in"):
+            est.expval("Z0", delta=delta, n_batches=3)
+        with pytest.raises(ValueError, match="delta must be in"):
+            est.expval_many([QubitOperator("Z0")], delta=delta, n_batches=3)
+
+
+def test_constant_rejects_invalid_n_batches():
+    est = _all_z_zero_dataset().estimator()
+    with pytest.raises(ValueError, match="n_batches must be >= 1"):
+        est.expval(5.0 * QubitOperator(""), n_batches=0)
 
 
 def test_observable_wider_than_dataset_raises():

@@ -142,11 +142,14 @@ something else, parked until they are picked up.
 
 | Plan | Theme |
 |---|---|
+| [`batch_run_no_implicit_rebuild_plan.md`](batch_run_no_implicit_rebuild_plan.md) | `Engine.batch_run` reuses the prior build by default and raises on a primitive that was never built |
 | [`compiled_backend_stubs_plan.md`](compiled_backend_stubs_plan.md) | Ship type stubs for `qarpx` and type-check `qarp` against them |
 | [`lazy_circuit_derivation_plan.md`](lazy_circuit_derivation_plan.md) | Primitives derive circuits lazily; declared structure planned inside `Engine.build`; `Target` below the engine layer |
 | [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator |
 | [`qmc_gpu_plan.md`](qmc_gpu_plan.md) | Persistent GPU Monte Carlo with exact transitions and resident signed evolution |
 | [`qmc_measurement_layouts_plan.md`](qmc_measurement_layouts_plan.md) | Reusable grouped transition layouts and general commuting measurement bases |
+| [`qsci_plan.md`](qsci_plan.md) | Quantum-selected configuration interaction (QSCI / SQD): diagonalize the Hamiltonian in sampled configurations |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` |
 | [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels |
+| [`symbols_always_tuple_plan.md`](symbols_always_tuple_plan.md) | `.symbols` is a tuple on every block that has a registry and a `RuntimeError` before |

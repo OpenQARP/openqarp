@@ -35,6 +35,9 @@ class Runnable(Protocol):
     sub_blocks: list
     # One per sub-block, written by the engine's build() alone.
     compiled: "list[CompiledCircuit]"
+    # The last build() compiled no circuit (a constant operator): built, so an
+    # empty ``compiled`` is not a missing build.  Written by build() alone.
+    built_empty: bool
     # None, or LSB-indexed ket-seeding amplitudes (ndarray — typed Any for the
     # same layering reason as operator).
     initial_state: Any

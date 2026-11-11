@@ -143,6 +143,7 @@ def compute_gradients(
     _validate_options(method, opts)
     params = _coerce_params(params)
     symbol_names = list(params.keys())
+    engine._reject_bound(symbol_names)
 
     engine._pre_run()
     prims = list(engine._primitives)

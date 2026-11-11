@@ -109,6 +109,20 @@ A read-only type alias for sampling results.  Both a :class:`~qarp.SamplingDistr
 The keys are LSB-first bit tuples representing measurement outcomes, and values are
 probabilities.  Annotate results you only read with it; build a new dict to change one.
 
+PrimitiveResult
+---------------
+
+One primitive's result: an entry of the list :meth:`~qarp.engines.Engine.run` returns, and of
+each inner list of :meth:`~qarp.engines.Engine.batch_run`.  It is a ``float`` or ``complex``
+expectation value, or a :class:`~qarp.SamplingDistribution` for a sampling primitive.
+It works with ``isinstance``.
+
+.. code-block:: python
+
+   from qarp import PrimitiveResult
+
+   # PrimitiveResult is defined as: Union[float, complex, SamplingDistribution]
+
 ----
 
 Threads

@@ -23,7 +23,8 @@ from typing import Optional, Union
 import qarpx as qx
 from qarp.operators import QubitOperator
 
-from .._types import Consumes, PrimitiveResult, Shots, Target
+from .._sampling_distribution import PrimitiveResult
+from .._types import Consumes, Shots, Target
 from ..errors import CapabilityError
 from ._engine import (
     Engine,

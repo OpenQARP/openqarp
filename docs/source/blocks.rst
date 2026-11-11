@@ -753,8 +753,8 @@ so ``'XI'`` is :math:`X_0` and ``'IX'`` is :math:`X_1`. The full LCU API is cove
 ``BlockEncodingBlock`` turns that LCU into a unitary circuit. It first prepares the
 ancilla amplitudes :math:`\sqrt{|c_i|/\lambda}`, applies the selected Pauli term and its
 coefficient phase, then unprepares the ancillas. Here
-:math:`\lambda = \sum_i |c_i|`, available as ``lambda_norm`` (or
-``lambda_factor()`` for compatibility). Consequently, the all-zero ancilla sector obeys
+:math:`\lambda = \sum_i |c_i|`, available as ``lambda_norm``.
+Consequently, the all-zero ancilla sector obeys
 
 .. math::
 
@@ -1144,7 +1144,7 @@ denotes the desired projector and :math:`U_P` the complete circuit, then
 
 The LCU ancillas are the lowest-index qubits and the system register is exposed
 as ``system_qubits``. ``num_controls`` gives the number of LCU ancillas and
-``lambda_norm`` (also returned by ``lambda_factor()``) is :math:`\lambda`.
+``lambda_norm`` is :math:`\lambda`.
 Consequently, applying the full unitary does not deterministically project a
 state: the projector is obtained from the all-zero ancilla branch, with
 success probability :math:`\|P|\psi\rangle\|^2/\lambda^2`.
@@ -1439,7 +1439,7 @@ so the resulting unitary is
 
 ``A`` may be an ``np.ndarray`` or a ``QubitOperator``. The
 underlying ``BlockEncodingBlock`` encodes :math:`A/\lambda`, and its
-normalization is exposed as ``lambda_factor``. For Hermitian
+normalization is exposed as ``lambda_norm``. For Hermitian
 :math:`A` with eigenvalue :math:`E`, the walk has eigenphases
 :math:`\exp(\mathord{\pm}i\arccos(E/\lambda))`. Therefore, if phase
 estimation reports a phase :math:`\theta` in :math:`[0,1)`, then
@@ -1458,7 +1458,7 @@ For example, a two-term one-qubit Hamiltonian needs one LCU ancilla qubit:
    walk = QubitizationBlock(hamiltonian, operator_name="H").build()
 
    assert walk.BE.num_controls == 1
-   assert walk.lambda_factor == 1.0
+   assert walk.lambda_norm == 1.0
 
 .. figure:: images/qubitizationblock.svg
    :width: 70%
@@ -1493,7 +1493,7 @@ block unambiguous:
    from qarp.blocks import BlockEncodingBlock, QSVTBlock, QSPAngleFinder
 
    A = np.array([[0.5, 0.3], [0.3, -0.5]])
-   A /= BlockEncodingBlock(A).lambda_factor()
+   A /= BlockEncodingBlock(A).lambda_norm
    phases = QSPAngleFinder([-1, 0, 1]).QSVT()
    qsvt = QSVTBlock(A, phases).build()
 

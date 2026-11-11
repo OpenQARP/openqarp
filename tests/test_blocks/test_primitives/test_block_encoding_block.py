@@ -145,12 +145,6 @@ def test_lambda_norm_is_sum_of_abs_coeffs():
     assert be.lambda_norm == pytest.approx(1.0)
 
 
-def test_lambda_factor_compatibility_method():
-    op = QubitOperator("X0", 0.7) + QubitOperator("Z0", 0.3)
-    be = BlockEncodingBlock(op)
-    assert be.lambda_factor() == be.lambda_norm
-
-
 def test_unitaries_attribute_preserved():
     op = QubitOperator("X0", 0.5) + QubitOperator("Z0", -0.5)
     be = BlockEncodingBlock(op)

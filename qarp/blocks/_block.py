@@ -292,15 +292,23 @@ class _BlockMixin:
     # ── Public parameter registry ───────────────────────────────────────
 
     @property
-    def symbols(self) -> Optional[Tuple[Symbol, ...]]:
-        """Canonically ordered free-parameter registry of a built block.
+    def symbols(self) -> Tuple[Symbol, ...]:
+        """Canonically ordered free-parameter registry (§17).
 
         Always sorted by string representation (``_sorted_symbols``); every
         positional parameter vector in the public API aligns to this order.
         Never use it for symbol↔operator pairing — pairing lives in dedicated
-        structures (e.g. ``TrotterAnsatzBlock.symbol_qop_pairs``).
+        structures (e.g. ``TrotterAnsatzBlock.symbol_qop_pairs``).  Raises
+        ``RuntimeError`` before the block has a registry: build it, or declare
+        the symbols in the constructor.
         """
-        return getattr(self, "_symbols", None)
+        symbols = getattr(self, "_symbols", None)
+        if symbols is None:
+            raise RuntimeError(
+                f"'{self.name}' has no symbols yet: build it first, or define "
+                "symbols in the constructor."
+            )
+        return symbols
 
     @symbols.setter
     def symbols(self, value: Optional[Iterable[Symbol]]) -> None:
@@ -312,16 +320,11 @@ class _BlockMixin:
         """Map a positional parameter vector onto ``symbols`` — the one
         blessed vector→map conversion.  Length-checked; use this instead of
         hand-zipping against a symbol list."""
-        if self.symbols is None:
-            raise RuntimeError(
-                "Block has no symbols — build it first or define symbols in the constructor."
-            )
+        symbols = self.symbols
         values = list(values)
-        if len(values) != len(self.symbols):
-            raise ValueError(
-                f"{len(values)} values for {len(self.symbols)} symbols on '{self.name}'"
-            )
-        return dict(zip(self.symbols, values, strict=True))
+        if len(values) != len(symbols):
+            raise ValueError(f"{len(values)} values for {len(symbols)} symbols on '{self.name}'")
+        return dict(zip(symbols, values, strict=True))
 
     # ── Validation ──────────────────────────────────────────────────────
 
@@ -420,7 +423,7 @@ class _BlockMixin:
         the symbol registry, but cannot run the target_qubits validation (a
         lifted ``ControlledBlock`` frame legitimately fails it).
         """
-        if self.symbols is not None:
+        if self._symbols is not None:
             return
         # Queue-aware view (composite flat-scan fallback included) so pending
         # set_symbols/replace_symbols on a not-yet-built block don't leak
@@ -589,8 +592,8 @@ class _BlockMixin:
         merged = {k: v for k, v in merged.items() if str(k) not in rebound}
         merged.update(bindings)
         new_object._pending_substitutions = [merged]
-        if new_object.symbols:
-            new_object.symbols = [s for s in new_object.symbols if s not in bindings]
+        if new_object._symbols:
+            new_object.symbols = [s for s in new_object._symbols if s not in bindings]
         new_object._update_parameters_attr(bindings)
         new_object._propagate_to_python_children("set_symbols", bindings)
         return new_object
@@ -612,8 +615,8 @@ class _BlockMixin:
                 for sub in new_object._pending_substitutions
             ]
         new_object._pending_replacements.append(renames)
-        if new_object.symbols:
-            new_object.symbols = [renames.get(s, s) for s in new_object.symbols]
+        if new_object._symbols:
+            new_object.symbols = [renames.get(s, s) for s in new_object._symbols]
         new_object._update_parameters_attr(renames)
         new_object._propagate_to_python_children("replace_symbols", renames)
         return new_object
@@ -639,7 +642,7 @@ class _BlockMixin:
         """Append ``postfix`` to every symbol name; return a new block."""
         if not postfix or not postfix.strip():
             raise ValueError("Postfix cannot be empty or whitespace only")
-        if not self.symbols:
+        if not self._symbols:
             raise RuntimeError(
                 "Cannot refresh symbols, no symbols defined. Build the block "
                 "first or define symbols in the constructor."

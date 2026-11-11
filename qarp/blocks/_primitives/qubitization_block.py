@@ -47,7 +47,7 @@ class QubitizationBlock(CompositeBlockBase):
         # ``self.BE.lambda_norm`` / ``self.BE.unitaries`` before .build() —
         # ``self.BE`` is stable public surface.
         self.BE = BlockEncodingBlock(A, name=operator_name)
-        self.lambda_factor = self.BE.lambda_norm
+        self.lambda_norm = self.BE.lambda_norm
         self.unitaries_qubits = list(range(self.BE.num_controls, self.BE.n_qubits))
 
         super().__init__(

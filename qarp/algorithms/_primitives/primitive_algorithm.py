@@ -11,7 +11,8 @@ for them).
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
 
-from ..._types import Consumes, PrimitiveResult, Shots
+from ..._sampling_distribution import PrimitiveResult
+from ..._types import Consumes, Shots
 from .target import Target
 
 
@@ -111,6 +112,7 @@ class PrimitiveAlgorithm(ABC):
         self.target = target
         self.sub_blocks: list = []
         self.compiled: list = []
+        self.built_empty = False
 
     @property
     def bra(self) -> Any:

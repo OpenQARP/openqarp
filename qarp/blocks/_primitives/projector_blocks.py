@@ -374,11 +374,6 @@ class _LCUProjectorBlock(CompositeBlockBase):
     def _lcu_terms(self) -> Tuple[List[complex], List[SimpleBlock]]:
         raise NotImplementedError
 
-    def lambda_factor(self) -> float:
-        """Compatibility shim matching BlockEncodingBlock."""
-
-        return self.lambda_norm
-
     @property
     def n_terms(self) -> int:
         return len(self.coefficients)

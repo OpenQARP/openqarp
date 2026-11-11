@@ -170,6 +170,7 @@ def test_batch_run_exact_override():
     b.build()
     pa = PauliAveraging(ket=b, operator=QubitOperator("Z0"), n_shots=123)
     eng = QarpEngine(seed=0)
+    eng.build([pa])
     thetas = [0.0, 0.4, np.pi / 2]
     results = eng.batch_run([pa], [{"theta": t} for t in thetas], n_shots=qarp.EXACT)
     for t, per_set in zip(thetas, results, strict=True):
@@ -179,6 +180,7 @@ def test_batch_run_exact_override():
 def test_batch_run_honors_primitive_exact():
     samp = Sampler(ket=_ry_ket(), n_shots=qarp.EXACT)
     eng = QarpEngine(seed=0)
+    eng.build([samp])
     results = eng.batch_run([samp], [{}])
     assert results[0][0][(0,)] == pytest.approx(np.cos(0.35) ** 2, abs=ATOL)
 

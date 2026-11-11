@@ -218,6 +218,7 @@ def test_batch_run_returns_grid_results():
     ket = _rx_ansatz()
     samp = Sampler(ket=ket, n_shots=500)
     eng = _cudaq(n_shots=500, seed=7)
+    eng.build([samp])
     param_sets = [{"theta": 0.0}, {"theta": np.pi}]
     out = eng.batch_run([samp], param_sets)
     assert len(out) == len(param_sets)
@@ -276,8 +277,12 @@ def test_batch_run_expectation_matches_qarp_engine():
 
     gpu = _cudaq()
     cpu = QarpEngine()
-    out_gpu = gpu.batch_run([StateVector(operator=H, ket=_rx_ry_ansatz())], param_sets)
-    out_cpu = cpu.batch_run([StateVector(operator=H, ket=_rx_ry_ansatz())], param_sets)
+    on_gpu = StateVector(operator=H, ket=_rx_ry_ansatz())
+    on_cpu = StateVector(operator=H, ket=_rx_ry_ansatz())
+    gpu.build([on_gpu])
+    cpu.build([on_cpu])
+    out_gpu = gpu.batch_run([on_gpu], param_sets)
+    out_cpu = cpu.batch_run([on_cpu], param_sets)
 
     assert len(out_gpu) == len(param_sets)
     for row_gpu, row_cpu in zip(out_gpu, out_cpu, strict=True):
@@ -411,14 +416,15 @@ def test_run_accepts_sympy_symbol_keys():
     text = {"theta": 0.3, "phi": -0.7}
 
     eng = _cudaq()
-    eng.build([StateVector(operator=_h1(), ket=_rx_ry_ansatz())])
+    expval = StateVector(operator=_h1(), ket=_rx_ry_ansatz())
+    eng.build([expval])
     assert complex(eng.run(sym)[0]) == pytest.approx(complex(eng.run(text)[0]))
 
     g_sym = eng.run_gradient(sym)[0]
     g_text = eng.run_gradient(text)[0]
     assert np.allclose(g_sym, g_text)
 
-    out = eng.batch_run([StateVector(operator=_h1(), ket=_rx_ry_ansatz())], [sym, text])
+    out = eng.batch_run([expval], [sym, text])
     assert complex(out[0][0]) == pytest.approx(complex(out[1][0]))
 
 
@@ -431,13 +437,14 @@ def test_operator_wider_than_ansatz_matches_qarp_engine():
     point = {"theta": 0.3, "phi": -0.7}
     gpu = _cudaq()
     cpu = QarpEngine()
-    gpu.build([StateVector(operator=_lin_h(), ket=_rx_ry_ansatz())])
+    on_gpu = StateVector(operator=_lin_h(), ket=_rx_ry_ansatz())
+    gpu.build([on_gpu])
     cpu.build([StateVector(operator=_lin_h(), ket=_rx_ry_ansatz())])
 
     assert complex(gpu.run(point)[0]) == pytest.approx(complex(cpu.run(point)[0]), abs=1e-9)
     assert np.allclose(gpu.run_gradient(point)[0], cpu.run_gradient(point)[0], atol=1e-9)
 
-    out = gpu.batch_run([StateVector(operator=_lin_h(), ket=_rx_ry_ansatz())], [point])
+    out = gpu.batch_run([on_gpu], [point])
     assert complex(out[0][0]) == pytest.approx(complex(cpu.run(point)[0]), abs=1e-9)
 
 

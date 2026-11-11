@@ -56,9 +56,8 @@ class VFF(CompositeAlgorithm):
         self.n_qubits = self.ansatz_block.n_qubits
         if not self.ansatz_block.symbols:
             raise ValueError(
-                "Cannot build VFF: ansatz_block has no parameters to optimize "
-                "(symbols is None or empty). Pass a parameterized ansatz, "
-                "not a bare state-preparation block."
+                "Cannot build VFF: ansatz_block has no parameters to optimize. "
+                "Pass a parameterized ansatz, not a bare state-preparation block."
             )
         if self.n_qubits is None:
             raise RuntimeError("Number of qubits not defined")
@@ -139,9 +138,7 @@ class VFF(CompositeAlgorithm):
         """Positional parameter surface: ansatz symbols first, then the
         diagonal layer's — a documented concatenation of two canonical
         orders, NOT globally sorted.  Available after build()."""
-        ansatz, diagonal = self.ansatz_block.symbols, self.D.symbols
-        assert ansatz is not None and diagonal is not None  # checked, and built by build()
-        return tuple(ansatz) + tuple(diagonal)
+        return self.ansatz_block.symbols + self.D.symbols
 
     @property
     def optimal_parameters(self):

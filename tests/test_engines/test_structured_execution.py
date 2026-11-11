@@ -269,6 +269,7 @@ def test_batch_run_exact_readout_uses_the_programs():
     engine = QarpEngine(structured=True)
     sampler = Sampler(_bound_ket(theta), n_shots=qarp.EXACT)
     angles = [0.3, 1.2]
+    engine.build([sampler])
     swept = engine.batch_run([sampler], [{theta: a} for a in angles])
     assert "permutation" in engine.kernels(sampler)[0]
     for angle, results in zip(angles, swept, strict=True):
@@ -277,6 +278,28 @@ def test_batch_run_exact_readout_uses_the_programs():
     again = engine.batch_run([sampler], [{theta: 0.5}], rebuild=False)
     assert "permutation" in engine.kernels(sampler)[0]
     np.testing.assert_allclose(_dense(again[0][0], 1 << 12)[:32], _born(0.5), atol=1e-12)
+
+
+def test_rebuild_false_rebinding_a_structured_bound_stream_compiles_afresh():
+    theta = Symbol("theta")
+    sampler = Sampler(_bound_ket(theta), n_shots=qarp.EXACT)
+    engine = QarpEngine(n_shots=qarp.EXACT, structured=True)
+    engine.build([sampler], params={theta: 0.3})
+    assert sampler.compiled[0].program is not None  # a planned stream, not a lowered one
+    before = list(sampler.compiled)
+    engine.build([sampler], params={theta: 1.2}, rebuild=False)
+    assert all(c is not d for c, d in zip(sampler.compiled, before, strict=True))
+    np.testing.assert_allclose(_dense(engine.run()[0], 1 << 12)[:32], _born(1.2), atol=1e-12)
+
+
+def test_a_default_sweep_after_a_structured_bound_build_binds_the_swept_value():
+    theta = Symbol("theta")
+    sampler = Sampler(_bound_ket(theta), n_shots=qarp.EXACT)
+    engine = QarpEngine(n_shots=qarp.EXACT, structured=True)
+    engine.build([sampler], params={theta: 0.3})
+    assert sampler.compiled[0].program is not None  # a planned stream, not a lowered one
+    swept = engine.batch_run([sampler], [{theta: 1.2}])
+    np.testing.assert_allclose(_dense(swept[0][0], 1 << 12)[:32], _born(1.2), atol=1e-12)
 
 
 class _Rotate(SimpleBlock):

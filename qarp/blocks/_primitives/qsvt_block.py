@@ -57,18 +57,18 @@ class QSVTBlock(CompositeBlockBase):
         be_probe = BlockEncodingBlock(A)
         be_probe.build()
         be_FU = np.array(qx.QarpSimulator().unitary_matrix(be_probe.flatten(), be_probe.n_qubits))
-        lambda_factor = be_probe.lambda_factor()
+        lambda_norm = be_probe.lambda_norm
 
         if np.linalg.norm(np.imag(be_FU)) > 1e-8:
             raise NotImplementedError("Current QSVT implementation only accepts real matrices/ops")
-        if np.abs(lambda_factor - 1) > 1e-8:
+        if np.abs(lambda_norm - 1) > 1e-8:
             print(
                 "Warning: lambda in QSVT is not 1. It is proceeded with A -> A / lambda. "
-                f"lambda = {lambda_factor}"
+                f"lambda = {lambda_norm}"
             )
 
         # Stash inputs (post-rescaling) for ``build_vanilla``.
-        self.A = A / lambda_factor if isinstance(A, np.ndarray) else A
+        self.A = A / lambda_norm if isinstance(A, np.ndarray) else A
         self.optimal_angles = list(P_angles)
         self.nqubits = be_probe.n_qubits
 

@@ -16,16 +16,6 @@ the same window.
 - **`CHANGELOG.md` carries each PR's lines.**  Every PR into `develop`
   before the release adds its entries under `[Unreleased]`; the release PR
   only moves them.
-- **`PrimitiveResult` is a public annotation without an export.**
-  `qarp/_types.py` defines it and `PrimitiveAlgorithm.run`, `Engine.run` and
-  `Engine.batch_run` return it, but `qarp.__all__` exports only
-  `SamplingDictionary`.  Export it next to `SamplingDictionary`, or annotate
-  with the public types.
-- **`lambda_factor()` is the last compatibility shim.**
-  `BlockEncodingBlock.lambda_factor` and the projector blocks' copy return
-  `lambda_norm`; `QSVTBlock` is the one caller and `QubitizationBlock` sets
-  an attribute of the same name.  Drop it in the release or keep it for
-  good.
 - **Plan text on the plan-only branches.**  `pauli_engine_plan.md` and
   `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
   `prepare_structured_qpe`; the counter is 15 and the hook is gone.  Fix when each branch rebases.
@@ -33,12 +23,8 @@ the same window.
 ## Breaking changes waiting for a minor release
 
 Each changes a default, a width, a return value or a class shape, so it rides
-a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
+a `0.x` minor with whatever else breaks then.
 
-- **`Engine.batch_run` without an implicit rebuild.**  `rebuild=True` is the
-  default, so every sweep transpiles its primitives again.  Default
-  `rebuild=False`, reusing the prior `build()`, and a `RuntimeError` naming
-  `engine.build` when nothing is built.  Tutorial 03 builds first.
 - **Optimisation stages inside `compile_for_device`.**  The binding takes
   `commands, n_qubits, device, router` and routes the rebased circuit as is.
   Intended pipeline: rebase to the routable set, optimise, route, lower
@@ -59,11 +45,6 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   returns the value for `c = 1`.  Apply `abs(coefficient)` where the
   primitive can express it, reject a non-unit modulus where it cannot; §18
   oracles for both.
-- **Shadow confidence from the actual batch count.**  `ShadowEstimate.delta`
-  stores the requested value even when `n_batches` overrides the count it
-  implies, and at `n_batches=1` the bound `2e^{-K/2}` exceeds 1.  Report
-  the achieved confidence `min(1, 2e^{-K/2})` from the actual `K`.  A public
-  field changes meaning.
 - **`HEABlock` as a tree.**  `qarp/blocks/_primitives/hea_block.py` builds
   it as a `SimpleBlock` leaf; its layers are a composition that a
   `CompositeBlockBase` tree expresses.  `isinstance` answers change; ships
@@ -71,6 +52,20 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
 - **`Consumes.OBSERVABLE` on the engine boundary.**
   `pauli_engine_plan.md` adds the member and makes `StateVector.consumes` a
   property, so a third-party engine that dispatches on `consumes` adapts.
+
+- **Shadow error bar from a certified variance.**  `ShadowEstimate.error`
+  puts the empirical `V_hat` where HKP Theorem 1 needs the true variance.
+  On an observable driven by rare outcomes `V_hat` is usually 0, and so is
+  the bar: `X = 100` with probability `1e-4` over 200 settings misses at
+  `K = 8` 98 % of the time against a reported `delta` of 0.037.  Bound the
+  variance from above instead, by the shadow norm (state-independent) or a
+  confidence bound on `V_hat`.  The same change can report the tighter
+  failure bound the half-width already earns: Chebyshev gives each batch
+  mean `1/34`, so a median of `K` fails at most `P[Bin(K, 1/34) >=
+  ceil(K/2)]`, `2.9e-2` at `K = 1` and `4.8e-5` at `K = 8` against HKP's
+  1 and 0.037.  Both change the reported values: `error` widens, and
+  `delta` stops being HKP's bound, so a public field changes meaning.
+  §18 oracles for each.
 
 ## Additive, no window needed
 
@@ -87,13 +82,11 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   otherwise conflict with it across them.
 - **`qarp` typed for its users.**  `qarp` ships no `py.typed`, so user code
   sees it untyped.  Running mypy over the example notebooks and the docs
-  snippets finds five gaps to close before it does: a list of Python blocks
+  snippets finds four gaps to close before it does: a list of Python blocks
   of different kinds infers as `list[_BlockMixin]`, which a
   `Sequence[QarpBlock]` parameter rejects, so the six classes need one
-  shared typing base; `symbols` is `Optional`, so `len(block.symbols)` fails
-  in 22 notebook cells and 3 docs snippets, and making it always a tuple
-  changes `symbols is None` checks; `PreparesKnownState`'s members are
-  attached by `setattr`, so mypy sees none of them on the state blocks;
+  shared typing base; `PreparesKnownState`'s members are attached by
+  `setattr`, so mypy sees none of them on the state blocks;
   `run()` returns `PrimitiveResult`, `float | complex | SamplingDistribution`,
   so 45 notebook and docs sites must narrow a result before reading it, which
   a return typed by primitive kind would remove; and a `MonteCarlo` walker's
