@@ -2849,7 +2849,7 @@ Aggregated Monte Carlo
 
 ``AggregatedMonteCarlo`` represents all walkers on a computational-basis label
 as one signed integer population. A capable engine supplies persistent exact
-FP64 transition columns and resident evolution; the initial implementation
+FP64 transition columns and resident evolution; the implementation
 requires ``CudaqEngine`` with its default single-device StateVector/FP64
 configuration and the separately enabled native MC build option. It executes
 no quantum measurement circuits. Existing ``MonteCarlo`` retains its CPU and
@@ -2924,3 +2924,18 @@ The bounded example is
 ``examples/algorithms/composite/mwe_montecarlo_gpu.ipynb``. Its independent CPU
 oracle always runs; GPU cells require ``QARP_RUN_CUDAQ_GPU_TESTS=1`` and an
 MC-enabled build. A CPU-only run explicitly reports the GPU path unverified.
+
+The engine extension point is ``Engine._resident_simulator(n_qubits)``. Its
+simulator exposes ``CudaqSimulator.make_transition_column_provider``; C++
+consumers include ``qarpx/montecarlo/contexts.h`` for evolution records and
+factories. These public headers contain no CUDA types.
+
+``aggregated_binomial_calls`` counts logical binomial sampler invocations,
+including probabilities zero and one. It does not count the underlying uniform
+variates: inversion may restart, while the Bernoulli branch draws per walker.
+Complete-row edge visits count cached outgoing edges of active sources;
+request-path edge visits count sampled proposal multiplicities.
+Automatic sector/realness certification requires the concrete canonical
+``TrotterAnsatzBlock``, not an arbitrary subclass overriding its accessors.
+Circuit accounting resets per run and includes reused complete-row support;
+a warm coefficient cache does not lower the logical measurement-setting count.

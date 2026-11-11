@@ -31,7 +31,7 @@ def _blas_pool_workers() -> int:
 def _configured_thread_count() -> int:
     """Internal: the worker count every qarpx parallel layer uses."""
 
-__abi_version__: int = 16
+__abi_version__: int = 17
 
 __source_dir__: str
 
@@ -1853,7 +1853,7 @@ class CudaqSimulator:
 class TransitionColumnProvider:
     def columns(self, source_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)]) -> NDArray[numpy.complex128]: ...
 
-    def compact_columns(self, source_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], absolute_tolerance: float) -> tuple: ...
+    def compact_columns(self, source_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], absolute_tolerance: float) -> tuple[Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu')], Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu')], Annotated[NDArray[numpy.complex128], dict(shape=(None,), order='C', device='cpu')]]: ...
 
     @property
     def diagnostics(self) -> dict: ...

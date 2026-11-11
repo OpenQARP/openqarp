@@ -1,5 +1,10 @@
 #pragma once
+#ifdef __CUDACC__
 #include <cuda_runtime.h>
+#define QARP_MC_HD __host__ __device__
+#else
+#define QARP_MC_HD
+#endif
 #include <cstdint>
 #include <cmath>
 #include "qarpx/montecarlo/contexts.h"
@@ -30,7 +35,7 @@ struct DeviceAggregatedControl {
     uint64_t died;
     uint64_t annihilated;
     uint64_t transition_edges;
-    uint64_t rng_variates;
+    uint64_t binomial_calls;
     double energy_shift;
 };
 
@@ -46,10 +51,18 @@ struct DeviceAggregatedStepSummary {
     uint64_t annihilated;
     uint64_t active_labels;
     uint64_t transition_edges;
-    uint64_t rng_variates;
+    uint64_t binomial_calls;
 };
 
-__device__ inline uint64_t splitmix64(uint64_t value) {
+QARP_MC_HD inline uint32_t multiply_high(uint32_t a, uint32_t b) {
+#ifdef __CUDA_ARCH__
+    return __umulhi(a, b);
+#else
+    return static_cast<uint32_t>((static_cast<uint64_t>(a) * b) >> 32U);
+#endif
+}
+
+QARP_MC_HD inline uint64_t splitmix64(uint64_t value) {
     value += 0x9e3779b97f4a7c15ULL;
     value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
     value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
@@ -66,13 +79,13 @@ struct PhiloxStream {
     uint32_t values[4] = {};
     int next_value = 4;
 
-    __device__ inline PhiloxStream(uint64_t seed, uint64_t event_key)
+    QARP_MC_HD inline PhiloxStream(uint64_t seed, uint64_t event_key)
         : counter2(static_cast<uint32_t>(event_key)),
           counter3(static_cast<uint32_t>(event_key >> 32U)),
           key0(static_cast<uint32_t>(seed)),
           key1(static_cast<uint32_t>(seed >> 32U)) {}
 
-    __device__ inline void generate() {
+    QARP_MC_HD inline void generate() {
         uint32_t c0 = counter0;
         uint32_t c1 = counter1;
         uint32_t c2 = counter2;
@@ -84,9 +97,9 @@ struct PhiloxStream {
         constexpr uint32_t increment0 = 0x9E3779B9U;
         constexpr uint32_t increment1 = 0xBB67AE85U;
         for (int round = 0; round < 10; ++round) {
-            const uint32_t high0 = __umulhi(multiplier0, c0);
+            const uint32_t high0 = multiply_high(multiplier0, c0);
             const uint32_t low0 = multiplier0 * c0;
-            const uint32_t high1 = __umulhi(multiplier1, c2);
+            const uint32_t high1 = multiply_high(multiplier1, c2);
             const uint32_t low1 = multiplier1 * c2;
             c0 = high1 ^ c1 ^ k0;
             c1 = low1;
@@ -103,12 +116,12 @@ struct PhiloxStream {
         if (++counter0 == 0U) ++counter1;
     }
 
-    __device__ inline uint32_t next_u32() {
+    QARP_MC_HD inline uint32_t next_u32() {
         if (next_value == 4) generate();
         return values[next_value++];
     }
 
-    __device__ inline double uniform() {
+    QARP_MC_HD inline double uniform() {
         const uint64_t high = static_cast<uint64_t>(next_u32() >> 5U);
         const uint64_t low = static_cast<uint64_t>(next_u32() >> 6U);
         return (static_cast<double>(high * 67108864ULL + low) + 0.5) /
@@ -116,7 +129,7 @@ struct PhiloxStream {
     }
 };
 
-__device__ inline uint64_t aggregated_event_key(
+QARP_MC_HD inline uint64_t aggregated_event_key(
     uint64_t trajectory, uint64_t step, uint64_t source, uint64_t target,
     int64_t sign, uint64_t event_type) {
     uint64_t key = splitmix64(trajectory);
@@ -127,8 +140,9 @@ __device__ inline uint64_t aggregated_event_key(
     return splitmix64(key ^ event_type);
 }
 
-__device__ inline uint64_t exact_binomial(
-    uint64_t n, double probability, PhiloxStream& random) {
+template <class RandomStream>
+QARP_MC_HD inline uint64_t exact_binomial(
+    uint64_t n, double probability, RandomStream& random) {
     if (n == 0 || probability <= 0.0) return 0;
     if (probability >= 1.0) return n;
     const bool complement = probability > 0.5;
@@ -137,14 +151,20 @@ __device__ inline uint64_t exact_binomial(
     uint64_t successes = 0;
     if (mean < 16.0) {
         const double q = 1.0 - p;
-        double mass = pow(q, static_cast<double>(n));
-        double sample = random.uniform();
-        while (sample > mass && successes < n) {
-            sample -= mass;
-            ++successes;
-            mass *= (static_cast<double>(n - successes + 1) /
-                     static_cast<double>(successes)) *
-                    (p / q);
+        const double initial_mass = exp(static_cast<double>(n) * log1p(-p));
+        for (;;) {
+            double mass = initial_mass;
+            double sample = random.uniform();
+            successes = 0;
+            while (sample > mass && successes < n) {
+                sample -= mass;
+                ++successes;
+                mass *= (static_cast<double>(n - successes + 1) /
+                         static_cast<double>(successes)) * (p / q);
+                // Rounded total mass can miss the top uniform-grid values.
+                if (mass == 0.0) break;
+            }
+            if (sample <= mass) break;
         }
     } else {
         for (uint64_t draw = 0; draw < n; ++draw) {
@@ -154,6 +174,7 @@ __device__ inline uint64_t exact_binomial(
     return complement ? n - successes : successes;
 }
 
+#ifdef __CUDACC__
 __device__ inline int64_t find_sorted_label(
     const uint64_t* labels, uint64_t count, uint64_t label) {
     uint64_t left = 0;
@@ -207,4 +228,6 @@ __global__ void apply_sampled_aggregated_death_cloning(
     const double* diagonal_elements, uint64_t diagonal_count,
     double time_step, uint64_t root_seed, uint64_t trajectory_index,
     int64_t* surviving_populations);
+#endif
+#undef QARP_MC_HD
 }

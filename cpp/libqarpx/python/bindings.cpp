@@ -239,7 +239,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 16
+#define QARPX_ABI_VERSION 17
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();

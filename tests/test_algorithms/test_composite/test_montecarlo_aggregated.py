@@ -87,6 +87,9 @@ def test_resident_config_validation_and_payload(field, value):
         ("estimator_burn_in_steps", -1),
         ("estimator_block_size", 0),
         ("num_trajectories", 0),
+        ("initial_walker_count", True),
+        ("population_threshold", True),
+        ("column_batch_size", True),
         ("time_step", 0),
         ("population_threshold", 0),
         ("seed", -1),
@@ -127,6 +130,7 @@ def test_typed_options_reject_invalid_types(option, value):
         {"save_walker_history": True},
         {"qdrift": True},
         {"ham_cache": {}},
+        {"walker_basis": np.eye(2)},
         {"hamiltonian": np.eye(2)},
         {"hamiltonian": "nonhermitian"},
     ],
@@ -378,18 +382,18 @@ def test_bulk_complete_rows_match_hand_derived_sparse_uploads(monkeypatch):
     before = list(rows.calls)
     assert m._upload_complete_rows([1, 2]) == set()
     assert rows.calls == before
-    legacy_rows = _MatrixRows(matrix)
-    monkeypatch.setattr(module, "_PersistentGpuRows", lambda *a: legacy_rows)
-    legacy = _mc(
+    counted_rows = _MatrixRows(matrix)
+    monkeypatch.setattr(module, "_PersistentGpuRows", lambda *a: counted_rows)
+    counted = _mc(
         unitary_block=SimpleBlock(2),
         reference_walker_label=1,
         column_batch_size=4,
         time_step=0.005,
         track_transition_circuits=True,
     ).build()
-    legacy._upload_complete_rows([2, 0, 3, 1])
+    counted._upload_complete_rows([2, 0, 3, 1])
     for actual, original in zip(
-        rows.context.uploads[0], legacy_rows.context.uploads[0], strict=True
+        rows.context.uploads[0], counted_rows.context.uploads[0], strict=True
     ):
         assert actual.dtype == original.dtype and actual.tobytes() == original.tobytes()
 
@@ -1037,9 +1041,9 @@ def test_accounting_reuses_lazy_circuits_per_run_and_preserves_tape(monkeypatch)
     assert counted.diagnostics["measurement_settings"] == 4
     assert counted.run() == expected
     assert len(calls) == 2
-    # Resident rows survive runs; only the reference diagonal is requested again.
+    # Resident rows survive runs; logical accounting is independent of that cache.
     assert counted.diagnostics["generated_circuits"] == 2
-    assert counted.diagnostics["measurement_settings"] == 2
+    assert counted.diagnostics["measurement_settings"] == 4
     assert counted.diagnostics["actual_shots_executed"] == 0
 
 
@@ -1167,6 +1171,9 @@ def test_combined_independent_trajectories_pool_signed_tapes(
     assert summary["completed_trajectories"] == 2
     assert summary["sample_count"] == (2 if estimator == "instantaneous" else 4 - 2 * burn_in)
     assert summary["status"] == "Completed"
+    assert summary["trajectory_jackknife_estimates"] == pytest.approx(
+        [50 / 7, 10 / 3] if estimator == "ratio_of_sums" and burn_in == 0 else [8, 4]
+    )
     assert all("jackknife_stderr" not in t["estimator"] for t in m.diagnostics["trajectories"])
     if estimator == "ratio_of_sums":
         m.estimator_block_size = 1
@@ -1255,3 +1262,506 @@ def test_nonfinite_native_numerator_preserves_raw_failure_history(monkeypatch):
     assert snapshot["completed_steps"] == 1
     assert m.diagnostics["estimator"]["failed_trajectories"] == 1
     assert m.diagnostics["estimator"]["estimate"] is None
+
+
+@pytest.mark.parametrize(
+    "estimator,burn_in,block_size,expected,stderr",
+    [
+        ("ratio_of_sums", 0, None, 6, None),
+        ("ratio_of_sums", 0, 2, 6, 40 / 21),
+        ("ratio_of_sums", 1, None, 58 / 9, None),
+        ("instantaneous", 0, None, 8, None),
+    ],
+)
+def test_plan_literal_single_trajectory_estimator(estimator, burn_in, block_size, expected, stderr):
+    m = _mc(
+        total_time=4,
+        time_step=1,
+        projected_energy_estimator=estimator,
+        estimator_burn_in_steps=burn_in,
+        estimator_block_size=block_size,
+    )
+    for step, (n, d) in enumerate(zip([2, 8, 18, 32], [1, 2, 3, 4], strict=True)):
+        m._record_aggregated_projected_energy(
+            step=step, numerator=float(n), denominator=d, instantaneous_energy=n / d
+        )
+    result = m._local_estimator()
+    assert result["estimate"] == pytest.approx(expected)
+    if stderr is not None:
+        assert result["jackknife_stderr"] == pytest.approx(stderr)
+    else:
+        assert "jackknife_stderr" not in result
+
+
+@pytest.mark.parametrize("option", ["estimator_burn_in_steps", "estimator_block_size"])
+def test_instantaneous_rejects_production_options_with_direction(option):
+    with pytest.raises(ValueError, match="ratio_of_sums"):
+        _mc(total_time=4, time_step=1, **{option: 1})
+
+
+def test_plan_literal_sector_and_config_payload():
+    sector = ComputationalBasisSector(((0, 2), (1, 3)), (1, 1))
+    assert sector.configuration_payload() == {
+        "qubit_partitions": [[0, 2], [1, 3]],
+        "hamming_weights": [1, 1],
+    }
+    assert ResidentEvolutionConfig(sector).configuration_payload() == {
+        "sector": {"qubit_partitions": [[0, 2], [1, 3]], "hamming_weights": [1, 1]},
+        "proposal": "uniform_sector",
+        "transition_batch_size": 64,
+        "proposal_attempts_per_walker": 1,
+        "cache_max_bytes": 16 * 2**30,
+    }
+
+
+@pytest.mark.parametrize("grouping", ["fully", "none", "qwc"])
+def test_plan_xx_yy_charge_certificate(grouping):
+    from qarp.operators import QubitWiseCommuting
+
+    group = {"fully": FullyCommuting, "none": NoGrouping, "qwc": QubitWiseCommuting}[grouping]()
+    u = TrotterAnsatzBlock(
+        2, [QubitOperator("X0 X1") + QubitOperator("Y0 Y1")], [Symbol("t")], grouping=group
+    ).set_symbols({Symbol("t"): 0.2})
+    m = _mc(
+        unitary_block=u,
+        reference_walker_label=1,
+        hamiltonian=QubitOperator("X0 X1") + QubitOperator("Y0 Y1"),
+    )
+    sector = ComputationalBasisSector(((0, 1),), (1,))
+    if grouping == "fully":
+        assert m._certify_computational_basis_sector(sector, enumerate_labels=True) == (1, 2)
+    else:
+        with pytest.raises(CapabilityError, match="commuting group"):
+            m._certify_computational_basis_sector(sector, enumerate_labels=True)
+
+
+def test_subclass_cannot_supply_its_own_sector_certificate():
+    class Untrusted(TrotterAnsatzBlock):
+        def generator_groups(self):
+            return ()
+
+    u = Untrusted(2, [QubitOperator("X0")], [Symbol("t")])
+    m = _mc(unitary_block=u, reference_walker_label=1, hamiltonian=QubitOperator("Z0"))
+    with pytest.raises(CapabilityError, match="TrotterAnsatzBlock"):
+        m._certify_computational_basis_sector(
+            ComputationalBasisSector(((0, 1),), (1,)), enumerate_labels=False
+        )
+    with pytest.raises(CapabilityError, match="TrotterAnsatzBlock"):
+        m._certify_real_resident_problem()
+
+
+def test_request_realness_reports_exact_coordinates():
+    with pytest.raises(CapabilityError, match="source=7, target=3"):
+        module.AggregatedMonteCarlo._require_real(1 + 0.1j, 7, 3)
+
+
+@pytest.mark.parametrize("budget,retained", [(255, False), (256, True), (257, True)])
+def test_literal_scalar_cache_budget_boundary_and_eviction(budget, retained):
+    cache = module._ExactCoefficientCache(budget, "literal")
+    cache.put(1, 2, 3 + 4j)
+    assert (cache.get(1, 2) is not None) == retained
+    cache.put(3, 4, 5j)
+    assert cache.get(1, 2) is None
+    cache.put(1, 2, 3 + 4j)
+    assert (cache.get(2, 1) == 3 - 4j) == retained
+
+
+def test_resident_hook_and_seed_reset_arguments_are_observed(monkeypatch):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    calls = []
+
+    class Spy(_CpuResidentEngine):
+        def _resident_simulator(self, n_qubits):
+            calls.append(n_qubits)
+            return super()._resident_simulator(n_qubits)
+
+    m = _mc(engine=Spy(), num_trajectories=2).build()
+    assert calls and set(calls) == {1}
+    root = int(np.random.SeedSequence(7).generate_state(1, dtype=np.uint64)[0])
+    resets = []
+    original = m._gpu_rows.context.reset_aggregated_evolution
+
+    def reset(*args):
+        resets.append(args[-2:])
+        original(*args)
+
+    m._gpu_rows.context.reset_aggregated_evolution = reset
+    m.run()
+    assert resets == [(root, 0), (root, 1)]
+
+
+def test_second_trajectory_failure_keeps_ensemble_incomplete(monkeypatch):
+    class Context(_ScriptedContext):
+        def reset_aggregated_evolution(self, *args):
+            super().reset_aggregated_evolution(*args)
+            self.trajectory = args[-1]
+
+        def advance_aggregated_evolution(self, steps):
+            if self.trajectory == 1:
+                raise RuntimeError("second trajectory failure")
+            return super().advance_aggregated_evolution(steps)
+
+    class Rows(_ScriptedRows):
+        def __init__(self, *args):
+            super().__init__(*args)
+            self.context = Context()
+
+    monkeypatch.setattr(module, "_PersistentGpuRows", Rows)
+    m = _mc(num_trajectories=2).build()
+    with pytest.raises(RuntimeError, match="second trajectory failure"):
+        m.run()
+    summary = m.diagnostics["estimator"]
+    assert summary["status"] == "Incomplete"
+    assert summary["completed_trajectories"] == 1
+    assert summary["failed_trajectories"] == 1
+    assert summary["estimate"] is None
+
+
+@pytest.mark.parametrize("event", ["spawn", "complement", "death", "clone"])
+def test_gpu_inversion_events_match_analytic_binomial_moments(event):
+    _, context = _gpu_context()
+    diagonal = 0.02 if event == "death" else -0.02 if event == "clone" else 0.0
+    context.reset_aggregated_evolution(0, 512, 0, diagonal, 1, 0, 1000000, 7, 0)
+    if event in ("spawn", "complement"):
+        _upload_x(context, 0.98 if event == "complement" else 0.02)
+    else:
+        context.upload_aggregated_transition_rows(
+            np.array([0, 0], dtype=np.uint64),
+            np.array([0], dtype=np.uint64),
+            np.array([], dtype=np.uint64),
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.int8),
+            np.array([0.02 if event == "death" else -0.02]),
+            np.array([0.0]),
+        )
+    observations = []
+    field = {
+        "spawn": "spawned_history",
+        "complement": "spawned_history",
+        "death": "died_history",
+        "clone": "cloned_history",
+    }[event]
+    for trajectory in range(1024):
+        context.reset_aggregated_evolution(0, 512, 0, diagonal, 1, 0, 1000000, 7, trajectory)
+        result = context.advance_aggregated_evolution(1)
+        assert result.status == qx.EvolutionStatus.Completed
+        observations.append(int(getattr(result, field)[0]))
+        if event in ("death", "clone"):
+            assert result.projected_energy_history[0] == pytest.approx(diagonal)
+    # Binomial(512,.02): mean 10.24, variance 10.0352; fixed seeds, no retries.
+    assert np.mean(observations) == pytest.approx(
+        501.76 if event == "complement" else 10.24, abs=8 * np.sqrt(10.0352 / 1024)
+    )
+    assert np.var(observations, ddof=1) == pytest.approx(10.0352, rel=0.35)
+
+    assert context.diagnostics["aggregated_binomial_calls"] == 1024 * (
+        2 if event in ("spawn", "complement") else 1
+    )
+
+
+def test_gpu_fractional_request_spawning_matches_inversion_binomial():
+    _, context = _gpu_context()
+    observations = []
+    for trajectory in range(1024):
+        context.reset_aggregated_evolution(0, 512, 0, 0, 1, 0, 1000000, 7, trajectory)
+        request = context.request_transitions(1)
+        u = lambda values: np.asarray(values, dtype=np.uint64)
+        f = lambda values: np.asarray(values, dtype=np.float64)
+        result = context.apply_transition_batch(
+            request.request_id,
+            trajectory,
+            0,
+            1,
+            u([0]),
+            u([1]),
+            u([512]),
+            f([1]),
+            np.array([0.02 + 0j]),
+            u([0]),
+            f([0]),
+            u([0, 1]),
+            f([0, 0.02]),
+        )
+        assert result.status == qx.EvolutionStatus.Completed
+        observations.append(int(result.spawned_history[0]))
+    assert np.mean(observations) == pytest.approx(10.24, abs=8 * np.sqrt(10.0352 / 1024))
+    assert np.var(observations, ddof=1) == pytest.approx(10.0352, rel=0.35)
+    assert context.diagnostics["aggregated_binomial_calls"] == 2048
+
+
+def test_incomplete_block_tail_and_invalid_replica_oracles():
+    m = _mc(
+        total_time=5,
+        time_step=1,
+        projected_energy_estimator="ratio_of_sums",
+        estimator_block_size=2,
+    )
+    for step, (n, d) in enumerate(zip([2, 8, 18, 32, 100], [1, 2, 3, 4, 5], strict=True)):
+        m._record_aggregated_projected_energy(
+            step=step, numerator=n, denominator=d, instantaneous_energy=n / d
+        )
+    result = m._local_estimator()
+    assert result["estimate"] == pytest.approx(32 / 3)
+    assert result["jackknife_samples"] == 4
+    assert result["jackknife_stderr"] == pytest.approx(40 / 21)
+    m.estimator_block_size = 1
+    m._reset_projected_energy_estimator()
+    for step, (n, d) in enumerate([(1, 0), (3, 2)]):
+        m._record_aggregated_projected_energy(
+            step=step, numerator=n, denominator=d, instantaneous_energy=np.nan if not d else n / d
+        )
+    result = m._local_estimator()
+    assert result["estimate"] == 2
+    assert result["invalid_jackknife_replicates"] == 1
+    assert result["jackknife_stderr"] is None
+
+
+def test_timing_partition_counts_preparation_as_orchestration(monkeypatch):
+    m = _mc()
+    clock = iter([100.0, 130.0])
+    monkeypatch.setattr(module, "perf_counter", lambda: next(clock))
+
+    def step():
+        m._resource_counters.update(
+            row_evaluation_wall_seconds=2.0,
+            evolution_wall_seconds=3.0,
+            cache_transfer_wall_seconds=5.0,
+            circuit_accounting_wall_seconds=11.0,
+            transition_array_preparation_wall_seconds=7.0,
+        )
+
+    monkeypatch.setattr(m, "_iterate_resident_impl", step)
+    m._iterate_resident()
+    assert m.diagnostics["propagation_wall_seconds"] == 30
+    assert m.diagnostics["host_orchestration_wall_seconds"] == 9
+
+
+@pytest.mark.parametrize(
+    "override,error,match",
+    [
+        ({"engine": None}, CapabilityError, "resident"),
+        ({"hamiltonian": "nonfinite"}, ValueError, "finite"),
+        ({"unitary_block": "wide"}, ValueError, "register"),
+        ({"unitary_block": "narrow", "hamiltonian": "outside"}, ValueError, "register"),
+        ({"total_time": 0.01}, ValueError, "Time"),
+        ({"time_step": float("nan")}, ValueError, "Time"),
+        ({"estimator_burn_in_steps": True}, ValueError, "integer"),
+        ({"estimator_burn_in_steps": 1.5}, ValueError, "integer"),
+        ({"num_trajectories": True}, ValueError, "integer"),
+        ({"resident_evolution": "config", "sector": "sector"}, ValueError, "Declare"),
+        (
+            {"resident_evolution": "config", "transition_prefetch": "adaptive"},
+            CapabilityError,
+            "prefetch",
+        ),
+    ],
+)
+def test_missing_option_matrix_rejections(override, error, match):
+    options = dict(override)
+    if options.get("hamiltonian") == "nonfinite":
+        options["hamiltonian"] = QubitOperator("X0", float("inf"))
+    if options.get("hamiltonian") == "outside":
+        options["hamiltonian"] = QubitOperator("X1")
+    if options.get("unitary_block") in ("wide", "narrow"):
+        options["unitary_block"] = SimpleBlock(63 if options["unitary_block"] == "wide" else 1)
+    if options.get("resident_evolution") == "config":
+        options["resident_evolution"] = ResidentEvolutionConfig(
+            ComputationalBasisSector(((0, 1),), (1,))
+        )
+    if options.get("sector") == "sector":
+        options["sector"] = ComputationalBasisSector(((0, 1),), (1,))
+    with pytest.raises(error, match=match):
+        _mc(**options)
+
+
+def test_missing_engine_and_cpu_engine_fail_before_native_context(monkeypatch):
+    from qarp.engines import QarpEngine
+
+    monkeypatch.setattr(module, "_PersistentGpuRows", lambda *a: pytest.fail("native allocation"))
+    with pytest.raises(TypeError, match="engine"):
+        AggregatedMonteCarlo(QubitOperator("X0"), 0.0, 1.0, 0.1, 0, SimpleBlock(1))
+    with pytest.raises(CapabilityError, match="resident"):
+        _mc(engine=QarpEngine())
+
+
+def test_one_state_sector_is_valid_for_complete_columns(monkeypatch):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    theta = Symbol("t")
+    u = TrotterAnsatzBlock(2, [QubitOperator(())], [theta]).set_symbols({theta: 0.0})
+    m = _mc(
+        hamiltonian=QubitOperator(()),
+        unitary_block=u,
+        sector=ComputationalBasisSector(((0, 1),), (0,)),
+    ).build()
+    assert m.sector is not None and m.sector.dimension == 1
+
+
+def test_dense_startup_helpers_cannot_participate(monkeypatch):
+    from qarp.algorithms import _utils
+    from qarp.algorithms._composite import montecarlo as cpu_module
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("dense host startup or primitive execution")
+
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    monkeypatch.setattr(_utils, "generate_states_new_basis", forbidden)
+    monkeypatch.setattr(cpu_module, "generate_states_new_basis", forbidden)
+    monkeypatch.setattr(qx.QubitOperator, "sparse_matrix", forbidden)
+    for name in ("statevector", "unitary_matrix", "run"):
+        monkeypatch.setattr(qx.QarpSimulator, name, forbidden)
+    m = _mc().build()
+    assert m.primitive is None
+    assert m.run() == [-1]
+
+
+@pytest.mark.parametrize("mutation", ["unitary", "config"])
+def test_bound_unitary_and_configuration_mutation_require_rebuild(monkeypatch, mutation):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    m = _mc().build()
+    if mutation == "unitary":
+        m.U.x(0)
+    else:
+        m.column_batch_size = 2
+    with pytest.raises(RuntimeError, match="rebuild"):
+        m.run()
+
+
+def test_literal_diagnostic_keys_and_snapshot_lifetime(monkeypatch):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    m = _mc().build()
+    snapshot = m.diagnostics
+    assert set(snapshot) == {
+        "transition_array_preparation_wall_seconds",
+        "max_complete_row_imaginary",
+        "provider",
+        "configuration_hash",
+        "root_seed",
+        "trajectory_index",
+        "proposal_seed_sequence",
+        "status",
+        "completed_steps",
+        "measurement_circuits_executed",
+        "actual_shots_executed",
+        "histories",
+        "trajectories",
+        "python_coefficient_cache_entries",
+        "column_provider",
+        "evolution",
+        "estimator",
+    }
+    m.run()
+    assert snapshot["completed_steps"] == 0
+    assert snapshot["trajectories"] == ()
+
+
+@pytest.mark.parametrize(
+    "time_step,source,expected",
+    [(0.005, 0, [4, 5]), (0.005, 1, [5]), (0.02, 0, [4, 5]), (0.02, 1, [4, 5])],
+)
+def test_cutoff_order_and_reference_exception_literal_targets(
+    monkeypatch, time_step, source, expected
+):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    m = _mc(unitary_block=SimpleBlock(3), time_step=time_step, total_time=time_step).build()
+
+    def compact(sources, tolerance):
+        assert sources.tolist() == [source]
+        assert tolerance == 1e-12
+        # Independent strict compaction removes the first two literal amplitudes.
+        return (
+            np.array([0, 2], dtype=np.uint64),
+            np.array([4, 5], dtype=np.uint64),
+            np.array([1.5e-12, 3e-12], dtype=np.complex128),
+        )
+
+    m._gpu_rows.provider.compact_columns = compact
+    m._upload_complete_rows([source])
+    arrays = m._gpu_rows.context.uploads[-1]
+    np.testing.assert_array_equal(arrays[2], expected)
+    assert all(arrays[4] == -1)
+
+
+def test_unbound_unitary_rejected_before_numerical_factory():
+    u = SimpleBlock(1)
+    u.rz(0, Symbol("unbound"))
+    with pytest.raises(ValueError, match="Bind all unitary parameters"):
+        _mc(unitary_block=u).build()
+
+
+def test_gpu_plan_class_request_fixture_has_energy_minus_four():
+    _gpu_context()
+    from qarp.engines import CudaqEngine
+
+    t = Symbol("t")
+    u = TrotterAnsatzBlock(2, [QubitOperator(())], [t]).set_symbols({t: 0.0})
+    m = _mc(
+        hamiltonian=QubitOperator("X0 X1") + QubitOperator("Y0 Y1"),
+        engine=CudaqEngine(),
+        unitary_block=u,
+        reference_walker_label=1,
+        initial_walker_count=1,
+        total_time=1.0,
+        time_step=1.0,
+        shift_damping=0.0,
+        resident_evolution=ResidentEvolutionConfig(ComputationalBasisSector(((0, 1),), (1,))),
+    ).build()
+    assert m.run() == [-4]
+    trajectory = m.diagnostics["trajectories"][0]
+    assert trajectory["histories"]["population_history"] == (3,)
+    assert trajectory["histories"]["reference_population_history"] == (1,)
+    assert trajectory["histories"]["projected_numerator_history"] == (-4.0,)
+
+
+def test_gpu_native_advance_releases_gil_for_python_progress():
+    import sys
+    import threading
+    import time
+
+    _, context = _gpu_context()
+    context.reset_aggregated_evolution(0, 8, 0, 0, 0.1, 0, 1000, 7, 0)
+    context.upload_aggregated_transition_rows(
+        np.array([0, 0], dtype=np.uint64),
+        np.array([0], dtype=np.uint64),
+        np.array([], dtype=np.uint64),
+        np.array([], dtype=np.float64),
+        np.array([], dtype=np.int8),
+        np.array([0.0]),
+        np.array([0.0]),
+    )
+    ready, stop = threading.Event(), threading.Event()
+    ticks = [0]
+
+    def heartbeat():
+        while not stop.is_set():
+            ticks[0] += 1
+            ready.set()
+            time.sleep(0.001)
+
+    worker = threading.Thread(target=heartbeat)
+    interval = sys.getswitchinterval()
+    worker.start()
+    try:
+        assert ready.wait(5)
+        # Prevent a bytecode timeslice between the before/call/after observations.
+        sys.setswitchinterval(60)
+        before = ticks[0]
+        result = context.advance_aggregated_evolution(512)
+        after = ticks[0]
+        assert result.completed_steps == 512
+        assert after > before
+    finally:
+        sys.setswitchinterval(interval)
+        stop.set()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+
+
+def test_scalar_coefficients_are_recomputed_after_literal_lru_eviction(monkeypatch):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    m = _mc().build()
+    m._coefficient_cache = module._ExactCoefficientCache(256, "single entry")
+    assert m._transition_coefficients([(0, 0)]) == [0]
+    assert m._transition_coefficients([(0, 1)]) == [1]
+    assert m._transition_coefficients([(0, 0)]) == [0]
+    assert m._gpu_rows.calls == [(0,), (0,), (0,)]
+    assert len(m._coefficient_cache.entries) == 1

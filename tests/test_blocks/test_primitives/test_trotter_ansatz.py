@@ -659,7 +659,7 @@ def test_generator_groups_is_immutable_and_matches_emission(grouping_name, group
         for group in groups
         for paulis, symbol, coefficient in group
     ]
-    assert sorted(triples) == [
+    assert triples == [
         (("X", "X"), "a", 1.0),
         (("Y", "Y"), "a", 1.0),
         (("Z", "Z"), "b", 1.0),

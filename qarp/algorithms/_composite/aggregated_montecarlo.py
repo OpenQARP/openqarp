@@ -27,7 +27,7 @@ from qarp.operators._computational_basis_sector import (
 )
 from qarp.operators.functions import count_qubits, is_hermitian
 
-from .._primitives import GroupedTransitionHadamardTest, StateVector
+from .._primitives import GroupedTransitionHadamardTest
 from .composite_algorithm import CompositeAlgorithm
 
 
@@ -287,7 +287,10 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
             raise ValueError("Reference outside the register")
         if initial_walker_count > np.iinfo(np.int64).max:
             raise ValueError("initial_walker_count exceeds int64")
-        super().__init__(primitive=StateVector(), engine=engine)
+        if engine is None:
+            raise CapabilityError("Engine has no resident simulator capability")
+        # The base permits None at runtime for amplitude-native composites.
+        super().__init__(primitive=None, engine=engine)  # type: ignore[arg-type]
         self.hamiltonian = deepcopy(hamiltonian)
         self.U = deepcopy(unitary_block)
         self.n_qubits = n
@@ -351,6 +354,8 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         self._resource_counters["generated_circuits"] = 0
         self._resource_counters["measurement_settings"] = 0
         self._run_status = "Incomplete"
+        if self.track_transition_circuits and self._cached_accounting_pairs:
+            self._count_transition_circuits(tuple(self._cached_accounting_pairs))
         try:
             for _ in range(self.num_trajectories):
                 before = self._trajectory_index
@@ -454,6 +459,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         self._uploaded_edge_count = 0
         self._accounted_pairs = set()
         self._accounting_count = None
+        self._cached_accounting_pairs: set[tuple[int, int]] = set()
         self._gpu_built = True
         self._resource_counters.clear()
         self._resource_counters["transition_array_preparation_wall_seconds"] = 0.0
@@ -466,10 +472,13 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         return self
 
     @staticmethod
-    def _require_real(value: complex) -> float:
+    def _require_real(
+        value: complex, source: int | None = None, target: int | None = None
+    ) -> float:
         if not isfinite(value.real) or not isfinite(value.imag) or abs(value.imag) > 1e-12:
             raise CapabilityError(
-                "Signed walker evolution requires finite real transition coefficients"
+                f"Signed walker evolution requires finite real transition coefficients; "
+                f"source={source}, target={target}, coefficient={value!r}"
             )
         return float(value.real)
 
@@ -521,7 +530,9 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
             circuits = primitive.circuits()
             self._accounting_count = len(circuits)
             self._resource_counters["generated_circuits"] += len(circuits)
-        self._accounted_pairs.update((min(a, b), max(a, b)) for a, b in pairs)
+        canonical = {(min(a, b), max(a, b)) for a, b in pairs}
+        self._accounted_pairs.update(canonical)
+        self._cached_accounting_pairs.update(canonical)
         self._resource_counters["measurement_settings"] = self._accounting_count * len(
             self._accounted_pairs
         )
@@ -557,7 +568,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
                     if self.resident_evolution is None:
                         self._require_complete_row_real(value, source, target)
                     else:
-                        self._require_real(value)
+                        self._require_real(value, source, target)
                     acquired[source, target] = value
                     acquired[target, source] = value.conjugate()
                     self._coefficient_cache.put(source, target, value)
@@ -621,9 +632,6 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
             self._resource_counters["cache_transfer_wall_seconds"] += (
                 perf_counter() - upload_started
             )
-            for source, column in zip(batch, columns, strict=True):
-                for target, amplitude in column.items():
-                    self._coefficient_cache.put(source, target, amplitude)
             self._uploaded_edge_count = next_edge_count
             self._uploaded_rows.update(batch)
             self._resource_counters["speculative_rows" if speculative else "requested_rows"] += len(
@@ -738,9 +746,17 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         )
         values = self._transition_coefficients(needed)
         coefficients = values[: len(pairs)]
-        diagonals = [self._require_real(v) for v in values[len(pairs) : len(pairs) + len(sources)]]
+        diagonals = [
+            self._require_real(v, source, source)
+            for source, v in zip(
+                sources, values[len(pairs) : len(pairs) + len(sources)], strict=True
+            )
+        ]
         correction = iter(values[len(pairs) + len(sources) :])
-        refs = [0.0 if s == reference else self._require_real(next(correction)) for s in references]
+        refs = [
+            0.0 if s == reference else self._require_real(next(correction), s, reference)
+            for s in references
+        ]
         return (
             request.request_id,
             request.trajectory_index,
@@ -872,7 +888,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         initial = (
             self._require_complete_row_real(coefficient, reference, reference)
             if self.resident_evolution is None
-            else self._require_real(coefficient)
+            else self._require_real(coefficient, reference, reference)
         )
         reset_started = perf_counter()
         context.reset_aggregated_evolution(
@@ -994,19 +1010,18 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
             raise CapabilityError("Certified computational-basis sectors require a QubitOperator")
         if not _operator_preserves_sector(self.hamiltonian, sector):
             raise CapabilityError(
-                "The effective Hamiltonian does not preserve every declared "
-                "semiclassical-sector partition"
+                "The effective Hamiltonian does not preserve every declared sector partition"
             )
-        if not isinstance(self.U, TrotterAnsatzBlock):
+        if type(self.U) is not TrotterAnsatzBlock:
             raise CapabilityError(
-                "Certified semiclassical-sector gathering currently requires "
+                "Certified sector gathering requires "
                 "TrotterAnsatzBlock so its complete grouped generators can be checked"
             )
         if self.U.target_qubits is not None and list(self.U.target_qubits) != list(
             range(self.n_qubits)
         ):
             raise CapabilityError(
-                "Certified semiclassical-sector gathering requires an uncontrolled, "
+                "Certified sector gathering requires an uncontrolled, "
                 "canonically mapped TrotterAnsatzBlock"
             )
 
@@ -1032,7 +1047,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
                     f"term {term} is incompatible"
                 )
 
-        if not isinstance(self.U, TrotterAnsatzBlock):
+        if type(self.U) is not TrotterAnsatzBlock:
             raise CapabilityError(
                 "Resident GPU realness certification currently requires TrotterAnsatzBlock"
             )

@@ -3,6 +3,7 @@
 #include <map>
 #include <optional>
 #include <cstddef>
+#include <functional>
 namespace qarpx::montecarlo::detail {
 struct AggregatedHostRow {
     uint64_t edge_count = 0;
@@ -27,8 +28,16 @@ struct HostProtocol {
     void validate_aggregated_transition_rows(const TransitionRows&) const;
     static std::size_t grown_capacity(std::size_t requested,std::size_t current);
     std::map<uint64_t,double> validate_reference_coefficients(const TransitionRows&, double) const;
+    void commit_transition_rows(const TransitionRows&, double, const std::function<void()>&);
+    std::map<uint64_t,bool> aggregated_target_labels_host_;
     std::map<uint64_t,double> aggregated_reference_elements_host_;
     bool replay(const TransitionBatch&) const;
+    void reset_requests();
+    TransitionRequest issue_request(std::uint64_t trajectory, std::uint64_t step,
+        std::uint64_t attempts, std::vector<Label> sources,
+        std::vector<Population> populations);
+    void accept_batch(const TransitionBatch&, const EvolutionResult&, Diagnostics&);
+    std::uint64_t sampled_request_counter_ = 0;
     std::size_t dimension_;
     std::map<uint64_t, AggregatedHostRow> aggregated_rows_;
     bool aggregated_initialized_ = false;

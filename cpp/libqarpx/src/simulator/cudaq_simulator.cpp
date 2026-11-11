@@ -484,12 +484,14 @@ CudaqSimulator::CudaqSimulator(CudaqSimulator&&) noexcept = default;
 CudaqSimulator& CudaqSimulator::operator=(CudaqSimulator&&) noexcept = default;
 
 CudaqResourceLease CudaqSimulator::lease_resources() const {
+    if (!config_mutex_) throw std::logic_error("CudaqSimulator is moved from");
     const std::lock_guard<std::mutex> lock(*config_mutex_);
     if (!resources_) resources_ = std::make_shared<detail::CudaqResources>(cfg_);
     return CudaqResourceLease(resources_);
 }
 
 void CudaqSimulator::set_config(CudaqConfig c) {
+    if (!config_mutex_) throw std::logic_error("CudaqSimulator is moved from");
     const std::lock_guard<std::mutex> lock(*config_mutex_);
     if (resources_ && resources_.use_count() > 1)
         throw std::runtime_error("Cannot reconfigure CudaqSimulator while resource leases are live");

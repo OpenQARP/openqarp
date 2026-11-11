@@ -108,6 +108,9 @@ TEST(MonteCarloResources, SimulatorMovePreservesActiveLeaseAndGuard) {
         CudaqSimulator original;
         auto lease = original.lease_resources();
         CudaqSimulator moved(std::move(original));
+        EXPECT_THROW((void)original.config(),std::logic_error);
+        EXPECT_THROW(original.set_config({}),std::logic_error);
+        EXPECT_THROW((void)original.lease_resources(),std::logic_error);
         EXPECT_THROW(moved.set_config({}), std::runtime_error);
         use.emplace(lease.acquire());
     }
@@ -124,6 +127,8 @@ bool gpu_opt_in() {
 TEST(MonteCarloGpu, gpu_SignedXTapeAndEvolutionOnlyAllocations) {
     if (!gpu_opt_in()) GTEST_SKIP() << "Open GPU numerical validation";
     CudaqSimulator simulator;
+    auto lease = simulator.lease_resources();
+    EXPECT_EQ(lease.acquire().handle_creations(), 0);
     auto context = mc::make_resident_evolution_context(simulator, 1);
     context->reset_aggregated_evolution(0, 8, 0, 0, 1, 0, 1000, 7, 0);
     auto missing = context->advance_aggregated_evolution(2);
@@ -138,9 +143,13 @@ TEST(MonteCarloGpu, gpu_SignedXTapeAndEvolutionOnlyAllocations) {
     EXPECT_EQ(result.projected_energy_history, (std::vector<double>{-1, -1}));
     const auto& d = context->diagnostics();
     EXPECT_EQ(d.handle_creations, 0);
-    EXPECT_EQ(d.state_buffer_bytes, 0);
-    EXPECT_EQ(d.gate_uploads, 0);
-    EXPECT_EQ(d.term_uploads, 0);
+    EXPECT_EQ(lease.acquire().handle_creations(), 0);
+    {
+        auto use = lease.acquire();
+        (void)use.statevector_handle();
+        EXPECT_EQ(use.handle_creations(), 1);
+    }
+    EXPECT_EQ(context->diagnostics().handle_creations, 1);
 }
 
 TEST(MonteCarloGpu, gpu_RequestReplayIsPayloadExactAndResetRejectsStaleBatch) {
@@ -197,13 +206,11 @@ TEST(MonteCarloHostProtocol, LiteralBatchValidationAndReplay) {
     mc::detail::HostProtocol protocol(1);
     protocol.aggregated_initialized_=true;
     protocol.aggregated_reference_label_=0;
-    protocol.sampled_request_pending_=true;
-    protocol.sampled_pending_attempts_per_walker_=1;
-    protocol.sampled_pending_request_={7,2,3,1,{0},{1},{1}};
-    mc::TransitionBatch batch{7,2,3,1,{0},{1},{1},{1.0},{{2.0,0.0}},{0},{0.0},{0,1},{0.0,2.0}};
+    const auto request=protocol.issue_request(2,3,1,{0},{1});
+    mc::TransitionBatch batch{request.request_id,2,3,1,{0},{1},{1},{1.0},{{2.0,0.0}},{0},{0.0},{0,1},{0.0,2.0}};
     EXPECT_NO_THROW(protocol.validate_transition_batch(batch));
     auto invalid=batch;
-    invalid.request_id=8;
+    invalid.request_id=request.request_id+1;
     EXPECT_THROW(protocol.validate_transition_batch(invalid),std::invalid_argument);
     invalid=batch;invalid.multiplicities[0]=2;
     EXPECT_THROW(protocol.validate_transition_batch(invalid),std::invalid_argument);
@@ -211,14 +218,22 @@ TEST(MonteCarloHostProtocol, LiteralBatchValidationAndReplay) {
     EXPECT_THROW(protocol.validate_transition_batch(invalid),std::invalid_argument);
     invalid=batch;invalid.reference_labels.pop_back();invalid.reference_elements.pop_back();
     EXPECT_THROW(protocol.validate_transition_batch(invalid),std::invalid_argument);
-    protocol.sampled_last_applied_request_id_=7;
-    protocol.last_batch_=batch;
+    mc::Diagnostics diagnostics;
+    mc::EvolutionResult result;
+    result.completed_steps=1;
+    protocol.accept_batch(batch,result,diagnostics);
+    protocol.accept_batch(batch,result,diagnostics);
+    EXPECT_EQ(diagnostics.transition_batches,1);
+    EXPECT_EQ(diagnostics.transition_proposals,1);
     EXPECT_TRUE(protocol.replay(batch));
     invalid=batch;invalid.transition_coefficients[0]=3.0;
     EXPECT_THROW(protocol.replay(invalid),std::invalid_argument);
-    protocol.last_batch_.reset();protocol.sampled_last_applied_request_id_=0;
-    protocol.sampled_request_pending_=false;
+    protocol.reset_requests();
     EXPECT_THROW(protocol.validate_transition_batch(batch),std::invalid_argument);
+    const auto next=protocol.issue_request(2,0,1,{0},{1});
+    EXPECT_GT(next.request_id,request.request_id);
+    EXPECT_THROW(protocol.accept_batch(batch,result,diagnostics),std::invalid_argument);
+    EXPECT_EQ(diagnostics.transition_batches,1);
 }
 TEST(MonteCarloHostProtocol, ImmutableRowsAndInvalidPayloads) {
     mc::detail::HostProtocol protocol(1);
@@ -236,4 +251,98 @@ TEST(MonteCarloHostProtocol, ImmutableRowsAndInvalidPayloads) {
     EXPECT_THROW(protocol.validate_aggregated_transition_rows(rows),std::invalid_argument);
     signs[0]=-1;protocol.aggregated_rows_[0]={1,0,0};
     EXPECT_THROW(protocol.validate_aggregated_transition_rows(rows),std::invalid_argument);
+}
+
+#include "../../src/montecarlo/rng.cuh"
+#include <array>
+
+TEST(MonteCarloRng, Random123PhiloxKnownAnswers) {
+    namespace rng = mc::cuda_detail;
+    // Published counter/key/output vectors: DEShawResearch/random123/tests/kat_vectors.
+    const std::array<std::array<uint32_t, 10>, 3> vectors{{
+        {0,0,0,0,0,0,0x6627e8d5,0xe169c58d,0xbc57ac4c,0x9b00dbd8},
+        {0xffffffff,0xffffffff,0xffffffff,0xffffffff,0xffffffff,0xffffffff,
+         0x408f276d,0x41c83b0e,0xa20bc7c6,0x6d5451fd},
+        {0x243f6a88,0x85a308d3,0x13198a2e,0x03707344,0xa4093822,0x299f31d0,
+         0xd16cfe09,0x94fdcceb,0x5001e420,0x24126ea1}
+    }};
+    for (const auto& v : vectors) {
+        rng::PhiloxStream stream(0, 0);
+        stream.counter0=v[0]; stream.counter1=v[1];
+        stream.counter2=v[2]; stream.counter3=v[3];
+        stream.key0=v[4]; stream.key1=v[5];
+        for (int i=0;i<4;++i) EXPECT_EQ(stream.next_u32(), v[6+i]);
+    }
+}
+
+TEST(MonteCarloRng, InversionAndComplementMatchLiteralBinomialPmf) {
+    constexpr int samples=40000, n=12;
+    for (double p : {0.1, 0.9}) {
+        mc::cuda_detail::PhiloxStream stream(7,0);
+        std::array<int,n+1> frequencies{};
+        for (int i=0;i<samples;++i) ++frequencies[mc::cuda_detail::exact_binomial(n,p,stream)];
+        long double choose=1;
+        for (int k=0;k<=n;++k) {
+            if (k) choose=choose*(n-k+1)/k;
+            const double probability=static_cast<double>(choose*std::pow(p,k)*std::pow(1-p,n-k));
+            EXPECT_NEAR(frequencies[k], samples*probability,
+                        8*std::sqrt(samples*probability*(1-probability))+4);
+        }
+    }
+}
+
+TEST(MonteCarloRng, TopGridUniformCannotRunAwayToPopulation) {
+    struct Tape {
+        int calls=0;
+        double uniform() { return calls++==0 ? std::nextafter(1.0,0.0) : 0.5; }
+    } tape;
+    const auto value=mc::cuda_detail::exact_binomial(512,0.02,tape);
+    EXPECT_LT(value,64);
+    EXPECT_GT(value,0);
+    EXPECT_LE(tape.calls,2);
+    Tape exhausted;
+    EXPECT_LT(mc::cuda_detail::exact_binomial(512,0.01,exhausted),64);
+    EXPECT_LE(exhausted.calls,2);
+    // log1p retains a probability that subtraction from one would erase.
+    struct Midpoint { double uniform() { return 0.5; } } midpoint;
+    EXPECT_EQ(mc::cuda_detail::exact_binomial(1000000000000000000ULL,1e-18,midpoint),1);
+}
+
+TEST(MonteCarloResources, SimulatorRunWaitsForLeaseUseGuard) {
+    using namespace std::chrono_literals;
+    CudaqSimulator simulator;
+    auto lease=simulator.lease_resources();
+    std::optional<CudaqResourceLease::Use> use(lease.acquire());
+    std::promise<void> started;
+    auto ready=started.get_future();
+    auto run=std::async(std::launch::async,[&] {
+        started.set_value();
+        try { (void)simulator.statevector({},1); }
+        catch (const std::runtime_error& error) {
+            if (CudaqSimulator::available() ||
+                std::string(error.what()).find("without CUDA-Q")==std::string::npos) throw;
+        }
+        return true;
+    });
+    EXPECT_EQ(ready.wait_for(5s),std::future_status::ready);
+    EXPECT_EQ(run.wait_for(10ms),std::future_status::timeout);
+    use.reset();
+    EXPECT_EQ(run.wait_for(5s),std::future_status::ready);
+    EXPECT_TRUE(run.get());
+}
+
+TEST(MonteCarloHostProtocol, FailedDeviceUploadCanRetryWithoutImmutableRows) {
+    mc::detail::HostProtocol protocol(1);
+    protocol.aggregated_initialized_=true;
+    std::vector<uint64_t> offsets{0,1},sources{0},targets{1};
+    std::vector<double> probabilities{0.5},diagonals{0},references{0};
+    std::vector<int8_t> signs{-1};
+    mc::detail::TransitionRows rows{offsets,sources,targets,probabilities,signs,diagonals,references};
+    EXPECT_THROW(protocol.commit_transition_rows(rows,1,[] { throw std::bad_alloc(); }),std::bad_alloc);
+    EXPECT_TRUE(protocol.aggregated_rows_.empty());
+    EXPECT_TRUE(protocol.aggregated_reference_elements_host_.empty());
+    EXPECT_TRUE(protocol.aggregated_target_labels_host_.empty());
+    EXPECT_NO_THROW(protocol.commit_transition_rows(rows,1,[] {}));
+    EXPECT_EQ(protocol.aggregated_rows_.size(),1);
+    EXPECT_EQ(protocol.aggregated_reference_elements_host_.at(1),0.5);
 }

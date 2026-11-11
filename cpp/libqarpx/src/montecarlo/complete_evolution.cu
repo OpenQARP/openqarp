@@ -24,7 +24,6 @@ namespace qarpx::montecarlo {
 using namespace cuda_detail;
 namespace {
 using detail::TransitionRows;
-using detail::AggregatedHostRow;
 [[noreturn]] void cuda_failure(cudaError_t status, const char* operation) {
     throw std::runtime_error(
         std::string("ResidentEvolutionContext: ") + operation +
@@ -43,7 +42,7 @@ __global__ void prepare_aggregated_step(DeviceAggregatedControl* control) {
     control->died = 0;
     control->annihilated = 0;
     control->transition_edges = 0;
-    control->rng_variates = 0;
+    control->binomial_calls = 0;
 }
 
 __global__ void find_missing_aggregated_rows(
@@ -97,6 +96,7 @@ __global__ void generate_aggregated_spawning(
             trajectory_index, control->absolute_step, edge_sources[edge],
             edge_targets[edge], population, 0));
     const uint64_t spawned = exact_binomial(count, probabilities[edge], random);
+    atomicAdd(reinterpret_cast<unsigned long long*>(&control->binomial_calls), 1ULL);
     const int64_t source_sign = population < 0 ? -1 : 1;
     edge_deltas[edge] =
         static_cast<int64_t>(spawned) * source_sign * sign_factors[edge];
@@ -160,9 +160,7 @@ __global__ void apply_aggregated_death_cloning(
     atomicAdd(
         reinterpret_cast<unsigned long long*>(&control->transition_edges),
         cached_edge_counts[row_index]);
-    atomicAdd(
-        reinterpret_cast<unsigned long long*>(&control->rng_variates),
-        cached_edge_counts[row_index] + 1);
+
     const double diagonal =
         time_step * (diagonal_elements[row_index] - control->energy_shift);
     const double probability = fabs(diagonal);
@@ -177,6 +175,7 @@ __global__ void apply_aggregated_death_cloning(
             trajectory_index, control->absolute_step, active_labels[index],
             active_labels[index], population, 1));
     const uint64_t changed = exact_binomial(count, fmin(1.0, probability), random);
+    atomicAdd(reinterpret_cast<unsigned long long*>(&control->binomial_calls), 1ULL);
     uint64_t survivors = count;
     if (diagonal < 0.0) {
         if (changed > static_cast<uint64_t>(INT64_MAX) - count) {
@@ -325,32 +324,24 @@ __global__ void finalize_aggregated_step(
     summary.annihilated = control->annihilated;
     summary.active_labels = control->active_count;
     summary.transition_edges = control->transition_edges;
-    summary.rng_variates = control->rng_variates;
+    summary.binomial_calls = control->binomial_calls;
     control->previous_population = control->total_population;
     ++control->absolute_step;
     ++control->advance_completed;
     if (reference_population_zero) control->status = DeviceReferenceZero;
 }
 
-std::size_t checked_dimension(int n_qubits) {
-    if (n_qubits < 1 || n_qubits >= 63) {
-        throw std::invalid_argument(
-            "ResidentEvolutionContext requires 1 <= n_qubits < 63");
-    }
-    return std::size_t{1} << n_qubits;
-}
-
-}  // namespace
-namespace {
 }  // namespace
 struct ResidentEvolutionContext::Impl : detail::HostProtocol {
     CudaqResourceLease lease_;
     int n_qubits_;
+    uint64_t lease_handle_baseline_ = 0;
 
     cudaStream_t stream_ = nullptr;
     explicit Impl(CudaqResourceLease lease, int n) : detail::HostProtocol(n), lease_(std::move(lease)),
         n_qubits_(n) {
         auto use = lease_.acquire();
+        lease_handle_baseline_ = use.handle_creations();
         stream_ = static_cast<cudaStream_t>(use.stream());
     }
     ~Impl() { release(); }
@@ -396,12 +387,7 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         aggregated_population_threshold_ = population_threshold;
         aggregated_root_seed_ = root_seed;
         aggregated_trajectory_index_ = trajectory_index;
-        sampled_request_pending_ = false;
-        sampled_pending_attempts_per_walker_ = 0;
-        sampled_pending_request_ = {};
-        last_batch_.reset();
-        sampled_last_applied_request_id_ = 0;
-        sampled_last_result_ = {};
+        reset_requests();
         aggregated_host_control_ = DeviceAggregatedControl{
             DeviceCompleted,
             1,
@@ -442,7 +428,6 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         if (sampled_request_pending_)
             throw std::runtime_error("Cannot upload complete rows while a transition request is in flight");
         validate_aggregated_transition_rows(rows);
-        auto references = validate_reference_coefficients(rows, aggregated_time_step_);
         const auto started = std::chrono::steady_clock::now();
         std::vector<uint64_t> edge_sources;
         std::vector<uint64_t> edge_targets;
@@ -452,39 +437,25 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         edge_targets.reserve(rows.target_labels.size());
         edge_probabilities.reserve(rows.target_labels.size());
         edge_signs.reserve(rows.target_labels.size());
-        for (std::size_t row_index = 0; row_index < rows.source_labels.size(); ++row_index) {
-            const uint64_t source = rows.source_labels[row_index];
-            if (aggregated_rows_.find(source) != aggregated_rows_.end()) {
-                throw std::invalid_argument(
-                    "ResidentEvolutionContext transition rows are immutable; "
-                    "a source label was uploaded twice");
-            }
-            const std::size_t start = static_cast<std::size_t>(rows.row_offsets[row_index]);
-            const std::size_t stop = static_cast<std::size_t>(rows.row_offsets[row_index + 1]);
-            AggregatedHostRow row;
-            row.edge_count = stop - start;
-            row.diagonal_element = rows.diagonal_elements[row_index];
-            row.reference_element = rows.reference_elements[row_index];
-            aggregated_rows_.emplace(source, row);
-            aggregated_reference_elements_host_[source] =
-                source == aggregated_reference_label_ ? 0.0 : row.reference_element;
-            for (std::size_t edge = start; edge < stop; ++edge) {
-                const uint64_t target = rows.target_labels[edge];
-                edge_sources.push_back(source);
-                edge_targets.push_back(target);
+        for (std::size_t row=0;row<rows.source_labels.size();++row) {
+            for (auto edge=rows.row_offsets[row];edge<rows.row_offsets[row+1];++edge) {
+                edge_sources.push_back(rows.source_labels[row]);
+                edge_targets.push_back(rows.target_labels[edge]);
                 edge_probabilities.push_back(rows.probabilities[edge]);
                 edge_signs.push_back(rows.sign_factors[edge]);
-                aggregated_target_labels_host_[target] = true;
-                if (source == aggregated_reference_label_) {
-                    aggregated_reference_elements_host_[target] =
-                        -static_cast<double>(rows.sign_factors[edge]) *
-                        rows.probabilities[edge] / aggregated_time_step_;
-                }
             }
         }
-        append_aggregated_device_edges(
-            edge_sources, edge_targets, edge_probabilities, edge_signs);
-        refresh_aggregated_device_metadata();
+        const auto previous_edges = aggregated_edge_count_;
+        try {
+            commit_transition_rows(rows,aggregated_time_step_,[&] {
+                append_aggregated_device_edges(
+                    edge_sources,edge_targets,edge_probabilities,edge_signs);
+                refresh_aggregated_device_metadata();
+            });
+        } catch (...) {
+            aggregated_edge_count_ = previous_edges;
+            throw;
+        }
         ++diagnostics_.aggregated_cache_uploads;
         diagnostics_.aggregated_cache_appended_rows += rows.source_labels.size();
         diagnostics_.aggregated_cache_appended_edges += edge_sources.size();
@@ -528,7 +499,7 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         const std::size_t active_count =
             static_cast<std::size_t>(aggregated_host_control_.active_count);
         TransitionRequest request;
-        request.request_id = ++sampled_request_counter_;
+        request.request_id = 0;
         request.trajectory_index = aggregated_trajectory_index_;
         request.step_index = aggregated_host_control_.absolute_step;
         request.attempts_per_walker = attempts_per_walker;
@@ -546,16 +517,12 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
                        aggregated_active_populations_[active_buffer],
                        detail::HostProtocol::checked_bytes(active_count, sizeof(int64_t)), cudaMemcpyDeviceToHost),
                    "cudaMemcpy(transition request populations)");
-        for (std::size_t index = 0; index < active_count; ++index) {
-            request.proposal_attempts[index] = detail::HostProtocol::proposal_count(
-                request.populations[index], attempts_per_walker);
-        }
+        request = issue_request(aggregated_trajectory_index_,
+            aggregated_host_control_.absolute_step, attempts_per_walker,
+            std::move(request.sources), std::move(request.populations));
         diagnostics_.aggregated_host_transfer_bytes += active_count *
             (sizeof(uint64_t) + sizeof(int64_t));
         ++diagnostics_.transition_requests;
-        sampled_pending_request_ = request;
-        sampled_pending_attempts_per_walker_ = attempts_per_walker;
-        sampled_request_pending_ = true;
         return request;
     }
 
@@ -724,19 +691,11 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         append_aggregated_summaries(result, summaries);
         diagnostics_.aggregated_steps += completed;
         for (const DeviceAggregatedStepSummary& summary : summaries) {
-            diagnostics_.aggregated_rng_variates += summary.rng_variates;
+            diagnostics_.aggregated_binomial_calls += summary.binomial_calls;
             diagnostics_.aggregated_transition_edge_visits +=
                 summary.transition_edges;
         }
-        ++diagnostics_.transition_batches;
-        diagnostics_.transition_edges += batch.sources.size();
-        diagnostics_.transition_proposals += std::accumulate(
-            batch.multiplicities.begin(),
-            batch.multiplicities.end(), uint64_t{0});
-        sampled_request_pending_ = false;
-        last_batch_ = batch;
-        sampled_last_applied_request_id_ = batch.request_id;
-        sampled_last_result_ = result;
+        accept_batch(batch, result, diagnostics_);
         return result;
     }
 
@@ -879,7 +838,7 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         append_aggregated_summaries(result, summaries);
         diagnostics_.aggregated_steps += completed;
         for (const DeviceAggregatedStepSummary& summary : summaries) {
-            diagnostics_.aggregated_rng_variates += summary.rng_variates;
+            diagnostics_.aggregated_binomial_calls += summary.binomial_calls;
             diagnostics_.aggregated_transition_edge_visits +=
                 summary.transition_edges;
         }
@@ -1204,33 +1163,34 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
 
         ensure_aggregated_population_capacity(
             std::max<std::size_t>(1, cached_sources.size() + target_labels.size()));
-        std::size_t metadata_bytes = replace_aggregated_device_vector(
-            aggregated_cached_sources_, cached_sources,
-            "cudaMalloc/cudaMemcpy(aggregated_cached_sources)");
-        metadata_bytes += replace_aggregated_device_vector(
-            aggregated_cached_edge_counts_, cached_edge_counts,
-            "cudaMalloc/cudaMemcpy(aggregated_cached_edge_counts)");
-        metadata_bytes += replace_aggregated_device_vector(
-            aggregated_diagonal_elements_, diagonal_elements,
-            "cudaMalloc/cudaMemcpy(aggregated_diagonal_elements)");
-        metadata_bytes += replace_aggregated_device_vector(
-            aggregated_target_labels_, target_labels,
-            "cudaMalloc/cudaMemcpy(aggregated_target_labels)");
-        metadata_bytes += replace_aggregated_device_vector(
-            aggregated_reference_labels_, reference_labels,
-            "cudaMalloc/cudaMemcpy(aggregated_reference_labels)");
-        metadata_bytes += replace_aggregated_device_vector(
-            aggregated_reference_elements_, reference_values,
-            "cudaMalloc/cudaMemcpy(aggregated_reference_elements)");
-        if (aggregated_target_deltas_ != nullptr)
-            cudaFree(aggregated_target_deltas_);
-        aggregated_target_deltas_ = nullptr;
-        if (!target_labels.empty()) {
-            cuda_check(cudaMalloc(
-                           &aggregated_target_deltas_,
-                           detail::HostProtocol::checked_bytes(target_labels.size(), sizeof(int64_t))),
-                       "cudaMalloc(aggregated_target_deltas)");
+        uint64_t *sources=nullptr, *counts=nullptr, *targets=nullptr, *references=nullptr;
+        double *diagonals=nullptr, *values=nullptr;
+        int64_t* deltas=nullptr;
+        std::size_t metadata_bytes=0;
+        try {
+            metadata_bytes += replace_aggregated_device_vector(sources,cached_sources,"cached sources");
+            metadata_bytes += replace_aggregated_device_vector(counts,cached_edge_counts,"cached counts");
+            metadata_bytes += replace_aggregated_device_vector(diagonals,diagonal_elements,"cached diagonals");
+            metadata_bytes += replace_aggregated_device_vector(targets,target_labels,"cached targets");
+            metadata_bytes += replace_aggregated_device_vector(references,reference_labels,"reference labels");
+            metadata_bytes += replace_aggregated_device_vector(values,reference_values,"reference values");
+            if (!target_labels.empty())
+                cuda_check(cudaMalloc(&deltas,checked_bytes(target_labels.size(),sizeof(int64_t))),
+                           "target deltas");
+        } catch (...) {
+            cudaFree(sources); cudaFree(counts); cudaFree(diagonals); cudaFree(targets);
+            cudaFree(references); cudaFree(values); cudaFree(deltas);
+            throw;
         }
+        std::swap(sources,aggregated_cached_sources_);
+        std::swap(counts,aggregated_cached_edge_counts_);
+        std::swap(diagonals,aggregated_diagonal_elements_);
+        std::swap(targets,aggregated_target_labels_);
+        std::swap(references,aggregated_reference_labels_);
+        std::swap(values,aggregated_reference_elements_);
+        std::swap(deltas,aggregated_target_deltas_);
+        cudaFree(sources); cudaFree(counts); cudaFree(diagonals); cudaFree(targets);
+        cudaFree(references); cudaFree(values); cudaFree(deltas);
 
         aggregated_cached_source_count_ = cached_sources.size();
         aggregated_target_count_ = target_labels.size();
@@ -1349,7 +1309,6 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         if (aggregated_control_ != nullptr) cudaFree(aggregated_control_);
     }
 
-    std::map<uint64_t, bool> aggregated_target_labels_host_;
 
 
 
@@ -1387,7 +1346,6 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
     DeviceAggregatedStepSummary* aggregated_summaries_ = nullptr;
     std::size_t aggregated_summary_capacity_ = 0;
 
-    uint64_t sampled_request_counter_ = 0;
 
 
 
@@ -1416,7 +1374,12 @@ ResidentEvolutionContext::ResidentEvolutionContext(std::unique_ptr<Impl> impl) :
 ResidentEvolutionContext::~ResidentEvolutionContext() = default;
 ResidentEvolutionContext::ResidentEvolutionContext(ResidentEvolutionContext&&) noexcept = default;
 ResidentEvolutionContext& ResidentEvolutionContext::operator=(ResidentEvolutionContext&&) noexcept = default;
-Diagnostics ResidentEvolutionContext::diagnostics() const { auto use = impl_->lease_.acquire(); return impl_->diagnostics_; }
+Diagnostics ResidentEvolutionContext::diagnostics() const {
+    auto use = impl_->lease_.acquire();
+    auto result = impl_->diagnostics_;
+    result.handle_creations = use.handle_creations() - impl_->lease_handle_baseline_;
+    return result;
+}
 void ResidentEvolutionContext::reset_aggregated_evolution(
     Label reference, Population population, double shift, double energy, double dt,
     double damping, double threshold, std::uint64_t seed, std::uint64_t trajectory) {

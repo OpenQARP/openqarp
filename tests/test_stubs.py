@@ -342,3 +342,29 @@ def test_mypy_verdict_on_the_stub_matches_the_runtime(tmp_path):
     for i, (statement, code, runs) in enumerate(snippets):
         assert codes.get(i, set()) == ({code} if code else set()), (statement, stdout)
         assert _runs(statement) is runs, statement
+
+
+def test_compact_column_stub_has_three_typed_arrays(tmp_path):
+    api = pytest.importorskip("mypy.api")
+    source = tmp_path / "compact.py"
+    source.write_text(
+        "import numpy as np\nfrom numpy.typing import NDArray\nimport qarpx as qx\n"
+        "def check(p: qx.TransitionColumnProvider, labels: NDArray[np.uint64]) -> None:\n"
+        "    offsets, targets, values = p.compact_columns(labels, 1e-12)\n"
+        "    wrong, arity = p.compact_columns(labels, 1e-12)\n"
+    )
+    config = tmp_path / "mypy.ini"
+    config.write_text(f"[mypy]\nmypy_path = {STUB.parent}\nfollow_imports = silent\n")
+    stdout, stderr, code = api.run(
+        [
+            "--config-file",
+            str(config),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--disable-error-code=import-untyped",
+            str(source),
+        ]
+    )
+    assert code == 1 and not stderr
+    assert "Too many values to unpack (2 expected, 3 provided)" in stdout
+    assert "Found 1 error" in stdout

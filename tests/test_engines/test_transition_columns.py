@@ -27,8 +27,6 @@ def test_gpu_exact_complex_columns_compaction_and_persistence():
     u.ry(0, a)
     u.rz(0, b)
     u.build()
-    dagger = u.dagger()
-    dagger.build()
     simulator = qx.CudaqSimulator()
     provider = simulator.make_transition_column_provider(
         u.flatten(), 2, [([(0, "X")], 0.7), ([(1, "Z")], 0.2), ([(1, "Y")], 0.3)], 2
@@ -99,8 +97,6 @@ def test_gpu_entangling_lsb_columns_match_literal_clifford():
     u.h(0)
     u.cx(0, 1)
     u.build()
-    dagger = u.dagger()
-    dagger.build()
     simulator = qx.CudaqSimulator()
     provider = simulator.make_transition_column_provider(u.flatten(), 2, [([(1, "Z")], 1.0)], 4)
     h = np.array([[1, 1], [1, -1]]) / np.sqrt(2)
@@ -127,8 +123,6 @@ def test_gpu_entangling_columns_match_literal_lsb_matrix():
     block.h(0)
     block.cx(0, 1)
     block.build()
-    dagger = block.dagger()
-    dagger.build()
     simulator = qx.CudaqSimulator()
     provider = simulator.make_transition_column_provider(
         block.flatten(), 2, [([(1, "Z")], 1.0), ([(0, "X")], 0.3)], 2
@@ -166,3 +160,14 @@ def test_gpu_column_global_phase_and_barrier_cancel_exactly():
     expected = np.array([[0, np.exp(0.37j)], [np.exp(-0.37j), 0]])
     actual = provider.columns(np.array([0, 1], dtype=np.uint64))
     np.testing.assert_allclose(actual, expected.T, rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("gate", ["Reset", "Measure", "BranchBegin", "BranchElse", "BranchEnd"])
+def test_column_factory_rejects_nonunitary_commands_before_build_gate(gate):
+    from qarp.errors import CapabilityError
+
+    simulator = qx.CudaqSimulator()
+    with pytest.raises(CapabilityError, match="measurement-free unitaries"):
+        simulator.make_transition_column_provider(
+            [qx.Command(getattr(qx.GateType, gate), 0)], 1, []
+        )

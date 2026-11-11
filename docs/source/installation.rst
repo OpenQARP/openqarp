@@ -293,8 +293,7 @@ required — the runtime alone does not enable GPU execution:
      -C cmake.define.QARP_CUDAQ_NVQIR_BACKEND=nvqir-custatevec-fp64
 
 Use ``-C cmake.define.QARP_CUDAQ_NVQIR_BACKEND=nvqir-qpp`` for a CPU-only CUDA-Q
-build (for testing without a GPU).  The build links against the pip wheel — the
-supported recipe uses the CUDA-Q wheel. CMake also has an SDK discovery branch
+build (for testing without a GPU).  The build links against the CUDA-Q wheel. CMake also has an SDK discovery branch
 through ``QARP_CUDAQ_MLIR_LIB_DIR``; SDK clang/libc++ libraries may be ABI
 incompatible with this g++ build. That route remains unverified until its
 configuration, compile/link probe and tests have actually run.  GPU execution needs an NVIDIA driver supporting
@@ -385,8 +384,8 @@ Resolve these shell variables from the installed runtime/development packages
 and GPU before invoking the command; they are not guessed installation paths.
 For notebooks with rebuild-on-import, set ``SKBUILD_EDITABLE_VERBOSE=0``.
 
-The author validates two source-build profiles sequentially: CUDA-Q enabled
-with MC disabled, then MC enabled. In the first profile, set
+To check both supported build configurations, use CUDA-Q enabled with MC
+disabled, then MC enabled. For the disabled configuration, set
 ``QARP_WITH_CUDAQ_SEMICLASSICAL=OFF``, verify MC unavailability and throwing
 stubs, and run existing CUDA-Q engine regressions. In the enabled profile,
 verify MC availability and run the same regressions plus all numerical cases:
@@ -412,10 +411,9 @@ statistical oracle uses 4096 one-step trajectories. Memory-boundary and prefetch
 forecasts use host fakes rather than allocations near the default 16 GiB
 cache budget. New GPU smokes use the engine's default target.
 
-Keep revision-specific logs and JUnit XML outside the repository. Record the
-head SHA, clean/dirty state, Python/extension/source origins, ABI, GPU and
-compiler/runtime versions, exact commands and per-case pass/fail/skip results.
-The MC-enabled profile must execute every required GPU case with zero required
-skips; CPU-only CI fakes establish host protocol behavior, not GPU numerical
-correctness. The final evidence must match the head marked ready for review.
-Previous builds or results do not certify a changed revision.
+GPU numerical tests require ``QARP_RUN_CUDAQ_GPU_TESTS=1`` and an MC-enabled
+extension. Disabled builds intentionally skip those cases and expose throwing
+factories. The binomial fixtures cover inversion, complement, death/cloning and
+fractional spawning with fixed seeds and analytic moments. CPU tests exercise
+the same RNG helpers and the host protocol without CUDA; they do not execute
+GPU kernels.

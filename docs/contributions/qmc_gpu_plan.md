@@ -385,8 +385,11 @@ circuit blocks are cached. Count each Hermitian coefficient pair once using
 `(min(source, target), max(source, target))`; repeated or reversed requests,
 including cache hits and later trajectories in the same run, add no settings.
 For P distinct accounted pairs, report C*P hypothetical measurement settings.
-Start fresh accounting metadata on each new run or rebuild after H/U/config
-changes. With accounting disabled, do not call `circuits()` at all.
+Start fresh per-run accounting metadata on each new run. Retain the canonical
+label pairs of cached complete-row support as counting metadata across runs,
+without coefficient values, and account that reused support in the new run.
+A rebuild after H/U/config changes clears both sets. With accounting disabled,
+do not call `circuits()` at all.
 
 `generated_circuits` counts the C representative circuits actually constructed
 once, while `measurement_settings` counts the C*P hypothetical settings. Both
@@ -679,8 +682,9 @@ sufficient, not necessary: every emitted group must conserve charge separately.
 Pin the XX+YY acceptance case to `FullyCommuting`; under `NoGrouping` or QWC its
 separate XX and YY groups fail the certificate even though their sum conserves
 charge. Test that rejection explicitly. Canonical means `target_qubits=None` or
-exactly `list(range(n_qubits))` and no controlling wrapper. Arbitrary user block
-subclasses are not certified.
+exactly `list(range(n_qubits))` and no controlling wrapper. Certification accepts
+only the concrete `TrotterAnsatzBlock`; arbitrary subclasses, including those
+overriding generator accessors, are not certified.
 
 Cutoffs apply in order: compact columns retain `abs(value) > 1e-12`, then
 realness is validated, then off-diagonal complete-row uploads select
@@ -862,7 +866,7 @@ key sets complete the diagnostics contract:
   `aggregated_cache_uploaded_bytes`, `aggregated_cache_metadata_uploaded_bytes`,
   `aggregated_cache_growth_copy_bytes`, `aggregated_host_transfer_bytes`,
   `aggregated_steps`, `aggregated_transition_edge_visits`,
-  `aggregated_rng_variates`, `aggregated_cache_upload_wall_seconds`,
+  `aggregated_binomial_calls`, `aggregated_cache_upload_wall_seconds`,
   `aggregated_kernel_wall_seconds`, `transition_requests`, `transition_batches`,
   `transition_edges`, `transition_proposals`, `transition_uploaded_bytes`,
   `transition_upload_wall_seconds`, `transition_kernel_wall_seconds`.
@@ -895,7 +899,7 @@ RuntimeError rather than adding another native status.
 | Exact complex columns | Literal LSB Pauli matrices, analytic Rz/Ry, H-CX, and GPhase+Barrier cancellation; independent NumPy `U† H U` | `tests/test_engines/test_transition_columns.py`, `cpp/libqarpx/tests/cpp/test_transition_columns.cpp` |
 | Compaction and sector gathering | Literal entries on either side of strict cutoffs, including 2e-12 retained at rtol=1e-14/atol=0; combinatorial fixed-charge labels and nonconserving counterexamples | `tests/test_engines/test_transition_columns.py`, `cpp/libqarpx/tests/cpp/test_transition_columns.cpp` |
 | Resident signed evolution | Hand-counted two-label X populations, raw numerators and energy tapes | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
-| RNG and chunking | Independent binomial moments; split-advance equality is supplementary | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
+| RNG and chunking | Random123 Philox known-answer vectors; direct sampler inversion/complement PMFs and upper-grid regression; analytic spawning/death/cloning/fractional binomial moments; split-advance equality is supplementary | `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp`, `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Request transport and replay | Combinatorial uniform proposal q, literal multiplicities and weights above one; exact-once counters plus changed/stale payload rejection | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`, `cpp/libqarpx/tests/cpp/test_montecarlo_contexts.cpp` |
 | Failure histories | Constructed reference-zero, extinction, invalid-probability, integer-overflow and no-progress tapes; NaN and partial history expectations | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
 | Combined trajectories and final uncertainty | Literal two-trajectory production tapes give pooled ratio 6, whole-trajectory replicas 50/7 and 10/3 and stderr 40/21; per-walk burn-in and instantaneous endpoints give 20/3 and stderr 2; inner block jackknife on/off leaves both combined outputs unchanged | `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py` |
@@ -1047,14 +1051,15 @@ ABI and regenerates the stub as required by §15.
 
 - [x] Add simulator-layer batched columns, canonical gate matrices and compact
   sector gathering with their independent simulator tests. (2026-11-05)
-- [x] Add build gates and separate resident complete-row kernels. (2026-11-05)
+- [ ] Validate the corrected build gates and resident complete-row kernels
+  in the MC-enabled profile.
 - [ ] Test analytic complex columns, signed X tapes, cache resume, RNG, overflow
   and reference-conflict guards.
 
 ### Phase 3 — request transport
 
-- [x] Add immutable requests, exact payload replay, proposal multiplicities and
-  full estimator support. (2026-11-05)
+- [ ] Validate immutable requests, exact payload replay, proposal multiplicities
+  and estimator support on the corrected MC-enabled profile.
 - [ ] Test request identity, stale/change rejection, weight-above-one and
   failure histories.
 
@@ -1076,47 +1081,72 @@ ABI and regenerates the stub as required by §15.
 
 ### Phase 6 — integration evidence and Gate 2
 
-- [x] Run CPU/native/lint/type/stub/wheel/coverage/example checks and resolve
-  all failures. (2026-11-05)
+- [ ] Run CPU/native/lint/type/stub/wheel/coverage/example checks on the final
+  correction revision and resolve all failures.
 - [ ] Execute both CUDA-Q profiles and attach author numerical evidence;
   required GPU skips remain open.
 - [ ] Fold declared deviations into the plan, date phase boxes and finish the
   Gate 2 sequence on this PR.
 
-## Local validation — 2026-11-05
-
-These are public-port working-tree checks, not validation of a committed
-Gate 2 head. The checkout uses its own Python 3.12.12 environment with
-nanobind 3.0.1. Python, extension and native source origins were checked;
-paired ABI is 16, advanced from the public baseline's 15, without a bypass.
-The CPU build has both GPU gates disabled.
-
-- Full CPU Python regression run: 5834 passed, 160 optional-backend skips,
-  24 deselected and seven expected failures. Final host-side MC fixes were
-  rechecked by the focused suite below.
-- Native suite: 955 passed; four explicitly gated GPU cases skipped.
-- Final focused MC/sector/column/stub suite: 495 passed; 20 GPU cases skipped.
-- Combined regression/final-module coverage is 94.8% globally and 96.82% on
-  changed Python lines, including untracked additions. The final focused run
-  replaces the algorithm module's earlier coverage after its last host fixes;
-  other modules retain full-regression coverage. Floors remain 94% and 80%.
-- Ruff check and format, mypy over 524 source files, documentation code checks,
-  generated-stub drift and wheel stub resolution outside the checkout pass.
-  The wheel contains the matching generated native stub.
-- The notebook's independent CPU oracle passes, including under editable
-  rebuild-on-import with persistent tooling and notebook-safe verbosity.
-  Both optional GPU smokes remain explicitly unverified.
-- The invalid MC-enabled/CUDA-Q-disabled build combination fails configuration
-  with the required dependency explanation.
-
-CUDA compilation and numerical execution were not available locally. Antonio
-must run both CUDA-Q profiles, the required GPU cases and both notebook smokes,
-and compare generated stubs against the same committed stub. The bounded
-commands and evidence requirements are in `docs/source/installation.rst` and
-the Test plan above. Required GPU skips keep Gate 2 open. Results must be
-repeated on the exact committed head submitted for review.
-
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR and folded
-  back here before merge)
+- The native implementation places sampled request orchestration beside the
+  complete-row context in `complete_evolution.cu`; `request_evolution.cu` holds
+  sampled kernels. Shared internal records and RNG helpers are in `rng.cuh`.
+- Column-provider bindings are grouped in `bindings_montecarlo.cpp`. Existing
+  CUDA-Q execution bindings release the GIL and take the same resource-use
+  guard as resident evolution. Reconfiguration during an ordinary run rejects
+  while that guard is alive.
+- The resident composite carries no primitive, following the existing
+  amplitude-native composite convention. Step counts round a ratio within
+  1e-12 of an integer and otherwise floor it. An empty uint64 sector array means
+  unrestricted columns. GPU tests use explicit runtime opt-in guards rather
+  than a collection-time marker; required cases must still execute at Gate 2.
+- The compact-column tuple annotation and renamed logical binomial-call
+  diagnostic advance the paired ABI from 16 to 17; regenerate the native stub.
+
+## Review correction scope
+
+These corrections fulfill the existing numerical and ownership contracts; they
+are not a new structural proposal or a new design approval. The green-lit blob
+above remains the reference. The PR must declare the deviations listed above.
+
+- Repair inversion sampling on exhausted floating-point mass by restarting with
+  a fresh uniform, and compute its initial mass with `exp(n * log1p(-p))`.
+  CPU ctest must exercise the production RNG helpers, including the three
+  Random123 Philox4x32-10 known-answer vectors, inversion/complement PMFs and
+  the top-uniform regression for Binomial(512,.02). GPU tests cover stochastic
+  complete-row spawning, death/cloning and fractional request spawning with
+  mean below 16, against analytic binomial moments. A one-qubit, constant
+  eight-walker 512-step fixture verifies ordinary Python thread progress during
+  native advance, with interpreter timeslicing disabled around the observation.
+- Put request issue, accept, replay and reset transitions in the CPU-compiled
+  HostProtocol used by CUDA. Direct CPU tests drive these methods and verify
+  exact-once counters and stale rejection. Evolution allocation tests observe
+  the resource lease rather than constant context fields.
+- Reject Reset, Measure and classical branch markers before column-provider
+  allocation. Require the concrete canonical TrotterAnsatzBlock for automatic
+  sector/realness certification; arbitrary subclasses cannot assert their own
+  certificate by overriding an accessor.
+- Circuit accounting describes logical requests of the current run, regardless
+  of previously cached coefficients. Repeated identical runs give identical
+  counts; metadata resets per run. Complete rows stay in the native cache,
+  including when accounting is enabled.
+- Make row upload transactional on allocation/copy failure, include coordinates
+  in request realness errors, and define diagnostics consistently. The
+  `aggregated_binomial_calls` counter counts logical sampler invocations,
+  including probabilities zero/one, not the uniforms consumed internally.
+- Complete the named estimator, option-matrix, sector, cache, threshold, seed,
+  lifecycle and timing oracles already listed in the test plan. Add direct
+  assertions; fake-driven protocol tests do not certify GPU numerics.
+- Remove validation history from this plan and reviewer-process prose from
+  user-facing documentation. Keep sanitized numerical evidence in the PR and
+  raw artifacts outside the tree. All validation of revised code remains open
+  until run on the revision submitted for review.
+
+The cache-wide spawning traversal, parallel merge/reduction redesign, replacement
+of the population-linear Bernoulli branch, bounded/conditional launch redesign,
+request column grouping and incremental cache metadata are deferred scaling
+work (review M3–M7). Redundant reference evaluation, lazy pinned buffers and
+host-proposal tuning (M10/M11/M16) remain optional follow-ups. No comparative
+performance scripts, claims or timings belong in this contribution.

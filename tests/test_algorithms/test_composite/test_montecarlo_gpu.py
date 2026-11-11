@@ -21,7 +21,7 @@ def _require_gpu():
 
 
 def test_native_mc_stubs_and_abi():
-    assert qx.__abi_version__ == EXPECTED_QARPX_ABI == 16
+    assert qx.__abi_version__ == EXPECTED_QARPX_ABI == 17
     if qx.montecarlo_available():
         pytest.skip("Throwing stubs only apply to builds without GPU MC")
     assert qx.montecarlo_available() is False

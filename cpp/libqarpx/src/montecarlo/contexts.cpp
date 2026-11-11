@@ -3,6 +3,7 @@
 #include "qarpx/simulator/cudaq_simulator.h"
 
 namespace qarpx::montecarlo {
+#ifndef QARP_WITH_CUDAQ_SEMICLASSICAL
 namespace {
 [[noreturn]] void unavailable() {
     throw capability_error(
@@ -12,6 +13,7 @@ namespace {
         "the build flag and installed CUDA dependencies are required for GPU execution.");
 }
 }  // namespace
+#endif
 
 bool available() noexcept {
 #ifdef QARP_WITH_CUDAQ_SEMICLASSICAL
@@ -68,6 +70,72 @@ std::uint64_t HostProtocol::proposal_count(Population population,std::uint64_t a
     const auto magnitude=static_cast<std::uint64_t>(population<0?-population:population);
     if(magnitude>UINT64_MAX/attempts) throw std::overflow_error("Proposal count overflow");
     return magnitude*attempts;
+}
+void HostProtocol::commit_transition_rows(const TransitionRows& rows, double dt,
+    const std::function<void()>& upload) {
+    validate_aggregated_transition_rows(rows);
+    auto references=validate_reference_coefficients(rows,dt);
+    auto staged_rows=aggregated_rows_;
+    auto staged_references=aggregated_reference_elements_host_;
+    auto staged_targets=aggregated_target_labels_host_;
+    for (std::size_t i=0;i<rows.source_labels.size();++i)
+        staged_rows.emplace(rows.source_labels[i],AggregatedHostRow{
+            rows.row_offsets[i+1]-rows.row_offsets[i],rows.diagonal_elements[i],
+            rows.reference_elements[i]});
+    for (auto [label,value]:references) staged_references[label]=value;
+    for (auto label:rows.target_labels) staged_targets[label]=true;
+    aggregated_rows_.swap(staged_rows);
+    aggregated_reference_elements_host_.swap(staged_references);
+    aggregated_target_labels_host_.swap(staged_targets);
+    try { upload(); }
+    catch (...) {
+        aggregated_rows_.swap(staged_rows);
+        aggregated_reference_elements_host_.swap(staged_references);
+        aggregated_target_labels_host_.swap(staged_targets);
+        throw;
+    }
+}
+void HostProtocol::reset_requests() {
+    sampled_request_pending_ = false;
+    sampled_pending_attempts_per_walker_ = 0;
+    sampled_pending_request_ = {};
+    last_batch_.reset();
+    sampled_last_applied_request_id_ = 0;
+    sampled_last_result_ = {};
+}
+TransitionRequest HostProtocol::issue_request(
+    std::uint64_t trajectory, std::uint64_t step, std::uint64_t attempts,
+    std::vector<Label> sources, std::vector<Population> populations) {
+    if (!aggregated_initialized_ || !attempts || sources.size()!=populations.size())
+        throw std::invalid_argument("Invalid transition request state or payload");
+    if (sampled_request_pending_) {
+        if (attempts!=sampled_pending_attempts_per_walker_)
+            throw std::invalid_argument("Pending request attempts cannot change");
+        return sampled_pending_request_;
+    }
+    if (sampled_request_counter_==UINT64_MAX)
+        throw std::overflow_error("Transition request id overflow");
+    TransitionRequest request{sampled_request_counter_+1,trajectory,step,attempts,
+                              std::move(sources),std::move(populations),{}};
+    for (auto population:request.populations)
+        request.proposal_attempts.push_back(proposal_count(population,attempts));
+    sampled_pending_request_=request;
+    sampled_request_counter_=request.request_id;
+    sampled_pending_attempts_per_walker_=attempts;
+    sampled_request_pending_=true;
+    return request;
+}
+void HostProtocol::accept_batch(const TransitionBatch& batch,
+    const EvolutionResult& result, Diagnostics& diagnostics) {
+    if (replay(batch)) return;
+    validate_transition_batch(batch);
+    last_batch_=batch;
+    sampled_last_result_=result;
+    sampled_last_applied_request_id_=batch.request_id;
+    sampled_request_pending_=false;
+    ++diagnostics.transition_batches;
+    diagnostics.transition_edges+=batch.sources.size();
+    for (auto count:batch.multiplicities) diagnostics.transition_proposals+=count;
 }
 bool HostProtocol::replay(const TransitionBatch& batch) const {
     if(sampled_last_applied_request_id_ && batch.request_id==sampled_last_applied_request_id_) {
@@ -152,7 +220,8 @@ void HostProtocol::validate_transition_batch(
                  !std::isfinite(batch.transition_coefficients[edge].imag()) ||
                  std::abs(batch.transition_coefficients[edge].imag()) > 1e-12)) {
                 throw std::invalid_argument(
-                    "Transition batch contains an invalid sampled edge");
+                    "Transition batch contains an invalid sampled edge; source=" +
+                    std::to_string(source) + ", target=" + std::to_string(target));
             }
             uint64_t& used = used_attempts[source];
             if (used > UINT64_MAX - batch.multiplicities[edge]) {

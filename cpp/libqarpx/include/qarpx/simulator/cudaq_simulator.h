@@ -100,6 +100,7 @@ public:
     CudaqSimulator& operator=(CudaqSimulator&&) noexcept;
 
     [[nodiscard]] CudaqConfig config() const {
+        if (!config_mutex_) throw std::logic_error("CudaqSimulator is moved from");
         const std::lock_guard<std::mutex> lock(*config_mutex_);
         return cfg_;
     }

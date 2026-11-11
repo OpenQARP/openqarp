@@ -31,6 +31,10 @@ std::unique_ptr<simulator::TransitionColumnProvider> CudaqSimulator::make_transi
         for(const auto& parameter:command.params)
             if(!parameter.is_concrete() || !std::isfinite(parameter.value()))
                 throw std::invalid_argument("Column commands require finite concrete parameters");
+        if(command.gate == GateType::Reset || command.gate == GateType::Measure ||
+           command.gate == GateType::BranchBegin || command.gate == GateType::BranchElse ||
+           command.gate == GateType::BranchEnd)
+            throw capability_error("Columns require unconditional measurement-free unitaries");
         if(!command.condition_bits.empty() || !command.cbits.empty())
             throw capability_error("Columns require unconditional measurement-free unitaries");
     }

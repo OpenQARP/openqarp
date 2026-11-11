@@ -70,7 +70,7 @@ __global__ void generate_sampled_aggregated_spawning(
         reinterpret_cast<unsigned long long*>(&control->transition_edges),
         multiplicity);
     atomicAdd(
-        reinterpret_cast<unsigned long long*>(&control->rng_variates), 1ULL);
+        reinterpret_cast<unsigned long long*>(&control->binomial_calls), 1ULL);
 }
 __global__ void apply_sampled_aggregated_death_cloning(
     DeviceAggregatedControl* control, const uint64_t* active_labels,
@@ -108,6 +108,7 @@ __global__ void apply_sampled_aggregated_death_cloning(
             trajectory_index, control->absolute_step, active_labels[index],
             active_labels[index], population, 1));
     const uint64_t changed = exact_binomial(count, fmin(1.0, probability), random);
+    atomicAdd(reinterpret_cast<unsigned long long*>(&control->binomial_calls), 1ULL);
     uint64_t survivors = count;
     if (diagonal < 0.0) {
         if (changed > static_cast<uint64_t>(INT64_MAX) - count) {

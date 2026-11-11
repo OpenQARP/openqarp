@@ -95,7 +95,7 @@ struct Diagnostics {
     uint64_t aggregated_host_transfer_bytes = 0;
     uint64_t aggregated_steps = 0;
     uint64_t aggregated_transition_edge_visits = 0;
-    uint64_t aggregated_rng_variates = 0;
+    uint64_t aggregated_binomial_calls = 0;
     double aggregated_cache_upload_wall_seconds = 0.0;
     double aggregated_kernel_wall_seconds = 0.0;
     uint64_t transition_requests = 0;
@@ -106,7 +106,7 @@ struct Diagnostics {
     double transition_upload_wall_seconds = 0.0;
     double transition_kernel_wall_seconds = 0.0;
 };
-// A configured build gate alone never establishes numerical availability.
+// Reports numerical code compiled into this build; it does not probe a GPU.
 [[nodiscard]] bool available() noexcept;
 
 class ResidentEvolutionContext {

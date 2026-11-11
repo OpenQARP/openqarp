@@ -152,7 +152,7 @@ nb::dict diagnostics(const mc::Diagnostics& d) {
     out["aggregated_host_transfer_bytes"] = d.aggregated_host_transfer_bytes;
     out["aggregated_steps"] = d.aggregated_steps;
     out["aggregated_transition_edge_visits"] = d.aggregated_transition_edge_visits;
-    out["aggregated_rng_variates"] = d.aggregated_rng_variates;
+    out["aggregated_binomial_calls"] = d.aggregated_binomial_calls;
     out["aggregated_cache_upload_wall_seconds"] = d.aggregated_cache_upload_wall_seconds;
     out["aggregated_kernel_wall_seconds"] = d.aggregated_kernel_wall_seconds;
     out["transition_requests"] = d.transition_requests;
@@ -206,7 +206,7 @@ void register_montecarlo_bindings(nb::module_& m) {
             if (sources.size() != populations.size())
                 throw std::invalid_argument("TransitionRequest sources/populations lengths differ");
             new (self) mc::TransitionRequest{id, trajectory, step, attempts,
-                                             copy_array(sources), copy_array(populations)};
+                                             copy_array(sources), copy_array(populations), {}};
         }, "request_id"_a, "trajectory_index"_a, "step_index"_a, "attempts_per_walker"_a,
            "sources"_a.noconvert(), "populations"_a.noconvert())
         .def_ro("request_id", &mc::TransitionRequest::request_id)
@@ -362,7 +362,8 @@ void register_transition_column_bindings(nb::module_& m) {
             return nb::make_tuple(owned_array(std::move(rows.offsets), {offsets}),
                                   owned_array(std::move(rows.labels), {labels}),
                                   owned_array(std::move(rows.values), {values}));
-        }, "source_labels"_a.noconvert(), "absolute_tolerance"_a)
+        }, "source_labels"_a.noconvert(), "absolute_tolerance"_a,
+           nb::sig("def compact_columns(self, source_labels: numpy.ndarray[dtype=uint64, shape=(*), order='C', device='cpu', writable=False], absolute_tolerance: float) -> tuple[numpy.ndarray[dtype=uint64, shape=(*), order='C', device='cpu'], numpy.ndarray[dtype=uint64, shape=(*), order='C', device='cpu'], numpy.ndarray[dtype=complex128, shape=(*), order='C', device='cpu']]") )
         .def_prop_ro("diagnostics", [](const sim::TransitionColumnProvider& p) {
             sim::Diagnostics snapshot;
             { nb::gil_scoped_release release; snapshot = p.diagnostics(); }
