@@ -639,7 +639,7 @@ def test_uniform_proposals_reject_source_and_use_d_minus_one(monkeypatch):
     np.testing.assert_array_equal(batch[7], [0.5, 0.5])
 
 
-def _upload_x(context, probability=1.0):
+def _upload_x(context, probability=1.0, *, time_step=1.0):
     context.upload_aggregated_transition_rows(
         np.array([0, 1, 2], dtype=np.uint64),
         np.array([0, 1], dtype=np.uint64),
@@ -647,7 +647,7 @@ def _upload_x(context, probability=1.0):
         np.array([probability, probability], dtype=np.float64),
         np.array([-1, -1], dtype=np.int8),
         np.array([0, 0], dtype=np.float64),
-        np.array([0, 1], dtype=np.float64),
+        np.array([0, probability / time_step], dtype=np.float64),
     )
 
 
@@ -678,7 +678,7 @@ def test_gpu_philox_split_advance_and_binomial_oracle():
         context.reset_aggregated_evolution(0, 512, 0, 0, 0.2, 0, 1000000, 7, trajectory)
 
     reset(0)
-    _upload_x(context, 0.2)
+    _upload_x(context, 0.2, time_step=0.2)
     combined = context.advance_aggregated_evolution(2)
     reset(0)
     first = context.advance_aggregated_evolution(1)
@@ -700,7 +700,7 @@ def test_gpu_philox_split_advance_and_binomial_oracle():
 def test_gpu_binomial_4096_independent_trajectories():
     _, context = _gpu_context()
     context.reset_aggregated_evolution(0, 512, 0, 0, 0.2, 0, 1000000, 7, 0)
-    _upload_x(context, 0.2)
+    _upload_x(context, 0.2, time_step=0.2)
     observed = []
     for index in range(4096):
         context.reset_aggregated_evolution(0, 512, 0, 0, 0.2, 0, 1000000, 7, index)
