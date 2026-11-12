@@ -10,8 +10,9 @@ Architecture section after it records the reviewer's positions on the
 design, the revision at `57971d0` is reviewed against both in the third
 pass, the revision at `3c99e80` in the fourth pass, the revision at
 `4225b8c` in the fifth pass, the implementation at `b2d1b5d` in the
-Gate 2 conformance review, and the fix-up at `15c7475` in the Gate 2
-re-review at the end.
+Gate 2 conformance review, the fix-up at `15c7475` in the Gate 2
+re-review, and the corrections at `9b04250`, merged with `develop` at
+`591d742`, in the Gate 2 third review at the end.
 
 ## Summary
 
@@ -1818,3 +1819,280 @@ Rows not listed keep their `b2d1b5d` status.
 4. M3 to M7, if the PR is meant to scale: per-step cost now follows the
    cache size, the largest label and the number of discovery rounds, not
    the active set.
+
+## Gate 2 third review at `591d742`
+
+The author's corrections are `499d836` and `9b04250` (`git diff 3a46eb4
+9b04250`, 24 files). `591d742` merges `develop`; its only conflict is the
+contributions index, resolved as the union (`git show --remerge-diff
+591d742`), and it changes no file this PR owns. Same procedure as the two
+rounds before: three independent passes, each covering correctness, tests,
+architecture and clean code; every finding re-verified in the tree by the
+collating reviewer; the draft confirmed by the other two. Line numbers are
+at `591d742`, `plan:` is the plan at HEAD, `blob:` the green-lit blob
+`8cfd4b8d`. Findings, not a verdict.
+
+### Delta
+
+- **M1 fixed.** `exact_binomial` restarts with a fresh uniform when the mass
+  underflows or the loop reaches n with the sample still above the mass
+  (`rng.cuh:153-168`). The restart conditions on u at or below the rounded
+  total, so the sampler is exact up to rounding. The production header now
+  compiles on the host, and two independent harnesses test it directly: pmf
+  chi-square on all four branches (inversion, complement inversion,
+  Bernoulli, complement Bernoulli) and on a forced restart, all pass; on
+  37528 random (n, p) with mean below 16, on the top 200 000 grid values of
+  (512, .02) and (1000, .01) and the top 100 000 of (512, .01), no draw
+  returns n and no draw needs more than two uniforms. Device `exp` and `log1p` can differ from the
+  host by an ulp; the restart absorbs that, the GPU run confirms it.
+- **M2 fixed, one branch short (R3).** CPU ctest includes the production
+  `rng.cuh` (`test_montecarlo_contexts.cpp:256`): the three Random123
+  known-answer vectors, inversion and complement pmfs at n = 12, the
+  top-grid regression and the `log1p` case. GPU fixtures cover spawning,
+  complement, death, cloning and fractional request spawning, each
+  Binomial(512, .02) against analytic moments
+  (`test_montecarlo_aggregated.py:1421`, :1462).
+- **M3 to M7 deferred, M10, M11 and M16 left optional**, as the plan's
+  correction scope declares (plan:1147-1152). The code is unchanged for
+  each. M7 grows a little: `commit_transition_rows` now also copies the
+  three host maps on every upload (`contexts.cpp:78-80`).
+- **M8 fixed.** `HostProtocol::commit_transition_rows` stages the three host
+  maps, swaps them in, runs the device upload and swaps them back on throw
+  (`contexts.cpp:74-97`). On the device, edge growth allocates, copies and
+  swaps; `refresh_aggregated_device_metadata` allocates every new buffer
+  before swapping (`complete_evolution.cu:1166-1193`); the caller restores
+  the edge count (:449-458). The CPU test
+  `FailedDeviceUploadCanRetryWithoutImmutableRows` drives the host part. The
+  device part has no failure-injection test, which needs a fault hook.
+- **M9 fixed.** `_require_real(value, source, target)` reports coordinates
+  at every call site (`aggregated_montecarlo.py:475-483`); the native batch
+  check does too (`contexts.cpp:222-224`). Test gap in R6.
+- **M12, M13 fixed; M15 fixed for `TransitionRequest`.** The accounting path no longer writes complete
+  rows into the scalar cache. The start mass is `exp(n * log1p(-p))`
+  (`rng.cuh:154`); the ctest case (1e18, 1e-18) at u = .5 returns 1 where
+  `pow` gave 0. `TransitionRequest` names its seventh initialiser; the
+  sibling `EvolutionResult` constructor keeps the pattern (R10).
+- **M14 fixed by definition.** The counter is `aggregated_binomial_calls`,
+  one atomic per sampler call on all four paths; edge visits are documented
+  per path (`algorithms.rst:3067-3073`). ABI 16 to 17, stub regenerated,
+  both declared. Wording gap in R8.
+- **G3 fixed.** "Local validation" is gone; the Phase 2, 3 and 6 boxes are
+  unticked. Box dates remain (plan edits below).
+- **G4a fixed, with duplicates left in the CUDA path (R2).** Request issue,
+  accept, replay and reset are `HostProtocol` methods (`contexts.cpp:98-139`)
+  that the CPU test drives.
+- **G4b fixed in C++.** The context reports the lease's handle count minus a
+  baseline taken at construction (`complete_evolution.cu:1377-1382`); the
+  test creates a handle and sees 1. Python remainder in R4, semantics in R5.
+- **G5 fixed.** `transition_columns.cpp:34-37` rejects Reset, Measure and
+  the three branch markers before the build gate; the CPU test runs five
+  cases and passes.
+- **G6, G7 fixed.** New tests carry the plan tape (6, 40/21, 58/9, 8), the
+  replicas 50/7, 10/3, 8 and 4, the class-level request fixture (energy -4,
+  GPU), the literal payload, XX+YY under `FullyCommuting`, `NoGrouping` and
+  QWC, the hook spy and the `(root, trajectory)` reset arguments, the
+  incomplete tail and invalid replica, the mocked clock, the key set, the
+  densification sentinels, the 256-byte boundary, recomputation after
+  eviction and the option-matrix rejections. Every value re-derives by hand.
+  blob:606 "rechecked on use" is still asserted only through the identity
+  hash.
+- **G8 resolved by a plan edit.** Each run resets its accounting and
+  re-accounts the pairs retained from earlier runs
+  (`aggregated_montecarlo.py:357-358`, :535); the test now expects 4 on the
+  second run (`test_montecarlo_aggregated.py:1046`). Runs of one build are
+  replays (root seed fixed at construction, :318), so repeated runs report
+  the same count. R1 is the case where they do not.
+- **G9 fixed.** `type(self.U) is not TrotterAnsatzBlock` (:1015, :1050);
+  plan:685-687 matches.
+- **G10 mostly fixed.** The C++ column test adds the upper entry,
+  compaction, and H-CX with GPhase and Barrier; the literal re-derives:
+  (CX H0)† Z1 (CX H0) = X0 Z1. `SimulatorRunWaitsForLeaseUseGuard` tests
+  the guard against a simulator run and can fail. Ry is in the Python file
+  only.
+- **G11 declared** in the Deviations log (plan:1091-1106); (e) is fixed with
+  `primitive=None`.
+- **G12 mostly fixed.** Remaining: "currently requires"
+  (`aggregated_montecarlo.py:1052`) and the overlapping H-CX Python cases
+  (`test_transition_columns.py:92`, :118).
+- **G13 open.** The PR body is still at plan stage, with no Deviations
+  entries and no Validation evidence.
+
+### Plan edits after the green-light
+
+- **Body edits not in the Deviations log.** plan:388-392 changes run-to-run
+  accounting (blob:388-389 "Start fresh accounting metadata on each new
+  run"); plan:685-687 sharpens certification (blob:682-683); plan:902
+  rewrites the RNG test row; plan:618 rewrites the instantaneous row of the
+  option matrix (blob:615). The first three appear in the correction scope,
+  the fourth nowhere. The plan:618 text matches the code and the
+  combined-trajectory oracle (20/3), so it is a clarification. Add one log
+  line each.
+- **Two terms for two sets.** plan:388-390 retains "the canonical label
+  pairs of cached complete-row support"; the code retains every accounted
+  pair, request-route pairs included (`aggregated_montecarlo.py:535`).
+  plan:1133 says "metadata resets per run" next to plan:389's metadata that
+  persists. Name them "per-run accounting" and "retained pairs" in both
+  places.
+- **"Review correction scope" is review process in a permanent plan**
+  (plan:1108-1152). It cites review IDs and says "These corrections fulfill
+  ... not a new design approval", the same class as G3. Fold the design
+  statements into Design and Test plan, keep the deferred scaling list as an
+  out-of-scope paragraph without review references, and move the rest to
+  the PR.
+- **Dates on boxes ticked before the corrections.** Phase 1, 2 (first box),
+  4 and 5 boxes keep 2026-11-05, and plan:1031 says checked items "have CPU
+  evidence dated 2026-11-05", although `499d836` changed the tested code.
+  Re-date them on the run submitted for review (plan:1142-1145).
+
+### Checks run on this Mac
+
+| Check | Result |
+|---|---|
+| pytest, full suite at `591d742` (ABI 17 rebuild) | 6004 passed, 170 skipped, 7 xfailed |
+| pytest, the touched test files plus `test_montecarlo.py` and `test_montecarlo_unit.py` | 624 passed, 27 skipped (all GPU opt-in) |
+| ctest, own CPU build (CUDA-Q off) | 958 of 961; the 3 failures are the `BlasThreads` exit-handler cases that fail on `develop` on this Mac; 14 MC cases pass, 4 `gpu_` cases skip |
+| ruff, ruff format, mypy on the changed Python files | clean |
+| clang CUDA `-fsyntax-only -Wall -Wextra`, three `.cu` files, host and device, shim headers with device `exp` and `log1p`, `-D__CUDACC__` as nvcc defines it | clean except one third-party Eigen `pop_macro` warning; `b2d1b5d` control still gives its 20 errors |
+| clang `-Wall -Wextra`, MC on and off, CPU-compiled sources | clean except R10's missing initialiser |
+| Production `exact_binomial`, host build: pmf chi-square, 10 (n, p) in each of two harnesses, plus 4 forced restarts | all pass (p > .14; \|z\| < 1.4) |
+| Same, quantile grid (999 995 uniforms on five inversion cases) and top-grid scans | 0 quantile mismatches; no draw returns n |
+| Mutation run on the three new RNG ctests (10 mutants of `rng.cuh`) | 6 fail, 1 hangs into the ctest timeout; the Bernoulli bias, uniform resolution and sign-blind event key survive (R3) |
+| Host emulation of the complete-row kernels with production Philox, event keys and `exact_binomial`, three 6x6 real H, 8 trajectories x 20 000 steps | -2.2019 vs exact -2.1976 (stderr .0023), -1.2832 vs -1.3200 (.0221), -2.6048 vs -2.6037 (.0009) |
+| Accounting flip probe through the test module's scripted rows | tracking on from build: 2 circuits, 4 settings; off, run, on, run: 2 and 2 (R1) |
+
+The emulation now runs the production sampler and RNG keying, not a port,
+and still reproduces the exact ground energies within about two standard
+errors. Every GPU numerical claim still needs the author's MC-enabled run on
+the head (plan:1142-1145); there is none on the PR yet.
+
+### Findings, most severe first
+
+None blocking. Only R1 changes a reported result, and none changes an
+energy.
+
+- **R1. Enabling accounting after a run under-counts (should-fix,
+  correctness of a reported result).** The identity payload
+  (`aggregated_montecarlo.py:375-427`) omits `track_transition_circuits`,
+  so setting it after `build()` needs no rebuild (blob:635 asks for a
+  `RuntimeError` on config changes). With tracking off the bulk path
+  (:586-587, :645) records no pairs, and a later run with tracking on skips
+  every cached row (:594) and accounts only what it still requests. Probe:
+  the same tape reports 4 measurement settings with tracking on from build
+  and 2 after the flip, and the identity is unchanged. That contradicts
+  plan:1131-1133 ("logical requests of the current run", "repeated
+  identical runs give identical counts"). Fix: add the flag to the identity
+  payload, so the flip requires a rebuild, or record the retained pairs on
+  the bulk path too. Add a test for the flip.
+- **R2. The CUDA path keeps its own copies of the protocol checks (low,
+  architecture and test).** `request_transitions` returns the pending
+  request itself (`complete_evolution.cu:488-492`) before calling
+  `issue_request`, so `issue_request`'s pending branch
+  (`contexts.cpp:111-115`) is dead in production. `apply_transition_batch`
+  replays and validates (:532-533) before the kernels; `accept_batch` then
+  replays and validates again (`contexts.cpp:130-131`), so its replay
+  branch never fires in production. The CPU exact-once test drives that
+  dead branch (`test_montecarlo_contexts.cpp:224-226`); the production
+  replay path, which returns the stored result without a relaunch, runs
+  only in a `gpu_` case. Rows are validated twice per upload (:430 and
+  `contexts.cpp:76`), and `validate_transition_batch` builds three
+  `std::map`s twice per request step. `request_transitions` fills
+  `request_id`, the indices and `proposal_attempts` (:502-508), which
+  `issue_request` overwrites. Fix: one protocol entry per transition, for
+  example `begin_apply(batch)` returning the stored result on replay and
+  validating otherwise, with `accept_batch` only committing; drive those
+  from the CPU test and drop the inline copies.
+- **R3. The Bernoulli branch has no host pmf test, and the tolerances are
+  loose (low, test).** Both CPU pmf cases run inversion
+  (`test_montecarlo_contexts.cpp:278-292`); the per-walker loop
+  (`rng.cuh:169-172`) is tested only by the GPU Binomial(512, .2) moments.
+  Mutation: `u <= 1.05 p` in that loop survives every new ctest. The
+  per-bin bound of 8σ + 4 misses a 5% bias that a 1e6-draw chi-square
+  resolves at .5%; the GPU moment bounds (8σ on the mean, 35% on the
+  variance) miss biases below about 8% in p. Seeds are fixed, so tighter
+  bounds cost no flakiness. Fix: add (100, .3) and (100, .8), assert one
+  chi-square statistic against a fixed bound, and tighten the GPU bounds.
+  An event-key known-answer would also catch the surviving sign-blind key
+  mutant.
+- **R4. Three allocation assertions in the Python GPU test still cannot
+  fail (low, test).** `test_montecarlo_aggregated.py:668-669` asserts
+  `state_buffer_bytes`, `gate_uploads` and `term_uploads` on the evolution
+  context; no MC source writes them (`contexts.h:77-79`). Only
+  `handle_creations` is live there. Drop the three from the assertion, or
+  from `mc::Diagnostics`.
+- **R5. The context's `handle_creations` counts every handle on the shared
+  lease (low, diagnostics).** It is the lease count minus a baseline taken
+  when the context is built (`complete_evolution.cu:1380`); the provider's
+  is the lease count itself (`transition_columns.cu:223`); blob:850 lists
+  one key for both. The C++ test shows a handle made elsewhere appearing in
+  the context counter (`test_montecarlo_contexts.cpp:146-152`). The
+  algorithm builds the provider first (`aggregated_montecarlo.py:122-125`),
+  so the evolution count reads 0 today, by ordering only. Document the
+  meaning in `algorithms.rst`.
+- **R6. The M9 test does not reach a call site (low, test).**
+  `test_montecarlo_aggregated.py:1353` calls the static `_require_real`
+  directly, so a call site that dropped its coordinates would still pass.
+  Drive one complex coefficient through `_transition_coefficients` on the
+  request route and match `source=.*target=`.
+- **R7. One same-address atomic per sampler call (low, speed; size on
+  GPU).** Every spawning thread adds 1 to `control->binomial_calls`
+  (`complete_evolution.cu:99`, :178, `request_evolution.cu:73`, :111),
+  where the old counter added once per active row. Same-address atomics
+  serialise at L2, on top of M3's per-edge work. The count is deterministic
+  given the active set: count it on the host, or warp-aggregate before the
+  atomic.
+- **R8. The docs say the counter includes probability zero (low, docs).**
+  `algorithms.rst:3067-3068` and plan:1137-1138; complete-row spawning
+  returns before the call for p ≤ 1e-14 and for inactive sources
+  (`complete_evolution.cu:83-86`), while death and cloning count a p = 0
+  call (:178). Say "edges above the spawning cutoff", or move the atomic
+  above the early return.
+- **R9. `uniform()` can return exactly 1.0 (nit, numerics; no wrong
+  sample).** `(x + 0.5) / 2^53` (`rng.cuh:124-128`): for x ≥ 2^52 the
+  half is a tie that rounds to even, so values above .5 sit on a 2^-52
+  grid and x = 2^53 - 1 gives 1.0. Inversion restarts or accepts a tail
+  value there, and `u < p` never fires at 1.0, so no sample is wrong. The
+  ctest tape value 1 - 2^-53 is one the stream never emits; the emitted
+  top values 1.0 and 1 - 2^-52 give the same result in both harnesses. Fix:
+  `(x52 + 0.5) * 2^-52` with a 52-bit x is exact and lies in (0, 1), or
+  state the interval as (0, 1].
+- **R10. Clean code (nits).** The `EvolutionResult` binding constructor
+  initialises 12 of 14 fields implicitly (`bindings_montecarlo.cpp:263-266`;
+  clang "missing field initializer"); name `{}` for the two native-only
+  histories, as M15 did. `test_transition_columns.cpp:44` appends
+  `qarpx::Command{}` and relies on its default gate being Barrier
+  (`core/command.h:30`); name `GateType::Barrier`. The new native code uses
+  a compressed spacing (`for (std::size_t row=0;row<...`) unlike the rest
+  of its files (`contexts.cpp:74-139`, `complete_evolution.cu:440-458`,
+  :1166-1193). Runs of four to seven blank lines remain at
+  `complete_evolution.cu:104-110`, :847-853, :1311-1314 and :1348-1352.
+  `test_montecarlo_aggregated.py:1468-1469` binds two lambdas inside the
+  trajectory loop. G12's two leftovers are listed above.
+
+### Test plan rows changed by this round
+
+Rows not listed keep their `15c7475` status.
+
+| Plan row | Status at `591d742` |
+|---|---|
+| RNG and chunking | Present on CPU for Philox and inversion; Bernoulli branch GPU only (R3); four moment fixtures GPU |
+| CPU native protocol | Present; the production replay path is GPU only (R2) |
+| Evolution-only allocation | Present in C++ (GPU); three vacuous Python asserts (R4) |
+| Exact complex columns, Column orientation | Present, GPU; C++ case extended (G10) |
+| No execution or fallback | Present (hook spy, G7) |
+| Optional lazy accounting | Present; the off-to-on transition untested (R1) |
+| Configuration matrix | Present; blob:606 recheck on use through the hash only; R1 adds a blob:635 gap |
+| Diagnostics and timing partition | Partial; host and native key lists (plan:835-872) asserted only as the top-level set |
+| Resident signed evolution, Request transport and replay, Example GPU cells, Engine ownership and GIL | GPU; oracles re-derive by hand |
+
+### Suggested reviewer focus
+
+1. R1: one line in the identity payload and a test.
+2. The author's MC-enabled build and GPU run on this head. The CPU side is
+   now as strong as it can be without a GPU, and none of the GPU cases has
+   run.
+3. G13 and the plan edits: the PR body, the Deviations entries for the four
+   body edits, and folding the correction scope into the plan.
+4. R2 and R3 before merge, since they decide whether the CPU tests cover
+   the paths production runs.
+5. M3 to M7 are deferred as declared; whether that is acceptable for this
+   PR is the reviewer's call.
