@@ -2,7 +2,8 @@
 
 All notable changes to OpenQARP are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/).
+[Semantic Versioning](https://semver.org/); `RELEASING.md` gives how it reads
+`0.x` versions.
 
 ## [Unreleased]
 
