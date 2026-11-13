@@ -12,7 +12,8 @@ pass, the revision at `3c99e80` in the fourth pass, the revision at
 `4225b8c` in the fifth pass, the implementation at `b2d1b5d` in the
 Gate 2 conformance review, the fix-up at `15c7475` in the Gate 2
 re-review, and the corrections at `9b04250`, merged with `develop` at
-`591d742`, in the Gate 2 third review at the end.
+`591d742`, in the Gate 2 third review, and the corrections at `eca8053` in
+the Gate 2 fourth review, with the evidence check at `61f5acf` at the end.
 
 ## Summary
 
@@ -2118,3 +2119,104 @@ out-of-scope list:
   contribution (plan:1150-1151). It fits the deferred scaling work.
 - M3-M7 stay deferred as declared (plan:1146-1149); M10, M11 and M16 stay
   optional.
+
+## Gate 2 fourth review at `eca8053`
+
+The author's corrections are `eca8053` (`git diff 63097a8 eca8053`, 10
+files). One pass by the collating reviewer, since the delta is small; each
+item checked in the tree and each new oracle re-derived independently. CI is
+green on `eca8053`. Line numbers are at `eca8053`. Findings, not a verdict.
+
+### Delta against the to-do list
+
+- **Step 1 done.** R1: `track_transition_circuits` is in the identity
+  payload (`aggregated_montecarlo.py:424`); the parametrised test
+  (`test_montecarlo_aggregated.py:1057`) flips the flag both ways, expects
+  the rebuild `RuntimeError`, and after the rebuild asserts the literal
+  counts 2 and 4 and an unchanged result.
+- **Step 2 done.**
+  - R3: Binomial(100, .3) and (100, .8) with 10^6 draws run the Bernoulli
+    branch and its complement (`test_montecarlo_contexts.cpp:327`, :331),
+    with one Pearson statistic below 100 for at most 41 bins (:297). The
+    0.99999 quantile at 40 degrees of freedom is 90.1, so the bound holds.
+    A sampler with `u <= 1.05 p` gives a noncentrality near 10^5 there; the
+    n = 12 cases reject it with probability .96. The event-key known
+    answers (:335) match an independent SplitMix64 composition, and the
+    sign bit changes the key, so the sign-blind mutant is now caught.
+  - The GPU moment bounds are 4σ on the mean and 3σ on the unbiased
+    variance, with the exact binomial fourth moment
+    (`test_montecarlo_aggregated.py:654`). The formula is correct.
+  - R4: only `handle_creations` is asserted. R6: the new test drives a
+    complex coefficient through `_transition_coefficients` (:1377) and
+    checks the cache stays empty.
+  - R5, R8 and R9 as docs (`algorithms.rst:3067-3090`, plan:225-230). R8's
+    wording matches the kernels: complete-row spawning counts only edges
+    above the cutoff, death, cloning and request spawning count p = 0.
+  - R10: the binding fills all 14 fields, the barrier is named, the new
+    native code uses the files' spacing, the blank-line runs and the loop
+    lambdas are gone. The `.cu` change is whitespace only.
+  - G12: "currently requires" is gone; the second H-CX case adds S1 and
+    measures X1, so U†X1U = -X0Y1 (checked numerically) and the two cases
+    no longer overlap.
+- **Step 3 done.** The correction-scope section is folded into Design
+  (plan:168-172, :225-230, :250-253), the accounting paragraph, the option
+  matrix, the identity payload, the diagnostics contract and the Test plan,
+  with no review IDs left. Deviations entries cover the body edits and the
+  R2/R7 deferrals (plan:1164-1185); Scope limits lists the deferred work
+  (plan:458-464). The boxes carry 2026-11-13, today's date.
+- **Step 4 in progress.** The author's GPU run is under way on this head.
+- **Step 5 open.** G13: the PR body is still at plan stage.
+
+### Notes
+
+- **N1. The GPU fixtures can fail by chance (low, test).** Simulated with a
+  correct sampler, the new bounds reject with probability .0045 for
+  N = 64, .0028 for N = 4096 and .003 for each of the five N = 1024
+  fixtures, so about 2% that one of the seven fails on a correct GPU. Seeds
+  are fixed, so the run either passes or fails every time. If one fails,
+  that alone is not evidence of a bug, and the plan forbids a seed change
+  (plan:1017-1018); report it with the observed statistic.
+- **N2. "existing" in user docs (nit).** `algorithms.rst:3073` reads "The
+  existing FP64 uniform conversion"; "The FP64 uniform conversion" says the
+  same without the history. Plan:229-230 can keep "existing random
+  streams", since the plan states a constraint on later changes.
+
+### Remaining before Gate 2
+
+1. The GPU report from the author's run on this head: both profiles, zero
+   skipped required `gpu_` cases (plan:1048), with the machine named
+   generically.
+2. G13: the PR body with the Deviations section and the sanitized evidence,
+   then mark the PR ready.
+3. No further `.cu` change after the run. N2 is a docs line and does not
+   invalidate it.
+
+### Evidence check at `61f5acf`
+
+The author's `e2bacb3` and `61f5acf` change only
+`docs/contributions/qmc_gpu_plan.md` (`git diff --stat eca8053 61f5acf`):
+Status Landed, the Phase 2, 3 and 6 boxes ticked and dated, and the phase
+preamble. No code, test, build file or example changed after the validated
+revision, so the GPU run on `eca8053` stands for the submitted head.
+
+- **GPU report.** The published evidence comment covers both CUDA-Q
+  profiles at `eca8053` from a clean tree, with every recorded command
+  exiting zero. It lists 27 Python and 4 native required GPU cases as
+  passed. These are exactly the `test_gpu_*` cases collected from the
+  three GPU test files and the four `TEST(MonteCarloGpu, gpu_*)` cases in
+  the tree. The MC-enabled skips (2 Python, 1 native) are reported as
+  unavailable-build paths. Both notebook transports passed, the source and
+  ABI origins are asserted without a bypass, and the stub check passed in
+  both profiles. Zero required GPU skips meets plan:1048-1058.
+- **Seed-fixed bounds.** All seven moment fixtures passed under the
+  tightened bounds, so N1's chance failure did not occur.
+- **G13 done.** The PR body carries the Deviations section, the declared
+  deferrals R2, R7, M3-M7 and M10/M11/M16, the validation table and the
+  sanitized evidence, and all author boxes are ticked. The PR is marked
+  ready. The body and the evidence comment name the hardware generically.
+- **Open.** N2 (one word in `algorithms.rst:3073`) remains a nit and does
+  not block.
+
+Every finding of the four Gate 2 rounds is fixed or declared deferred in
+the PR and the plan. The conformance review has nothing further to raise.
+Approval is the reviewer's decision.
