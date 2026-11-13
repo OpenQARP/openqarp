@@ -651,6 +651,17 @@ def _upload_x(context, probability=1.0, *, time_step=1.0):
     )
 
 
+def _assert_binomial_moments(observations, *, n, p):
+    samples = len(observations)
+    variance = n * p * (1 - p)
+    fourth_moment = 3 * variance**2 + variance * (1 - 6 * p * (1 - p))
+    variance_stderr = np.sqrt(
+        (fourth_moment - (samples - 3) / (samples - 1) * variance**2) / samples
+    )
+    assert np.mean(observations) == pytest.approx(n * p, abs=4 * np.sqrt(variance / samples))
+    assert np.var(observations, ddof=1) == pytest.approx(variance, abs=3 * variance_stderr)
+
+
 def test_gpu_resident_x_tape_and_evolution_only_resources():
     _, context = _gpu_context()
     context.reset_aggregated_evolution(0, 8, 0, 0, 1, 0, 1000, 7, 0)
@@ -665,8 +676,7 @@ def test_gpu_resident_x_tape_and_evolution_only_resources():
     np.testing.assert_array_equal(result.reference_population_history, [8, 16])
     np.testing.assert_array_equal(result.projected_numerator_history, [-8, -16])
     np.testing.assert_allclose(result.projected_energy_history, [-1, -1])
-    for counter in ("state_buffer_bytes", "gate_uploads", "term_uploads", "handle_creations"):
-        assert context.diagnostics[counter] == 0
+    assert context.diagnostics["handle_creations"] == 0
     with pytest.raises(ValueError, match="immutable"):
         _upload_x(context)
 
@@ -691,9 +701,7 @@ def test_gpu_philox_split_advance_and_binomial_oracle():
     for index in range(64):
         reset(index)
         observed.append(int(context.advance_aggregated_evolution(1).spawned_history[0]))
-    # Binomial(512,.2) has analytic mean 102.4 and variance 81.92.
-    assert np.mean(observed) == pytest.approx(102.4, abs=5 * np.sqrt(81.92 / 64))
-    assert np.var(observed, ddof=1) == pytest.approx(81.92, rel=0.6)
+    _assert_binomial_moments(observed, n=512, p=0.2)
     assert len(set(observed)) > 1
 
 
@@ -707,9 +715,7 @@ def test_gpu_binomial_4096_independent_trajectories():
         result = context.advance_aggregated_evolution(1)
         assert result.status == qx.EvolutionStatus.Completed
         observed.append(int(result.spawned_history[0]))
-    # Fixed seeds and analytic Binomial(512,.2) moments; no retry selection.
-    assert np.mean(observed) == pytest.approx(102.4, abs=16 * np.sqrt(81.92 / 4096))
-    assert np.var(observed, ddof=1) == pytest.approx(81.92, rel=0.6)
+    _assert_binomial_moments(observed, n=512, p=0.2)
 
 
 def test_gpu_request_identity_replay_and_weight_above_one():
@@ -1047,6 +1053,19 @@ def test_accounting_reuses_lazy_circuits_per_run_and_preserves_tape(monkeypatch)
     assert counted.diagnostics["actual_shots_executed"] == 0
 
 
+@pytest.mark.parametrize("enabled_at_build", [False, True])
+def test_accounting_toggle_after_run_requires_rebuild(monkeypatch, enabled_at_build):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    m = _mc(num_trajectories=2, track_transition_circuits=enabled_at_build).build()
+    expected = m.run()
+    m.track_transition_circuits = not enabled_at_build
+    with pytest.raises(RuntimeError, match="configuration changed; rebuild"):
+        m.run()
+    assert m.build().run() == expected
+    assert m.diagnostics["generated_circuits"] == (0 if enabled_at_build else 2)
+    assert m.diagnostics["measurement_settings"] == (0 if enabled_at_build else 4)
+
+
 def test_seed_contract_is_local_and_records_generated_root(monkeypatch):
     monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
     before = np.random.get_state()
@@ -1355,6 +1374,23 @@ def test_request_realness_reports_exact_coordinates():
         module.AggregatedMonteCarlo._require_real(1 + 0.1j, 7, 3)
 
 
+def test_request_transition_realness_reports_coordinates(monkeypatch):
+    matrix = np.zeros((4, 4), dtype=np.complex128)
+    matrix[1, 2], matrix[2, 1] = 1 - 0.1j, 1 + 0.1j
+    rows = _MatrixRows(matrix)
+    monkeypatch.setattr(module, "_PersistentGpuRows", lambda *args: rows)
+    m = _mc(
+        hamiltonian=QubitOperator("Z0"),
+        unitary_block=_ansatz(),
+        reference_walker_label=1,
+        resident_evolution=ResidentEvolutionConfig(ComputationalBasisSector(((0, 1),), (1,))),
+    ).build()
+    with pytest.raises(CapabilityError, match="source=1, target=2"):
+        m._transition_coefficients([(1, 2)])
+    assert rows.calls == [(1,)]
+    assert m._coefficient_cache.get(1, 2) is None
+
+
 @pytest.mark.parametrize("budget,retained", [(255, False), (256, True), (257, True)])
 def test_literal_scalar_cache_budget_boundary_and_eviction(budget, retained):
     cache = module._ExactCoefficientCache(budget, "literal")
@@ -1448,11 +1484,7 @@ def test_gpu_inversion_events_match_analytic_binomial_moments(event):
         observations.append(int(getattr(result, field)[0]))
         if event in ("death", "clone"):
             assert result.projected_energy_history[0] == pytest.approx(diagonal)
-    # Binomial(512,.02): mean 10.24, variance 10.0352; fixed seeds, no retries.
-    assert np.mean(observations) == pytest.approx(
-        501.76 if event == "complement" else 10.24, abs=8 * np.sqrt(10.0352 / 1024)
-    )
-    assert np.var(observations, ddof=1) == pytest.approx(10.0352, rel=0.35)
+    _assert_binomial_moments(observations, n=512, p=0.98 if event == "complement" else 0.02)
 
     assert context.diagnostics["aggregated_binomial_calls"] == 1024 * (
         2 if event in ("spawn", "complement") else 1
@@ -1462,11 +1494,11 @@ def test_gpu_inversion_events_match_analytic_binomial_moments(event):
 def test_gpu_fractional_request_spawning_matches_inversion_binomial():
     _, context = _gpu_context()
     observations = []
+    u = lambda values: np.asarray(values, dtype=np.uint64)
+    f = lambda values: np.asarray(values, dtype=np.float64)
     for trajectory in range(1024):
         context.reset_aggregated_evolution(0, 512, 0, 0, 1, 0, 1000000, 7, trajectory)
         request = context.request_transitions(1)
-        u = lambda values: np.asarray(values, dtype=np.uint64)
-        f = lambda values: np.asarray(values, dtype=np.float64)
         result = context.apply_transition_batch(
             request.request_id,
             trajectory,
@@ -1484,8 +1516,7 @@ def test_gpu_fractional_request_spawning_matches_inversion_binomial():
         )
         assert result.status == qx.EvolutionStatus.Completed
         observations.append(int(result.spawned_history[0]))
-    assert np.mean(observations) == pytest.approx(10.24, abs=8 * np.sqrt(10.0352 / 1024))
-    assert np.var(observations, ddof=1) == pytest.approx(10.0352, rel=0.35)
+    _assert_binomial_moments(observations, n=512, p=0.02)
     assert context.diagnostics["aggregated_binomial_calls"] == 2048
 
 

@@ -41,7 +41,9 @@ TEST(MonteCarloGpu, gpu_AnalyticComplexColumnsAndPersistentLease) {
     phase.gate=qarpx::GateType::GPhase;
     phase.params={qarpx::Param(0.41)};
     gates.push_back(phase);
-    gates.push_back(qarpx::Command{});
+    qarpx::Command barrier;
+    barrier.gate = qarpx::GateType::Barrier;
+    gates.push_back(barrier);
     auto entangled=clifford.make_transition_column_provider(gates,2,{{{{1,'Z'}},1.0}},4);
     // (CX H0)† Z1 (CX H0) = X0 Z1; scalar phase and barrier cancel.
     const std::vector<double> literal{0,1,0,0, 1,0,0,0, 0,0,0,-1, 0,0,-1,0};

@@ -421,6 +421,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
             "estimator": self.projected_energy_estimator,
             "burn_in": self.estimator_burn_in_steps,
             "block_size": self.estimator_block_size,
+            "track_transition_circuits": self.track_transition_circuits,
         }
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -1048,9 +1049,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
                 )
 
         if type(self.U) is not TrotterAnsatzBlock:
-            raise CapabilityError(
-                "Resident GPU realness certification currently requires TrotterAnsatzBlock"
-            )
+            raise CapabilityError("Resident GPU realness certification requires TrotterAnsatzBlock")
         for group_index, sequence in enumerate(self.U.generator_groups()):
             for paulis, _, coefficient in sequence:
                 if abs(float(coefficient)) <= 1e-12:

@@ -102,12 +102,6 @@ __global__ void generate_aggregated_spawning(
         static_cast<int64_t>(spawned) * source_sign * sign_factors[edge];
 }
 
-
-
-
-
-
-
 __global__ void reduce_aggregated_spawning(
     DeviceAggregatedControl* control, const uint64_t* edge_targets,
     uint64_t edge_count, const uint64_t* target_labels,
@@ -437,8 +431,8 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         edge_targets.reserve(rows.target_labels.size());
         edge_probabilities.reserve(rows.target_labels.size());
         edge_signs.reserve(rows.target_labels.size());
-        for (std::size_t row=0;row<rows.source_labels.size();++row) {
-            for (auto edge=rows.row_offsets[row];edge<rows.row_offsets[row+1];++edge) {
+        for (std::size_t row = 0; row < rows.source_labels.size(); ++row) {
+            for (auto edge = rows.row_offsets[row]; edge < rows.row_offsets[row + 1]; ++edge) {
                 edge_sources.push_back(rows.source_labels[row]);
                 edge_targets.push_back(rows.target_labels[edge]);
                 edge_probabilities.push_back(rows.probabilities[edge]);
@@ -447,9 +441,9 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         }
         const auto previous_edges = aggregated_edge_count_;
         try {
-            commit_transition_rows(rows,aggregated_time_step_,[&] {
+            commit_transition_rows(rows, aggregated_time_step_, [&] {
                 append_aggregated_device_edges(
-                    edge_sources,edge_targets,edge_probabilities,edge_signs);
+                    edge_sources, edge_targets, edge_probabilities, edge_signs);
                 refresh_aggregated_device_metadata();
             });
         } catch (...) {
@@ -845,12 +839,6 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         return result;
     }
 
-
-
-
-
-
-
     void ensure_sampled_edge_capacity(std::size_t requested) {
         if (requested <= sampled_edge_capacity_) return;
         const std::size_t capacity = grown_capacity(requested, sampled_edge_capacity_);
@@ -1163,34 +1151,50 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
 
         ensure_aggregated_population_capacity(
             std::max<std::size_t>(1, cached_sources.size() + target_labels.size()));
-        uint64_t *sources=nullptr, *counts=nullptr, *targets=nullptr, *references=nullptr;
-        double *diagonals=nullptr, *values=nullptr;
-        int64_t* deltas=nullptr;
-        std::size_t metadata_bytes=0;
+        uint64_t *sources = nullptr, *counts = nullptr, *targets = nullptr, *references = nullptr;
+        double *diagonals = nullptr, *values = nullptr;
+        int64_t* deltas = nullptr;
+        std::size_t metadata_bytes = 0;
         try {
-            metadata_bytes += replace_aggregated_device_vector(sources,cached_sources,"cached sources");
-            metadata_bytes += replace_aggregated_device_vector(counts,cached_edge_counts,"cached counts");
-            metadata_bytes += replace_aggregated_device_vector(diagonals,diagonal_elements,"cached diagonals");
-            metadata_bytes += replace_aggregated_device_vector(targets,target_labels,"cached targets");
-            metadata_bytes += replace_aggregated_device_vector(references,reference_labels,"reference labels");
-            metadata_bytes += replace_aggregated_device_vector(values,reference_values,"reference values");
+            metadata_bytes += replace_aggregated_device_vector(
+                sources, cached_sources, "cached sources");
+            metadata_bytes += replace_aggregated_device_vector(
+                counts, cached_edge_counts, "cached counts");
+            metadata_bytes += replace_aggregated_device_vector(
+                diagonals, diagonal_elements, "cached diagonals");
+            metadata_bytes += replace_aggregated_device_vector(
+                targets, target_labels, "cached targets");
+            metadata_bytes += replace_aggregated_device_vector(
+                references, reference_labels, "reference labels");
+            metadata_bytes += replace_aggregated_device_vector(
+                values, reference_values, "reference values");
             if (!target_labels.empty())
-                cuda_check(cudaMalloc(&deltas,checked_bytes(target_labels.size(),sizeof(int64_t))),
+                cuda_check(cudaMalloc(&deltas, checked_bytes(target_labels.size(), sizeof(int64_t))),
                            "target deltas");
         } catch (...) {
-            cudaFree(sources); cudaFree(counts); cudaFree(diagonals); cudaFree(targets);
-            cudaFree(references); cudaFree(values); cudaFree(deltas);
+            cudaFree(sources);
+            cudaFree(counts);
+            cudaFree(diagonals);
+            cudaFree(targets);
+            cudaFree(references);
+            cudaFree(values);
+            cudaFree(deltas);
             throw;
         }
-        std::swap(sources,aggregated_cached_sources_);
-        std::swap(counts,aggregated_cached_edge_counts_);
-        std::swap(diagonals,aggregated_diagonal_elements_);
-        std::swap(targets,aggregated_target_labels_);
-        std::swap(references,aggregated_reference_labels_);
-        std::swap(values,aggregated_reference_elements_);
-        std::swap(deltas,aggregated_target_deltas_);
-        cudaFree(sources); cudaFree(counts); cudaFree(diagonals); cudaFree(targets);
-        cudaFree(references); cudaFree(values); cudaFree(deltas);
+        std::swap(sources, aggregated_cached_sources_);
+        std::swap(counts, aggregated_cached_edge_counts_);
+        std::swap(diagonals, aggregated_diagonal_elements_);
+        std::swap(targets, aggregated_target_labels_);
+        std::swap(references, aggregated_reference_labels_);
+        std::swap(values, aggregated_reference_elements_);
+        std::swap(deltas, aggregated_target_deltas_);
+        cudaFree(sources);
+        cudaFree(counts);
+        cudaFree(diagonals);
+        cudaFree(targets);
+        cudaFree(references);
+        cudaFree(values);
+        cudaFree(deltas);
 
         aggregated_cached_source_count_ = cached_sources.size();
         aggregated_target_count_ = target_labels.size();
@@ -1309,9 +1313,6 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
         if (aggregated_control_ != nullptr) cudaFree(aggregated_control_);
     }
 
-
-
-
     double aggregated_initial_energy_ = 0.0;
     double aggregated_time_step_ = 0.0;
     double aggregated_shift_damping_ = 0.0;
@@ -1345,10 +1346,6 @@ struct ResidentEvolutionContext::Impl : detail::HostProtocol {
     std::size_t aggregated_reference_count_ = 0;
     DeviceAggregatedStepSummary* aggregated_summaries_ = nullptr;
     std::size_t aggregated_summary_capacity_ = 0;
-
-
-
-
 
     uint64_t* sampled_edge_sources_ = nullptr;
     uint64_t* sampled_edge_targets_ = nullptr;

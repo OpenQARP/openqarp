@@ -3064,12 +3064,27 @@ simulator exposes ``CudaqSimulator.make_transition_column_provider``; C++
 consumers include ``qarpx/montecarlo/contexts.h`` for evolution records and
 factories. These public headers contain no CUDA types.
 
-``aggregated_binomial_calls`` counts logical binomial sampler invocations,
-including probabilities zero and one. It does not count the underlying uniform
+``aggregated_binomial_calls`` counts logical binomial sampler invocations.
+Complete-row spawning counts edges of active sources above the ``1e-14``
+spawning cutoff; inactive sources and edges at or below the cutoff are skipped.
+Death/cloning counts calls with probability zero or one; request fractional
+spawning also counts probability zero. The counter does not count the underlying uniform
 variates: inversion may restart, while the Bernoulli branch draws per walker.
+The existing FP64 uniform conversion produces values in ``(0, 1]``; rounding
+can produce exactly one. Inversion restarts when a uniform exceeds the rounded
+total probability mass.
 Complete-row edge visits count cached outgoing edges of active sources;
 request-path edge visits count sampled proposal multiplicities.
 Automatic sector/realness certification requires the concrete canonical
 ``TrotterAnsatzBlock``, not an arbitrary subclass overriding its accessors.
-Circuit accounting resets per run and includes reused complete-row support;
-a warm coefficient cache does not lower the logical measurement-setting count.
+Circuit accounting resets per run and includes retained pair labels from both
+transport paths; a warm coefficient cache does not lower the logical
+measurement-setting count. Changing ``track_transition_circuits`` after
+``build()`` requires rebuilding the contexts before running again.
+
+The column provider's ``handle_creations`` is the total handle count on its
+shared simulator resource lease. The evolution context reports the increase
+since that context was constructed, including handles created by other users
+of the same lease. It measures shared resource activity, rather than attributing
+each handle to a particular context. The algorithm constructs the provider
+before the evolution context, so its existing handle is outside that baseline.

@@ -263,7 +263,7 @@ void register_montecarlo_bindings(nb::module_& m) {
             new (self) mc::EvolutionResult{status, steps, copy_array(missing),
                 copy_array(population), copy_array(reference), copy_array(shift),
                 copy_array(energy), copy_array(numerator), copy_array(spawned),
-                copy_array(died), copy_array(cloned), copy_array(annihilated)};
+                copy_array(died), copy_array(cloned), copy_array(annihilated), {}, {}};
         }, "status"_a = mc::EvolutionStatus::Completed, "completed_steps"_a = 0,
            "missing_labels"_a.noconvert() = nb::none(),
            "population_history"_a.noconvert() = nb::none(),

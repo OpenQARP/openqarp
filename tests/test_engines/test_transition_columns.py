@@ -96,14 +96,16 @@ def test_gpu_entangling_lsb_columns_match_literal_clifford():
     u = SimpleBlock(2)
     u.h(0)
     u.cx(0, 1)
+    u.s(1)
     u.build()
     simulator = qx.CudaqSimulator()
-    provider = simulator.make_transition_column_provider(u.flatten(), 2, [([(1, "Z")], 1.0)], 4)
+    provider = simulator.make_transition_column_provider(u.flatten(), 2, [([(1, "X")], 1.0)], 4)
     h = np.array([[1, 1], [1, -1]]) / np.sqrt(2)
     cx = np.array([[1, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0], [0, 1, 0, 0]])
-    U = cx @ np.kron(np.eye(2), h)
-    H = np.diag([1, 1, -1, -1])
-    expected = U.T @ H @ U
+    # S1 makes U† X1 U = -X0 Y1, exposing row/column conjugation mistakes.
+    U = np.diag([1, 1, 1j, 1j]) @ cx @ np.kron(np.eye(2), h)
+    H = np.kron(np.array([[0, 1], [1, 0]]), np.eye(2))
+    expected = U.conj().T @ H @ U
     np.testing.assert_allclose(
         provider.columns(np.arange(4, dtype=np.uint64)), expected.T, rtol=0, atol=1e-12
     )

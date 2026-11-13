@@ -256,6 +256,49 @@ TEST(MonteCarloHostProtocol, ImmutableRowsAndInvalidPayloads) {
 #include "../../src/montecarlo/rng.cuh"
 #include <array>
 
+namespace {
+void expect_binomial_pmf(int n, double p, int samples) {
+    SCOPED_TRACE(::testing::Message() << "n=" << n << ", p=" << p);
+    mc::cuda_detail::PhiloxStream stream(7, 0);
+    std::vector<int> frequencies(n + 1);
+    for (int i = 0; i < samples; ++i) {
+        ++frequencies[mc::cuda_detail::exact_binomial(n, p, stream)];
+    }
+
+    std::vector<std::pair<long double, int>> bins;
+    long double choose = 1;
+    long double tail_expected = 0;
+    int tail_observed = 0;
+    for (int k = 0; k <= n; ++k) {
+        if (k != 0) choose = choose * (n - k + 1) / k;
+        const long double expected = samples * choose *
+            std::pow(static_cast<long double>(p), k) *
+            std::pow(1 - static_cast<long double>(p), n - k);
+        if (expected >= 5) {
+            bins.emplace_back(expected, frequencies[k]);
+        } else {
+            tail_expected += expected;
+            tail_observed += frequencies[k];
+        }
+    }
+    ASSERT_FALSE(bins.empty());
+    if (tail_expected >= 5) {
+        bins.emplace_back(tail_expected, tail_observed);
+    } else {
+        bins.back().first += tail_expected;
+        bins.back().second += tail_observed;
+    }
+    long double chi_square = 0;
+    for (const auto& [expected, observed] : bins) {
+        const long double difference = observed - expected;
+        chi_square += difference * difference / expected;
+    }
+    // These fixed cases have at most 41 bins; 100 exceeds the 0.99999 quantile.
+    ASSERT_LE(bins.size(), 41);
+    EXPECT_LT(chi_square, 100);
+}
+}  // namespace
+
 TEST(MonteCarloRng, Random123PhiloxKnownAnswers) {
     namespace rng = mc::cuda_detail;
     // Published counter/key/output vectors: DEShawResearch/random123/tests/kat_vectors.
@@ -276,25 +319,33 @@ TEST(MonteCarloRng, Random123PhiloxKnownAnswers) {
 }
 
 TEST(MonteCarloRng, InversionAndComplementMatchLiteralBinomialPmf) {
-    constexpr int samples=40000, n=12;
     for (double p : {0.1, 0.9}) {
-        mc::cuda_detail::PhiloxStream stream(7,0);
-        std::array<int,n+1> frequencies{};
-        for (int i=0;i<samples;++i) ++frequencies[mc::cuda_detail::exact_binomial(n,p,stream)];
-        long double choose=1;
-        for (int k=0;k<=n;++k) {
-            if (k) choose=choose*(n-k+1)/k;
-            const double probability=static_cast<double>(choose*std::pow(p,k)*std::pow(1-p,n-k));
-            EXPECT_NEAR(frequencies[k], samples*probability,
-                        8*std::sqrt(samples*probability*(1-probability))+4);
-        }
+        expect_binomial_pmf(12, p, 40000);
     }
+}
+
+TEST(MonteCarloRng, BernoulliMatchesBinomialPmf) {
+    expect_binomial_pmf(100, 0.3, 1000000);
+}
+
+TEST(MonteCarloRng, ComplementBernoulliMatchesBinomialPmf) {
+    expect_binomial_pmf(100, 0.8, 1000000);
+}
+
+TEST(MonteCarloRng, EventKeyKnownAnswersIncludePopulationSign) {
+    namespace rng = mc::cuda_detail;
+    // Literal uint64 SplitMix composition for (trajectory, step, source, target).
+    EXPECT_EQ(rng::aggregated_event_key(3, 5, 7, 11, 19, 0), 0xb1943863fb2353bdULL);
+    EXPECT_EQ(rng::aggregated_event_key(3, 5, 7, 11, 19, 1), 0x4ddf3d526a8d35bfULL);
+    EXPECT_EQ(rng::aggregated_event_key(3, 5, 7, 11, -19, 0), 0x47f6b83baecbe889ULL);
+    EXPECT_EQ(rng::aggregated_event_key(3, 5, 7, 11, -19, 1), 0x79bc9154aea9e995ULL);
 }
 
 TEST(MonteCarloRng, TopGridUniformCannotRunAwayToPopulation) {
     struct Tape {
         int calls=0;
-        double uniform() { return calls++==0 ? std::nextafter(1.0,0.0) : 0.5; }
+        double top = std::nextafter(1.0, 0.0);
+        double uniform() { return calls++ == 0 ? top : 0.5; }
     } tape;
     const auto value=mc::cuda_detail::exact_binomial(512,0.02,tape);
     EXPECT_LT(value,64);
@@ -303,6 +354,12 @@ TEST(MonteCarloRng, TopGridUniformCannotRunAwayToPopulation) {
     Tape exhausted;
     EXPECT_LT(mc::cuda_detail::exact_binomial(512,0.01,exhausted),64);
     EXPECT_LE(exhausted.calls,2);
+    for (double top : {1.0, 1.0 - 0x1p-52}) {
+        Tape emitted;
+        emitted.top = top;
+        EXPECT_LT(mc::cuda_detail::exact_binomial(512, 0.02, emitted), 64);
+        EXPECT_LE(emitted.calls, 2);
+    }
     // log1p retains a probability that subtraction from one would erase.
     struct Midpoint { double uniform() { return 0.5; } } midpoint;
     EXPECT_EQ(mc::cuda_detail::exact_binomial(1000000000000000000ULL,1e-18,midpoint),1);
