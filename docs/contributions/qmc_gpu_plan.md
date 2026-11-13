@@ -1084,10 +1084,9 @@ tests are separate bounded cases.
 
 ## Phases
 
-Checked implementation items carry their latest implementation/CPU verification
-date. GPU numerical execution remains open in Phases 2, 3 and 6 until the final
-correction revision is validated; checked items do not claim GPU validation or
-Gate 2 approval.
+Checked items carry their latest implementation or verification date.
+Supporting validation evidence belongs in the PR. Publication of that evidence
+and the final Gate 2 sequence remain separate from completed validation.
 
 All increments belong to the same contribution branch and PR. Each increment is
 reviewable and CPU-buildable with its own tests; mark it complete only with
@@ -1108,17 +1107,17 @@ ABI and regenerates the stub as required by §15.
 
 - [x] Add simulator-layer batched columns, canonical gate matrices and compact
   sector gathering with their independent simulator tests. (2026-11-13)
-- [ ] Validate the corrected build gates and resident complete-row kernels
-  in the MC-enabled profile.
-- [ ] Test analytic complex columns, signed X tapes, cache resume, RNG, overflow
-  and reference-conflict guards.
+- [x] Validate the corrected build gates and resident complete-row kernels
+  in the MC-enabled profile. (2026-11-13)
+- [x] Test analytic complex columns, signed X tapes, cache resume, RNG, overflow
+  and reference-conflict guards. (2026-11-13)
 
 ### Phase 3 — request transport
 
-- [ ] Validate immutable requests, exact payload replay, proposal multiplicities
-  and estimator support on the corrected MC-enabled profile.
-- [ ] Test request identity, stale/change rejection, weight-above-one and
-  failure histories.
+- [x] Validate immutable requests, exact payload replay, proposal multiplicities
+  and estimator support on the corrected MC-enabled profile. (2026-11-13)
+- [x] Test request identity, stale/change rejection, weight-above-one and
+  failure histories. (2026-11-13)
 
 ### Phase 4 — Python MC integration
 
@@ -1138,12 +1137,14 @@ ABI and regenerates the stub as required by §15.
 
 ### Phase 6 — integration evidence and Gate 2
 
-- [ ] Run CPU/native/lint/type/stub/wheel/coverage/example checks on the final
-  correction revision and resolve all failures.
-- [ ] Execute both CUDA-Q profiles and attach author numerical evidence;
-  required GPU skips remain open.
-- [ ] Fold declared deviations into the plan, date phase boxes and finish the
-  Gate 2 sequence on this PR.
+- [x] Run CPU/native/lint/type/stub/wheel/coverage/example checks on the final
+  correction revision and resolve all failures. (2026-11-13)
+- [x] Execute both CUDA-Q profiles with zero skipped required GPU cases.
+  (2026-11-13)
+- [x] Fold declared deviations into the plan and date completed phase boxes.
+  (2026-11-13)
+- [ ] Publish sanitized author numerical evidence in the PR.
+- [ ] Complete the author checklist and prepare the PR for Gate 2 review.
 
 ## Deviations log
 
