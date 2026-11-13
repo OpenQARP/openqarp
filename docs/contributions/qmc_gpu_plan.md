@@ -1,6 +1,6 @@
 # Add persistent GPU Monte Carlo and resident signed evolution
 
-**Status:** In progress
+**Status:** Landed
 **Author:** Antonio Márquez Romero (+ Codex)
 **Date:** 2026-10-29
 **Tier:** Structural
@@ -1085,8 +1085,8 @@ tests are separate bounded cases.
 ## Phases
 
 Checked items carry their latest implementation or verification date.
-Supporting validation evidence belongs in the PR. Publication of that evidence
-and the final Gate 2 sequence remain separate from completed validation.
+Supporting validation evidence belongs in the PR. These checkboxes record
+completed implementation, validation and author handoff.
 
 All increments belong to the same contribution branch and PR. Each increment is
 reviewable and CPU-buildable with its own tests; mark it complete only with
@@ -1143,8 +1143,8 @@ ABI and regenerates the stub as required by §15.
   (2026-11-13)
 - [x] Fold declared deviations into the plan and date completed phase boxes.
   (2026-11-13)
-- [ ] Publish sanitized author numerical evidence in the PR.
-- [ ] Complete the author checklist and prepare the PR for Gate 2 review.
+- [x] Publish sanitized author numerical evidence in the PR. (2026-11-13)
+- [x] Complete the author checklist and prepare the PR for Gate 2 review. (2026-11-13)
 
 ## Deviations log
 
