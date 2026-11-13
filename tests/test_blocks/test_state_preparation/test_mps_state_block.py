@@ -11,7 +11,7 @@ def _quimb_mps_to_qarp_tensors(mps: qtn.MatrixProductState, n: int):
     """Convert a quimb MPS (built via its own, independent SVD code) into
     qarp's ``(chi_left, 2, chi_right)`` / LSB (site k = qubit k, §1)
     convention. quimb's ``from_dense`` is kron/MSB-ordered (documented as
-    an external boundary in ``qarp/endianness.py``), the opposite of
+    an external boundary in ``src/qarp/endianness.py``), the opposite of
     qarp's LSB — verified empirically (not assumed) before writing this:
     reversing the site order and swapping each tensor's bond axes fixes it."""
     raw = []

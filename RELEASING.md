@@ -76,7 +76,7 @@ in which the old name still works and emits a `DeprecationWarning`.
 
 Branch `chore/release-X.Y.Z` off `develop` and change:
 
-* `qarp/__init__.py` — `__version__ = "X.Y.Z"` (the single source;
+* `src/qarp/__init__.py` — `__version__ = "X.Y.Z"` (the single source;
   `pyproject.toml` reads it).
 * `CHANGELOG.md` — move the `[Unreleased]` entries under
   `## [X.Y.Z] - <date>`, fill in anything the merged PRs did not record,

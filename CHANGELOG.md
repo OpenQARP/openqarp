@@ -54,6 +54,14 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ### Changed
 
+- The Python package lives at `src/qarp/` and the C++ project at
+  `src/qarpx/`; `cpp/libqarpx/` is gone.  Import names, module paths and the
+  wheel are unchanged.  A checkout re-runs its editable install with the same
+  options in every worktree, configures CMake with `-S src/qarpx`, and reads
+  the stub from `src/qarpx/python/qarpx.pyi`.  Until the install is redone,
+  `import qarp` fails with `FileNotFoundError` for `qarp/__init__.py`.
+  Delete the old checkout's leftover `cpp/` and `qarp/` trees; both are
+  ignored, so `git status` does not show them.
 - `Engine.batch_run` reuses the circuits a prior `build()` compiled, with
   `rebuild=False` the default, and raises `RuntimeError` for a primitive that
   has circuits but none compiled: build first, or pass `rebuild=True`, which

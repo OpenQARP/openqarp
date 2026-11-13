@@ -16,7 +16,7 @@ import qarpx as qx
 
 def _reference_parity_encode(op, nqubits):
     """The hand-rolled parity mapping that lived in
-    qarp's Python parity mapping (now qarp/operators/_mappings.py) before
+    qarp's Python parity mapping (now src/qarp/operators/_mappings.py) before
     the C++ rewrite, verbatim,
     over openfermion operators — kept here as the golden reference."""
     Q = openfermion.QubitOperator

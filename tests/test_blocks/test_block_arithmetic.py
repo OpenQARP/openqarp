@@ -3,7 +3,7 @@
 All four operators build on ``composite_block.CompositeBlock`` and reuse the
 operand's C++ command buffer via structural sharing (``ref<Block>`` children)
 rather than flattening or deep-copying — see the docstrings in
-``qarp/blocks/_block.py`` next to each operator.
+``src/qarp/blocks/_block.py`` next to each operator.
 """
 
 import numpy as np

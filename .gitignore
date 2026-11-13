@@ -61,8 +61,8 @@ venv/
 docs/superpowers/
 superpowers/
 
-# cpp build
-cpp/libqarpx/build*/
+# qarpx build
+src/qarpx/build*/
 
 # competitor benchmark raw results (host-specific; only the generated docs are committed)
 benchmarks/results/

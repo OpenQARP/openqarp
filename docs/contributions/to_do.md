@@ -45,7 +45,7 @@ a `0.x` minor with whatever else breaks then.
   returns the value for `c = 1`.  Apply `abs(coefficient)` where the
   primitive can express it, reject a non-unit modulus where it cannot; §18
   oracles for both.
-- **`HEABlock` as a tree.**  `qarp/blocks/_primitives/hea_block.py` builds
+- **`HEABlock` as a tree.**  `src/qarp/blocks/_primitives/hea_block.py` builds
   it as a `SimpleBlock` leaf; its layers are a composition that a
   `CompositeBlockBase` tree expresses.  `isinstance` answers change; ships
   with the symbol-contract regression test.
@@ -69,13 +69,24 @@ a `0.x` minor with whatever else breaks then.
 
 ## Additive, no window needed
 
+- **Installation docs traps, from a clean-clone walk-through.**  "Checking it
+  worked" runs `pytest` after a plain `pip install .`, which installs no
+  pytest, and sends C++ tests to `bootstrap_qarpx.py --with-tests`, which
+  refuses beside a pip install; the route that works is
+  `cmake -S src/qarpx -B src/qarpx/build -DQARP_BUILD_TESTS=ON` then
+  `scripts/run_cpp_tests.py`, and the script's hint should say so.  On macOS
+  every re-run of `pip install -e` needs the `OpenMP_ROOT` define again or
+  the backend silently rebuilds serial.  `build_docs.sh` says one intersphinx
+  warning remains; the build shows nineteen duplicate-description warnings
+  for `SamplingDistribution`, documented twice on `docs/api/qarp.rst`.
+
 - **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
   and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
   at 12 threads is slow on its own.  Repeat the Threads measurements of
   `openblas_thread_sharing_plan.md` on bare-metal Linux and revisit the
   default from them.
 - **`check_untyped_defs` for `tests/`.**  `compiled_backend_stubs_plan.md`
-  turns it on for `qarp/` only, so unannotated test bodies, which is nearly
+  turns it on for `src/qarp/` only, so unannotated test bodies, which is nearly
   every test, are still unchecked.  It reports 762 errors in 134 test files
   on macOS, 416 of them `arg-type`.  It touches nearly half the test files,
   so it gets its own plan; land it after the layout move, which would
@@ -97,7 +108,7 @@ a `0.x` minor with whatever else breaks then.
   carries `n_shots` the same way.  Post-selected qubits must be measured and
   leave the key.
 - **`QarpEngine`'s plan cache is bounded by count, not size.**
-  `_PLAN_CACHE_SIZE` (`qarp/engines/_qarp_engine.py`) keeps 64 programs of
+  `_PLAN_CACHE_SIZE` (`src/qarp/engines/_qarp_engine.py`) keeps 64 programs of
   the built path, whatever their tables weigh: sixteen distinct 22-qubit
   permutation circuits held 517 MB after every primitive was gone, and 64
   such tables at 26 qubits reach 32 GB.  Bound it by the bytes its
@@ -108,7 +119,7 @@ a `0.x` minor with whatever else breaks then.
   parametric ket is flattened only to be declined.  A cache would need a
   key for an unbuilt composition, which has no stream to digest.
 - **A parametric planned program copies its tables on every binding.**
-  `Program::substituted` (`cpp/libqarpx/src/simulator/program.cpp`) copies
+  `Program::substituted` (`src/qarpx/src/simulator/program.cpp`) copies
   every permutation table and dense matrix by value, and `QarpEngine`
   substitutes a parametric program once per `run(params)` and per
   `batch_run` set.  Structural kernels never hold a parameter, so a built
