@@ -32,12 +32,28 @@ a commit that CI has already passed on `develop`.
 
 ## Versioning
 
-[Semantic Versioning](https://semver.org/).  While on `0.x`, a patch release
-(`0.1.1`) carries fixes only; anything that adds or changes public API is a
-minor release (`0.2.0`), and a minor release may remove or change a public
-name with no deprecation shim, listing it under *Removed* or *Changed* in
-`CHANGELOG.md`.  From 1.0, a removal is preceded by one minor release in
-which the old name still works and emits a `DeprecationWarning`.
+[Semantic Versioning](https://semver.org/).  While on `0.x`, each role
+moves down one place, as Cargo reads `0.x` versions:
+
+* A **minor** release (`0.2.0` → `0.3.0`) is the breaking one.  It may
+  remove or change a public name, a default, a return value or a class shape
+  with no deprecation shim, and lists each under *Removed* or *Changed* in
+  `CHANGELOG.md`.
+* A **patch** release (`0.2.0` → `0.2.1`) is compatible: new features and
+  fixes, nothing removed or changed.  Code that runs on `0.2.0` keeps running
+  on every `0.2.x`, so `openqarp~=0.2.0` is a safe pin.
+* A `QARPX_ABI_VERSION` bump is not breaking by itself: additions move it
+  too, such as a new method or enum value.  The Python-visible change it
+  carries, in `qarp` or `qarpx`, decides.
+
+The next version follows from `[Unreleased]`: one entry that removes or
+changes what existing code relies on makes it a minor release, otherwise it
+is a patch.  *Changed* also holds compatible changes, so judge the entries,
+not the headings.
+
+From 1.0 the roles are the standard ones: additions are a minor release,
+breaking changes a major one, and a removal is preceded by one minor release
+in which the old name still works and emits a `DeprecationWarning`.
 
 ## Steps
 
