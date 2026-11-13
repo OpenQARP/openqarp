@@ -7,19 +7,6 @@ entry leaves when it lands.  Anything that needs a plan gets its own
 `<topic>_plan.md` and an index row in [`README.md`](README.md); this file
 never stands in for one.
 
-## Before 0.2.0
-
-0.2.0 is tagged after `lazy_circuit_derivation_plan.md`, the compiled-backend
-type stubs and the repository layout move land, in that order.  These ride
-the same window.
-
-- **`CHANGELOG.md` carries each PR's lines.**  Every PR into `develop`
-  before the release adds its entries under `[Unreleased]`; the release PR
-  only moves them.
-- **Plan text on the plan-only branches.**  `pauli_engine_plan.md` and
-  `oqtopus_plan.md` name an ABI bump 8 → 9, and the OQTOPUS plan names
-  `prepare_structured_qpe`; the counter is 15 and the hook is gone.  Fix when each branch rebases.
-
 ## Breaking changes waiting for a minor release
 
 Each changes a default, a width, a return value or a class shape, so it rides
@@ -52,7 +39,6 @@ a `0.x` minor with whatever else breaks then.
 - **`Consumes.OBSERVABLE` on the engine boundary.**
   `pauli_engine_plan.md` adds the member and makes `StateVector.consumes` a
   property, so a third-party engine that dispatches on `consumes` adapts.
-
 - **Shadow error bar from a certified variance.**  `ShadowEstimate.error`
   puts the empirical `V_hat` where HKP Theorem 1 needs the true variance.
   On an observable driven by rare outcomes `V_hat` is usually 0, and so is
@@ -69,6 +55,16 @@ a `0.x` minor with whatever else breaks then.
 
 ## Additive, no window needed
 
+- **A `CHANGELOG.md` line in the PR checklist.**  Nothing asks a PR for its
+  `[Unreleased]` entry: `CONTRIBUTING.md` and the PR template do not mention
+  the changelog, so a feature can merge without one and the release PR
+  writes it by hand.  Add an author checkbox to both paths of
+  `.github/PULL_REQUEST_TEMPLATE.md`, struck through for a PR with no
+  user-visible change.
+- **Plan text on the plan-only branches.**  `pauli_engine_plan.md` names an
+  ABI bump 8 → 9 and `oqtopus_plan.md` 15 → 16; the counter is 17.  Both
+  name paths under `qarp/` and `cpp/libqarpx/`; the trees are `src/qarp/`
+  and `src/qarpx/`.  Fix when each branch rebases.
 - **Installation docs traps, from a clean-clone walk-through.**  "Checking it
   worked" runs `pytest` after a plain `pip install .`, which installs no
   pytest, and sends C++ tests to `bootstrap_qarpx.py --with-tests`, which
@@ -79,7 +75,6 @@ a `0.x` minor with whatever else breaks then.
   the backend silently rebuilds serial.  `build_docs.sh` says one intersphinx
   warning remains; the build shows nineteen duplicate-description warnings
   for `SamplingDistribution`, documented twice on `docs/api/qarp.rst`.
-
 - **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
   and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
   at 12 threads is slow on its own.  Repeat the Threads measurements of
@@ -89,8 +84,7 @@ a `0.x` minor with whatever else breaks then.
   turns it on for `src/qarp/` only, so unannotated test bodies, which is nearly
   every test, are still unchecked.  It reports 762 errors in 134 test files
   on macOS, 416 of them `arg-type`.  It touches nearly half the test files,
-  so it gets its own plan; land it after the layout move, which would
-  otherwise conflict with it across them.
+  so it gets its own plan.
 - **`qarp` typed for its users.**  `qarp` ships no `py.typed`, so user code
   sees it untyped.  Running mypy over the example notebooks and the docs
   snippets finds four gaps to close before it does: a list of Python blocks
