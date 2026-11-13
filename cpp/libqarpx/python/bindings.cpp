@@ -49,6 +49,8 @@ void register_qiskit_absorber(nb::module_& m);
 // QubitOperator/FermionOperator classes and their free functions.
 namespace qarpx::python {
 void register_operator_bindings(nb::module_& m);
+void register_montecarlo_bindings(nb::module_& m);
+void register_transition_column_bindings(nb::module_& m);
 }
 
 // Move a statevector into an owning 1-D complex128 numpy array (zero copy:
@@ -237,7 +239,7 @@ static nb::object block_py_deepcopy(nb::handle self, nb::dict memo) {
 
 // Bump together with EXPECTED_QARPX_ABI in qarp/_abi.py — same commit —
 // whenever a binding signature, enum, or class shape changes (§15).
-#define QARPX_ABI_VERSION 15
+#define QARPX_ABI_VERSION 17
 
 NB_MODULE(qarpx, m) {
     qarpx::init_threading();
@@ -1555,17 +1557,28 @@ NB_MODULE(qarpx, m) {
                      [](const CudaqSimulator& s) { return s.config(); },
                      [](CudaqSimulator& s, CudaqConfig c) { s.set_config(std::move(c)); })
         .def("run", &CudaqSimulator::run,
-            "commands"_a, "n_qubits"_a, "n_shots"_a, "seed"_a = nb::none())
+            "commands"_a, "n_qubits"_a, "n_shots"_a, "seed"_a = nb::none(),
+            nb::call_guard<nb::gil_scoped_release>())
         .def("batch_run", &CudaqSimulator::batch_run,
-            "commands"_a, "n_qubits"_a, "n_shots"_a, "param_sets"_a, "seed"_a = nb::none())
+            "commands"_a, "n_qubits"_a, "n_shots"_a, "param_sets"_a, "seed"_a = nb::none(),
+            nb::call_guard<nb::gil_scoped_release>())
         .def("statevector", [](const CudaqSimulator& sim,
                                const std::vector<Command>& cmds,
                                int n_qubits) {
-            return statevector_to_numpy(sim.statevector(cmds, n_qubits));
+            std::vector<std::complex<double>> state;
+            {
+                nb::gil_scoped_release release;
+                state = sim.statevector(cmds, n_qubits);
+            }
+            return statevector_to_numpy(std::move(state));
         }, "commands"_a, "n_qubits"_a,
            "Host statevector as a zero-copy 1-D complex128 numpy array.")
         .def("batch_expectation", &CudaqSimulator::batch_expectation,
             "commands"_a, "n_qubits"_a, "observable"_a, "param_sets"_a,
+            nb::call_guard<nb::gil_scoped_release>(),
             "Sampling-free <H> swept over parameter sets (CUDA-Q observe). "
             "One expectation value per parameter set.");
+    qarpx::python::register_transition_column_bindings(m);
+    qarpx::python::register_montecarlo_bindings(m);
+
 }

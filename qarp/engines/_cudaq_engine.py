@@ -204,6 +204,18 @@ class CudaqEngine(Engine):
         """
         return self._transpiler.transpile(flat), block_n_qubits, None
 
+    def _resident_simulator(self, n_qubits: int):
+        """Resident computation never transfers a host statevector."""
+        cfg = self._sim.config
+        if (
+            not qx.montecarlo_available()
+            or cfg.backend != qx.CudaqBackend.StateVector
+            or cfg.precision != qx.CudaqPrecision.FP64
+            or cfg.target
+        ):
+            raise CapabilityError("Resident evolution requires MC-enabled default StateVector/FP64")
+        return self._sim
+
     def _host_statevector_simulator(self, n_qubits: int):
         # Algorithm-level fast paths (ADAPT pool scans, QSE, MonteCarlo's
         # exact reference) pull 2**n amplitudes to host: same cap as the

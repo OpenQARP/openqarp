@@ -2977,3 +2977,114 @@ roughly six qubits). The state is carried forward through the QarpSimulator
 The optimized state is a re-simulable block via
 :code:`qite.get_final_state_block()`, and the per-step energies are recorded in
 :code:`qite.energy_history`.
+
+Aggregated Monte Carlo
+----------------------
+
+``AggregatedMonteCarlo`` represents all walkers on a computational-basis label
+as one signed integer population. A capable engine supplies persistent exact
+FP64 transition columns and resident evolution; the implementation
+requires ``CudaqEngine`` with its default single-device StateVector/FP64
+configuration and the separately enabled native MC build option. It executes
+no quantum measurement circuits. Existing ``MonteCarlo`` retains its CPU and
+Quantum modes.
+
+The Hamiltonian is a finite Hermitian ``QubitOperator`` in LSB order and the
+copied unitary must be fully bound. Register width comes from the unitary,
+not from the highest nonidentity Hamiltonian term. Startup constructs neither
+a full host unitary nor the dense transformed computational basis. Persistent
+batched columns, compact sector gathering and caches reuse allocations and
+coefficients across steps and trajectories.
+
+``resident_evolution=None`` uses complete transition support. A
+``ResidentEvolutionConfig`` instead samples uniform destinations other than
+the current source within its certified ``ComputationalBasisSector``;
+coefficients remain exact. Sector certification is sufficient, not necessary:
+each emitted Trotter generator group must conserve each partition's charge.
+For example XX+YY conserves total number as one fully commuting group, but
+its individual XX and YY groups fail that certificate. Request transport also
+requires a real Hamiltonian and a real-orthogonal ansatz up to scalar phase.
+
+Compact coefficients retain ``abs(value) > 1e-12``; complete-row realness
+allows imaginary residue up to ``1e-10`` and request coefficients up to
+``1e-12``. Complete-row support then applies ``dt*abs(real(value)) > 1e-14``
+with the reference-source exception. These cutoffs and the LSB convention
+are part of the numerical contract.
+
+``projected_energy_estimator="instantaneous"`` contributes each trajectory's
+final-step numerator and reference population. ``"ratio_of_sums"`` contributes
+signed sums after each trajectory's own ``estimator_burn_in_steps``.
+``run()`` returns a one-element list containing the pooled numerator divided
+by the pooled signed denominator across all requested trajectories. This
+is not an average of the individual ratios. The combined diagnostics report
+leave-one-trajectory jackknife standard error, or ``None`` with one trajectory
+or an invalid replica. A zero pooled denominator yields NaN and status
+``ZeroDenominator``. A failed trajectory aborts the run with partial histories
+retained and combined status ``Incomplete``; no reduced ensemble is returned.
+
+An explicit ``estimator_block_size`` additionally enables within-trajectory
+block jackknife for ratio-of-sums; ``None`` disables only that local uncertainty.
+Instantaneous estimation rejects burn-in/block options and directs users to
+ratio-of-sums. Local and across-trajectory errors occupy separate diagnostic
+mappings and are never combined as independent error estimates.
+
+``seed`` creates local, event-keyed streams without reseeding process-wide
+RNGs. Explicit seeds reproduce results within a backend/configuration; CPU and
+GPU trajectories need not match. Diagnostics record the generated root for
+``seed=None``. ``CudaqEngine(seed=...)`` controls its circuit execution, not the
+walker's RNG.
+
+``track_transition_circuits=False`` avoids companion circuit construction.
+When enabled, one lazy QWC circuit list supplies per-pair counts: constructed
+``generated_circuits`` and hypothetical ``measurement_settings`` are distinct
+from executed measurement circuits and shots, which remain zero.
+
+The scalar coefficient cache is bounded host RAM, accounting 256 bytes per
+entry, with a default 16 GiB budget and LRU eviction. The separate 16 GiB
+complete-support forecast is not a hard GPU allocator limit. Request transport
+accepts a smaller ``cache_max_bytes``; adaptive complete-row prefetch is bounded
+and unavailable for request transport. A changed H/U/configuration requires a
+rebuild.
+
+Unsupported capabilities raise ``CapabilityError``. Invalid values raise
+``ValueError``; incompatible types/dtypes/shapes raise ``TypeError``. Host
+checked count/size overflow raises ``OverflowError``. Device integer overflow
+returns ``IntegerOverflow`` and retained partial histories before the algorithm
+raises ``RuntimeError``. Runtime/state failures also raise ``RuntimeError``.
+Read-only record array views retain their owners; column outputs own their
+storage independently of provider lifetime.
+
+The bounded example is
+``examples/algorithms/composite/mwe_montecarlo_gpu.ipynb``. Its independent CPU
+oracle always runs; GPU cells require ``QARP_RUN_CUDAQ_GPU_TESTS=1`` and an
+MC-enabled build. A CPU-only run explicitly reports the GPU path unverified.
+
+The engine extension point is ``Engine._resident_simulator(n_qubits)``. Its
+simulator exposes ``CudaqSimulator.make_transition_column_provider``; C++
+consumers include ``qarpx/montecarlo/contexts.h`` for evolution records and
+factories. These public headers contain no CUDA types.
+
+``aggregated_binomial_calls`` counts logical binomial sampler invocations.
+Complete-row spawning counts edges of active sources above the ``1e-14``
+spawning cutoff; inactive sources and edges at or below the cutoff are skipped.
+Death/cloning counts calls with probability zero or one; request fractional
+spawning also counts probability zero. The counter does not count the underlying uniform
+variates: inversion may restart, while the Bernoulli branch draws per walker.
+The existing FP64 uniform conversion produces values in ``(0, 1]``; rounding
+can produce exactly one. Inversion restarts when a uniform exceeds the rounded
+total probability mass.
+Complete-row edge visits count cached outgoing edges of active sources;
+request-path edge visits count sampled proposal multiplicities.
+Automatic sector/realness certification requires the concrete canonical
+``TrotterAnsatzBlock``, not an arbitrary subclass overriding its accessors.
+Circuit accounting resets per run and includes retained pair labels from both
+transport paths; a warm coefficient cache does not lower the logical
+measurement-setting count. Changing ``track_transition_circuits`` after
+``build()`` requires rebuilding the contexts before running again.
+
+The column provider's ``handle_creations`` is the total handle count on its
+shared simulator resource lease. The evolution context reports the increase
+since that context was constructed, including handles created by other users
+of the same lease. It measures shared resource activity, rather than attributing
+each handle to a particular context. The algorithm constructs the provider
+before the evolution context, so its existing handle is outside that baseline.

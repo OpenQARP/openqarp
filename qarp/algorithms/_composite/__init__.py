@@ -24,3 +24,5 @@ from .qse import QSE
 from .qsci import QSCI
 from .qite import QITE
 from .shor import Shor
+
+from .aggregated_montecarlo import AggregatedMonteCarlo, ResidentEvolutionConfig

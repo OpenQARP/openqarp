@@ -729,3 +729,21 @@ coefficients back as :code:`mf.mo_coeff @ U` —
 (``examples/operators/mwe_orbital_rotation.ipynb`` runs this loop on LiH and recovers the RHF
 energy from perturbed orbitals.)
 
+
+Computational-basis sectors
+---------------------------
+
+``ComputationalBasisSector`` is a frozen record exported from ``qarp.operators``.
+Its disjoint qubit partitions and fixed Hamming weights describe exact LSB
+basis labels. ``validate_register(n)`` requires full register coverage;
+``contains(label)`` tests membership; ``dimension`` is the product of the
+partition binomial coefficients. ``labels(n)`` enumerates only the sector.
+``sample_labels(rng, size)`` samples uniformly without enumeration using a local
+NumPy Generator and returns uint64 labels; qubit indices must be below 64.
+Native MC imposes its separate width limit ``1 <= n < 63``.
+
+``spin_resolved(n_spatial_orbitals, n_alpha, n_beta)`` follows ``onv``'s
+interleaved alpha/beta convention: even qubits are alpha and odd qubits beta.
+``configuration_payload()`` returns JSON-compatible field values. The sector
+itself does not certify charge conservation; the MC adapter checks H and every
+emitted generator group before enabling compact sector gathering.

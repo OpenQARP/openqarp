@@ -31,7 +31,7 @@ def _blas_pool_workers() -> int:
 def _configured_thread_count() -> int:
     """Internal: the worker count every qarpx parallel layer uses."""
 
-__abi_version__: int = 15
+__abi_version__: int = 17
 
 __source_dir__: str
 
@@ -1847,3 +1847,162 @@ class CudaqSimulator:
         """
         Sampling-free <H> swept over parameter sets (CUDA-Q observe). One expectation value per parameter set.
         """
+
+    def make_transition_column_provider(self, U: Sequence[Command], n: int, observable: Sequence[tuple[Sequence[tuple[int, str]], complex]], initial_batch_capacity: int = 1, sector_target_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None) -> TransitionColumnProvider: ...
+
+class TransitionColumnProvider:
+    def columns(self, source_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)]) -> NDArray[numpy.complex128]: ...
+
+    def compact_columns(self, source_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], absolute_tolerance: float) -> tuple[Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu')], Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu')], Annotated[NDArray[numpy.complex128], dict(shape=(None,), order='C', device='cpu')]]: ...
+
+    @property
+    def diagnostics(self) -> dict: ...
+
+class EvolutionStatus(enum.Enum):
+    Completed = 0
+
+    NeedsTransitionRows = 1
+
+    ReferencePopulationZero = 2
+
+    PopulationExtinct = 3
+
+    IntegerOverflow = 4
+
+    InvalidProbability = 5
+
+    InvalidTransitionBatch = 6
+
+    CapacityExceeded = 7
+
+class TransitionRequest:
+    def __init__(self, request_id: int, trajectory_index: int, step_index: int, attempts_per_walker: int, sources: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], populations: Annotated[NDArray[numpy.int64], dict(shape=(None,), order='C', device='cpu', writable=False)]) -> None: ...
+
+    @property
+    def request_id(self) -> int: ...
+
+    @property
+    def trajectory_index(self) -> int: ...
+
+    @property
+    def step_index(self) -> int: ...
+
+    @property
+    def attempts_per_walker(self) -> int: ...
+
+    @property
+    def sources(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def populations(self) -> Annotated[NDArray[numpy.int64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def proposal_attempts(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+class TransitionBatch:
+    def __init__(self, request_id: int, trajectory_index: int, step_index: int, attempts_per_walker: int, sources: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], targets: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], multiplicities: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], proposal_probabilities: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)], transition_coefficients: Annotated[NDArray[numpy.complex128], dict(shape=(None,), order='C', device='cpu', writable=False)], diagonal_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], diagonal_elements: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)], reference_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], reference_elements: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)]) -> None: ...
+
+    @property
+    def request_id(self) -> int: ...
+
+    @property
+    def trajectory_index(self) -> int: ...
+
+    @property
+    def step_index(self) -> int: ...
+
+    @property
+    def attempts_per_walker(self) -> int: ...
+
+    @property
+    def sources(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def targets(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def multiplicities(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def proposal_probabilities(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def transition_coefficients(self) -> Annotated[NDArray[numpy.complex128], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def diagonal_labels(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def diagonal_elements(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def reference_labels(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def reference_elements(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
+
+class EvolutionResult:
+    def __init__(self, status: EvolutionStatus = EvolutionStatus.Completed, completed_steps: int = 0, missing_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, population_history: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, reference_population_history: Annotated[NDArray[numpy.int64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, shift_history: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, projected_energy_history: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, projected_numerator_history: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, spawned_history: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, died_history: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, cloned_history: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None, annihilated_history: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)] | None = None) -> None: ...
+
+    @property
+    def status(self) -> EvolutionStatus: ...
+
+    @property
+    def completed_steps(self) -> int: ...
+
+    @property
+    def missing_labels(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def population_history(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def reference_population_history(self) -> Annotated[NDArray[numpy.int64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def shift_history(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def projected_energy_history(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def projected_numerator_history(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def spawned_history(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def died_history(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def cloned_history(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def annihilated_history(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def active_label_history(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+    @property
+    def transition_edge_history(self) -> Annotated[NDArray[numpy.uint64], dict(shape=(None,), writable=False)]: ...
+
+class ResidentEvolutionContext:
+    def reset_aggregated_evolution(self, reference_label: int, initial_population: int, initial_energy_shift: float, initial_projected_energy: float, dt: float, damping: float, threshold: float, root_seed: int, trajectory_index: int) -> None: ...
+
+    def upload_aggregated_transition_rows(self, offsets: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], sources: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], targets: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], probabilities: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)], int8_signs: Annotated[NDArray[numpy.int8], dict(shape=(None,), order='C', device='cpu', writable=False)], diagonals: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)], reference_elements: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)]) -> None: ...
+
+    def advance_aggregated_evolution(self, max_steps: int) -> EvolutionResult: ...
+
+    def request_transitions(self, attempts_per_walker: int) -> TransitionRequest: ...
+
+    def apply_transition_batch(self, request_id: int, trajectory_index: int, step_index: int, attempts_per_walker: int, sources: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], targets: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], multiplicities: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], proposal_probabilities: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)], transition_coefficients: Annotated[NDArray[numpy.complex128], dict(shape=(None,), order='C', device='cpu', writable=False)], diagonal_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], diagonal_elements: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)], reference_labels: Annotated[NDArray[numpy.uint64], dict(shape=(None,), order='C', device='cpu', writable=False)], reference_elements: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C', device='cpu', writable=False)]) -> EvolutionResult: ...
+
+    @property
+    def diagnostics(self) -> dict: ...
+
+def montecarlo_available() -> bool:
+    """
+    Whether native GPU Monte Carlo numerical execution is implemented in this build.
+    """
+
+def make_resident_evolution_context(simulator: CudaqSimulator, n: int) -> ResidentEvolutionContext: ...

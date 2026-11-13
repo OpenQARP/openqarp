@@ -549,6 +549,17 @@ class TrotterAnsatzBlock(SimpleBlock):
                 out.append(per_generator)
         return out
 
+    def generator_groups(self) -> tuple[tuple[tuple[tuple, str, float], ...], ...]:
+        """Immutable per-generator commuting groups before Suzuki scaling.
+
+        This reads the same grouping as emission without building the block;
+        symbols are names, and Pauli tuples use local LSB qubit order.
+        """
+        return tuple(
+            tuple((tuple(p), str(symbol), float(c)) for p, symbol, c in group)
+            for group in self._sequences_grouped()
+        )
+
     def _sequences_grouped(self) -> List[List[Tuple[tuple, str, float]]]:
         """Commuting partition via the injected strategy, applied *within* each
         generator.

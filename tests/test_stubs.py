@@ -216,6 +216,7 @@ def test_builder_overload_runs_as_the_stub_declares(name, params, make_param, ma
 _SETUP = """\
 import numpy as np
 import qarpx as qx
+from numpy.typing import NDArray
 from sympy import Symbol
 from qarp.algorithms import VQD, VQE, TermwiseSWAPTest
 from qarp.blocks import (
@@ -239,6 +240,7 @@ kets = [hb]
 amplitudes = {(0, 1): 1.0}
 onvs = {(1, 0): 1.0}
 table = {0: (1, 0, 1), 1: (0, 1, 1)}
+float_labels: NDArray[np.float64] = np.array([0.0], dtype=np.float64)
 """
 _SNIPPETS = [
     # (statement, mypy error code or None, runs)
@@ -272,6 +274,24 @@ _SNIPPETS = [
     ("SparseStateBlock(2, amplitudes)", None, True),
     ("MultiONVStateBlock(onvs)", None, True),
     ("QROMBlock(index_qubits=1, data=table)", None, True),
+]
+_SNIPPETS += [
+    (
+        "qx.TransitionRequest(1, 0, 0, 1, np.array([0], dtype=np.uint64), np.array([1], dtype=np.int64)).sources.dtype",
+        None,
+        True,
+    ),
+    (
+        "qx.TransitionRequest(1, 0, 0, 1, float_labels, np.array([1], dtype=np.int64))",
+        "arg-type",
+        False,
+    ),
+    (
+        "qx.EvolutionResult(status=qx.EvolutionStatus.IntegerOverflow, completed_steps=1, projected_numerator_history=np.array([2.0], dtype=np.float64)).status",
+        None,
+        True,
+    ),
+    ("callable(qx.CudaqSimulator.make_transition_column_provider)", None, True),
 ]
 _KNOWN_FALSE_REJECTIONS = [
     # A numpy integer is not an int to mypy; nanobind converts it.
@@ -322,3 +342,29 @@ def test_mypy_verdict_on_the_stub_matches_the_runtime(tmp_path):
     for i, (statement, code, runs) in enumerate(snippets):
         assert codes.get(i, set()) == ({code} if code else set()), (statement, stdout)
         assert _runs(statement) is runs, statement
+
+
+def test_compact_column_stub_has_three_typed_arrays(tmp_path):
+    api = pytest.importorskip("mypy.api")
+    source = tmp_path / "compact.py"
+    source.write_text(
+        "import numpy as np\nfrom numpy.typing import NDArray\nimport qarpx as qx\n"
+        "def check(p: qx.TransitionColumnProvider, labels: NDArray[np.uint64]) -> None:\n"
+        "    offsets, targets, values = p.compact_columns(labels, 1e-12)\n"
+        "    wrong, arity = p.compact_columns(labels, 1e-12)\n"
+    )
+    config = tmp_path / "mypy.ini"
+    config.write_text(f"[mypy]\nmypy_path = {STUB.parent}\nfollow_imports = silent\n")
+    stdout, stderr, code = api.run(
+        [
+            "--config-file",
+            str(config),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--disable-error-code=import-untyped",
+            str(source),
+        ]
+    )
+    assert code == 1 and not stderr
+    assert "Too many values to unpack (2 expected, 3 provided)" in stdout
+    assert "Found 1 error" in stdout

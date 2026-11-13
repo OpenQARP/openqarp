@@ -293,9 +293,10 @@ required — the runtime alone does not enable GPU execution:
      -C cmake.define.QARP_CUDAQ_NVQIR_BACKEND=nvqir-custatevec-fp64
 
 Use ``-C cmake.define.QARP_CUDAQ_NVQIR_BACKEND=nvqir-qpp`` for a CPU-only CUDA-Q
-build (for testing without a GPU).  The build links against the pip wheel — the
-CUDA-Q **SDK is not needed**, and cannot be used: its clang/libc++ binaries do
-not link into this g++ build.  GPU execution needs an NVIDIA driver supporting
+build (for testing without a GPU).  The build links against the CUDA-Q wheel. CMake also has an SDK discovery branch
+through ``QARP_CUDAQ_MLIR_LIB_DIR``; SDK clang/libc++ libraries may be ABI
+incompatible with this g++ build. That route remains unverified until its
+configuration, compile/link probe and tests have actually run.  GPU execution needs an NVIDIA driver supporting
 CUDA 12.x.  A CPU-only build raises a clear, actionable error from
 ``CudaqEngine`` — use ``QarpEngine`` for CPU simulation.
 
@@ -337,3 +338,82 @@ override them with ``--lapack`` / ``--no-symengine``.
 
 ``scripts/bootstrap_qarpx_cudaq.py`` is the CUDA-Q equivalent, for those
 environments only.
+
+Native aggregated Monte Carlo (optional)
+----------------------------------------
+
+The independent ``QARP_WITH_CUDAQ_SEMICLASSICAL`` option defaults to ``OFF``.
+Enabling it requires ``QARP_WITH_CUDAQ=ON``, a CUDA C++20 compiler, CUDAToolkit
+and development cuStateVec headers/library exposing and linking
+``custatevecApplyMatrixBatched``. Obtain ``custatevec.h`` from a matching NVIDIA
+cuQuantum SDK/development distribution; runtime-only CUDA-Q wheels may not
+include headers. This header requirement is separate from the CUDA-Q SDK
+compiler/runtime ABI question above.
+
+Set ``QARP_CUSTATEVEC_INCLUDE_DIR`` (PATH) and ``QARP_CUSTATEVEC_LIBRARY``
+(FILEPATH) explicitly when needed. Otherwise discovery checks the CUDA-Q
+wheel's cuquantum include/lib and include directories, ``CUQUANTUM_ROOT``
+include/lib/lib64 paths, then CMake system paths. Configuration fails when
+the headers, library or batched-symbol compile/link probe is missing.
+``CMAKE_CUDA_ARCHITECTURES`` selects the executor's actual GPU architecture.
+The column factory and evolution factory share this gate; probe
+``qarpx.montecarlo_available()``. Disabled factories raise ``CapabilityError``;
+CUDA-free host records remain usable in CPU builds.
+
+Use this checkout's own Python 3.12 ``.venv``. Both the interpreter and imported
+``qarp``/``qarpx`` must resolve to this checkout, the native source stamp must
+match ``cpp/libqarpx``, and the paired ABI must match without a bypass.
+Install persistent build tools before an editable rebuild installation:
+
+.. code-block:: bash
+
+   export CMAKE_BUILD_PARALLEL_LEVEL=3
+   python -m pip install scikit-build-core cmake ninja
+   python -m pip install -e ".[full-dev,notebooks]" --no-build-isolation \
+     -C editable.rebuild=true \
+     -C cmake.define.QARP_WITH_CUDAQ=ON \
+     -C cmake.define.QARP_WITH_CUDAQ_SEMICLASSICAL=ON \
+     -C cmake.define.QARP_BUILD_TESTS=ON \
+     -C cmake.define.QARP_CUDAQ_WHEEL_DIR="$QMC_WHEEL_DIR" \
+     -C cmake.define.QARP_CUDAQ_NVQIR_BACKEND=nvqir-custatevec-fp64 \
+     -C cmake.define.QARP_CUSTATEVEC_INCLUDE_DIR="$QMC_INCLUDE_DIR" \
+     -C cmake.define.QARP_CUSTATEVEC_LIBRARY="$QMC_LIBRARY" \
+     -C cmake.define.CMAKE_CUDA_ARCHITECTURES="$QMC_ARCH"
+
+Resolve these shell variables from the installed runtime/development packages
+and GPU before invoking the command; they are not guessed installation paths.
+For notebooks with rebuild-on-import, set ``SKBUILD_EDITABLE_VERBOSE=0``.
+
+To check both supported build configurations, use CUDA-Q enabled with MC
+disabled, then MC enabled. For the disabled configuration, set
+``QARP_WITH_CUDAQ_SEMICLASSICAL=OFF``, verify MC unavailability and throwing
+stubs, and run existing CUDA-Q engine regressions. In the enabled profile,
+verify MC availability and run the same regressions plus all numerical cases:
+
+.. code-block:: bash
+
+   export QARP_RUN_CUDAQ_GPU_TESTS=1
+   export QARP_CUDAQ_TEST_TARGET=""
+   export CUDAQ_DEFAULT_SIMULATOR=nvqir-custatevec-fp64
+   python -m pytest -q tests/test_engines/test_cudaq_engine.py \
+     tests/test_engines/test_transition_columns.py \
+     tests/test_algorithms/test_composite/test_montecarlo_gpu.py \
+     tests/test_algorithms/test_composite/test_montecarlo_aggregated.py
+   python scripts/run_cpp_tests.py --build-dir "$QMC_BUILD_DIR" --jobs 3
+   SKBUILD_EDITABLE_VERBOSE=0 python -m pytest --nbmake --nbmake-timeout=120 \
+     examples/algorithms/composite/mwe_montecarlo_gpu.ipynb
+   python scripts/generate_stubs.py --check
+
+``QMC_BUILD_DIR`` is the configured build directory for that profile. Numerical
+cases use small registers (at most four qubits), deterministic two-step tapes,
+512-walker binomial trials and bounded independent trajectories. The larger
+statistical oracle uses 4096 one-step trajectories. Memory-boundary and prefetch
+forecasts use host fakes rather than allocations near the default 16 GiB
+cache budget. New GPU smokes use the engine's default target.
+
+GPU numerical tests require ``QARP_RUN_CUDAQ_GPU_TESTS=1`` and an MC-enabled
+extension. Disabled builds intentionally skip those cases and expose throwing
+factories. The binomial fixtures cover inversion, complement, death/cloning and
+fractional spawning with fixed seeds and analytic moments. CPU tests exercise
+the same RNG helpers and the host protocol without CUDA; they do not execute
+GPU kernels.
