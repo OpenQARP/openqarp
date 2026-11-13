@@ -280,7 +280,8 @@ def verify() -> None:
     print(probe.stdout, end="")
     if probe.returncode != 0:
         deps = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
-        print("  qarp not importable yet: " + probe.stderr.strip().splitlines()[-1])
+        last = (probe.stderr.strip().splitlines() or ["(no output)"])[-1]
+        print("  qarp not importable yet: " + last)
         print("  Its runtime dependencies are not installed by this script:")
         print("    pip install " + " ".join(f"'{d}'" for d in deps))
 

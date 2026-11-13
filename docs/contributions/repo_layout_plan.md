@@ -15,7 +15,8 @@
 - Functional edits: `src/qarp/_abi.py` (the expected source tree),
   `src/qarp/__init__.py` (a namespace-package `qarpx` is refused),
   `scripts/bootstrap_qarpx.py` and `bootstrap_qarpx_cudaq.py` (the `.pth`
-  names `src/`),
+  names `src/`; the first one's verification fails only on `qarpx` and
+  advises on `qarp`),
   `src/qarpx/CMakeLists.txt` (the tests subdirectory),
   `tests/test_bindings/test_mcm_bindings.py` (collected by pytest, so the
   pytest-less fallback goes)
@@ -265,8 +266,10 @@ add_subdirectory(tests)
   fails only on `qarpx` and prints the dependency list when `qarp` does not
   import.  Three messages that cited a README section "Installation" name
   the real one, "Install", and one claimed editable installs rebuild on
-  import.  Pre-existing install-doc traps the clean-clone walk-through found
-  are parked in `to_do.md`.
+  import.  `docs/source/installation.rst` gains one troubleshooting
+  sentence for the `FileNotFoundError` a stale editable install raises after
+  the pull.  Pre-existing install-doc traps the clean-clone walk-through
+  found are parked in `to_do.md`.
 - **Stale pointers fixed in passing.**  §17 of the conventions doc and a
   comment in `src/qarpx/python/bindings.cpp` named `blocks/block.py`;
   `src/qarp/blocks/_block.py` named `engines/qarp_engine.py`;
