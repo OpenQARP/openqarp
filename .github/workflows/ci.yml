@@ -127,7 +127,7 @@ jobs:
       - run: python -m pip install "$(ls dist/*.whl)[full-dev]"
       - run: |
           mypy --version
-          mypy qarp/ tests/ --disable-error-code=import-untyped
+          mypy src/qarp tests/ --disable-error-code=import-untyped
       # Outside the checkout no mypy.ini applies: the wheel's own qarpx-stubs
       # must resolve.
       - name: The wheel's qarpx stub resolves
@@ -258,10 +258,10 @@ jobs:
       - name: Build and run the C++ suite (shipping pure-Eigen CSD)
         run: |
           ccache --zero-stats
-          cmake -S cpp/libqarpx -B cpp/libqarpx/build-ci -DQARP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release \
+          cmake -S src/qarpx -B src/qarpx/build-ci -DQARP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build cpp/libqarpx/build-ci --target qarpx_tests --parallel "$(nproc)"
-          ctest --test-dir cpp/libqarpx/build-ci --output-on-failure -j "$(nproc)"
+          cmake --build src/qarpx/build-ci --target qarpx_tests --parallel "$(nproc)"
+          ctest --test-dir src/qarpx/build-ci --output-on-failure -j "$(nproc)"
           ccache --show-stats
 
   pages:

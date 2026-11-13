@@ -1,11 +1,11 @@
 # Move the Python package and the C++ project under `src/`
 
-**Status:** Planned
+**Status:** Landed
 **Author:** Stefano Scali (+ Claude Code)
 **Date:** 2026-11-13
 **Tier:** Structural
 **Branch:** chore/src-layout
-**Green-lit:**
+**Green-lit:** 2026-11-13, plan blob d3a23dd784c997d557f6c3712811e07c47e95e99
 **Scope:**
 - Moves: `qarp/` → `src/qarp/`; `cpp/libqarpx/` → `src/qarpx/`; inside it
   `tests/cpp/` → `tests/`; `tests/python/test_mcm_bindings.py` →
@@ -13,6 +13,9 @@
   `__init__.py`.  A moved file changes content only where it names a path,
   except the three functional edits below.
 - Functional edits: `src/qarp/_abi.py` (the expected source tree),
+  `src/qarp/__init__.py` (a namespace-package `qarpx` is refused),
+  `scripts/bootstrap_qarpx.py` and `bootstrap_qarpx_cudaq.py` (the `.pth`
+  names `src/`),
   `src/qarpx/CMakeLists.txt` (the tests subdirectory),
   `tests/test_bindings/test_mcm_bindings.py` (collected by pytest, so the
   pytest-less fallback goes)
@@ -34,12 +37,15 @@
   `benchmarks/__init__.py`, `examples/operators/mwe_grouping_strategy.ipynb`
   (one markdown cell), the docstrings and comments of
   `src/qarp/absorb/__init__.py`, `_qasm2_absorber.py`, `_qasm3_absorber.py`,
-  `src/qarp/emit/__init__.py`, `src/qarpx/python/bindings.cpp`,
+  `src/qarp/emit/__init__.py`, `src/qarp/blocks/_block.py`,
+  `src/qarp/blocks/_state_preparation/multi_onv_state_block.py`,
+  `src/qarpx/include/qarpx/operators/transforms.h`, `src/qarpx/python/bindings.cpp`,
   `bindings_operators.cpp`, `src/qarpx/src/simulator/cudaq_simulator.cpp`,
   `src/qarpx/src/transpiler/identities.cpp`,
   `src/qarpx/tests/test_program_kernels.cpp`, `test_simulation_fusion.cpp`,
+  `test_montecarlo_contexts.cpp` (two includes written for the old depth),
   `tests/test_algorithms/test_composite/test_dos_qpe.py`,
-  `tests/test_blas_threads.py`, `tests/test_blocks/_block_test_helpers.py`,
+  `tests/test_devices/test_device.py`, `tests/test_blas_threads.py`, `tests/test_blocks/_block_test_helpers.py`,
   `test_block_arithmetic.py`, `test_state_preparation/test_mps_state_block.py`,
   `tests/test_operators/test_mappings_vs_openfermion.py`, `test_qubit_operator.py`
 - `CHANGELOG.md`, `docs/contributions/README.md` (index row and the roadmap
@@ -76,11 +82,16 @@ changes content in the move itself; every edit is a path.  `tests/`,
 `benchmarks/`, `scripts/`, `examples/`, `docs/` stay.
 
 `src/qarpx/` is a directory named like the compiled module and has no
-`__init__.py`.  At runtime that is inert: a module found anywhere on
-`sys.path` beats a namespace directory, and nothing puts `src/` on
-`sys.path`.  mypy and pyright must keep resolving `qarpx` through the stub
-at `src/qarpx/python/qarpx.pyi`, which `mypy_path` and `stubPath` name and
-which they search before source roots; the mypy run is the check.
+`__init__.py`.  The editable install's `.pth` puts `src/` on `sys.path`
+(scikit-build-core registers the parent of `wheel.packages`), so with the
+compiled module missing, `import qarpx` would yield an empty namespace
+package instead of an `ImportError`.  The redirect finder serves the
+compiled module first whenever it exists; `qarp/__init__.py` refuses a
+`qarpx` without `__file__` with the same "not importable" message, and a
+subprocess test pins it.  mypy and pyright must keep resolving `qarpx`
+through the stub at `src/qarpx/python/qarpx.pyi`, which `mypy_path` and
+`stubPath` name and which they search before source roots; the mypy run is
+the check.
 
 **Build.**  `[tool.scikit-build]` sets `cmake.source-dir = "src/qarpx"` and
 `wheel.packages = ["src/qarp"]`; `build-dir`, the install components and the
@@ -92,13 +103,15 @@ expected tree as `Path(__file__).resolve().parents[1] / "qarpx"`
 (`src/qarp/_abi.py` → `src/qarp`, `src`), and a wheel install finds no
 `qarpx` directory beside its `qarp`, so the source-dir check stays off there.
 
-**Import path.**  The editable install maps `qarp` to `src/qarp`; the
-repository root is no longer on `sys.path` by virtue of the install.  pytest
+**Import path.**  The editable install maps `qarp` to `src/qarp` and puts
+`src/` on `sys.path`; the repository root is no longer there by virtue of the
+install.  `scripts/bootstrap_qarpx.py`'s `.pth` names `src/` too.  pytest
 puts it there (the `tests/` package sits under a root with no `__init__.py`),
 which is what `tests/test_benchmarks` and `tests/test_docs` rely on, and the
 subprocess tests insert it explicitly already.  `docs/conf.py` keeps its
-`sys.path.insert(0, "..")` for the Sphinx extensions it reaches; autodoc
-imports the installed wheel either way.
+`sys.path.insert(0, "..")`, which is inert now: the root holds no package,
+and `src/` is not on the path, so the `src/qarpx/` directory cannot shadow
+the compiled module; autodoc imports the installed package.
 
 **§15 edits, deliberate.**  The path pointers (`cpp/libqarpx/python/bindings.cpp`,
 `cpp/libqarpx/python/qarpx.pyi`, `qarp/_abi.py`, `qarp/<pkg>/__init__.py`,
@@ -164,7 +177,7 @@ cpp/libqarpx/third_party/     → src/qarpx/third_party/
 [tool.scikit-build]
 cmake.source-dir = "src/qarpx"
 wheel.packages = ["src/qarp"]
-sdist.exclude = ["src/qarpx/build**", "**/__pycache__/**", "**/*.so", "**/*.pyd"]
+sdist.exclude = ["src/qarpx/build/**", "**/__pycache__/**", "**/*.so", "**/*.pyd"]
 
 [tool.coverage.paths]
 source = ["src/qarp", "*/site-packages/qarp"]
@@ -184,7 +197,7 @@ add_subdirectory(tests)
 
 | Test | Oracle | Location |
 |---|---|---|
-| No tracked file outside `docs/contributions/*_plan.md` and `*_review.md` names `cpp/` or a `qarp/` path that is not `src/qarp/` | `git grep` count 0 | run by hand, recorded in the PR |
+| No tracked file outside `docs/contributions/*_plan.md` and `*_review*.md` names `cpp/` or a `qarp/` path that is not `src/qarp/` | `git grep` count 0 | run by hand, recorded in the PR |
 | Fresh editable install in the worktree; `qarp.__file__` is under `src/qarp`; `qarpx.__source_dir__` is `<root>/src/qarpx` and `import qarp` passes the ABI check | the paths | `tests/test_abi_stamp.py` (adapted), run by hand |
 | The whole suite passes against the editable install | the suite's own oracles, unchanged | `pytest` |
 | `mypy src/qarp tests/` resolves `qarpx` to the stub at `src/qarpx/python`, not to the `src/qarpx/` directory, and passes; `ruff check .`, `ruff format --check .` | the tools; `mypy -v` names the stub file | CI `mypy`, `lint` |
@@ -192,6 +205,7 @@ add_subdirectory(tests)
 | C++ tests build and pass from `src/qarpx/` | `ctest` | `scripts/run_cpp_tests.py`, CI `ctest` |
 | A wheel built from the branch contains `qarp/__init__.py`, one `qarpx.*.so`, `qarpx-stubs/__init__.pyi`, and no `src/` entry; an sdist contains `src/qarpx/third_party/` and `src/qarp/` | `unzip -l`, `tar -tf` | run by hand |
 | The wheel installed in a clean venv imports, and `scripts/ci/synthesis_smoke.py` passes | the smoke script's own oracle | run by hand, CI `wheel` |
+| `python -S` with only `src/` on the path: `import qarp` raises the "not importable" `ImportError`, never an ABI mismatch | the contract: the message | `tests/test_abi_stamp.py` |
 | The docs build and the API inventory check pass | `build_docs.sh` | CI `docs` |
 | `test_mcm_bindings.py` passes where pytest collects it | its own assertions | `tests/test_bindings/` |
 | `pytest --cov` reports `src/qarp/...` paths and the floor holds | the coverage xml | CI `coverage` |
@@ -200,30 +214,52 @@ add_subdirectory(tests)
 
 ### Phase 1 — Move
 
-- [ ] The moves, with the path edits inside the moved files
+- [x] The moves, with the path edits inside the moved files *(2026-11-13)*
 
 ### Phase 2 — Wiring
 
-- [ ] `pyproject.toml`, `mypy.ini`, CMake, workflows, `.gitignore`,
+- [x] `pyproject.toml`, `mypy.ini`, CMake, workflows, `.gitignore`,
       `.gitattributes`, `.pre-commit-config.yaml`, `CODEOWNERS`,
-      `LICENSES_bundled.txt`
-- [ ] `_abi.py`, the four scripts, the five tests that derive a path
-- [ ] Fresh editable install; `pytest`, `mypy`, `ruff`, C++ tests, stub test
+      `LICENSES_bundled.txt` *(2026-11-13)*
+- [x] `_abi.py`, the four scripts, the five tests that derive a path *(2026-11-13)*
+- [x] Fresh editable install; `pytest`, `mypy`, `ruff`, C++ tests, stub test *(2026-11-13)*
 
 ### Phase 3 — Text
 
-- [ ] §15 and the file pointers in the conventions doc
-- [ ] `AGENTS.md`, `CONTRIBUTING.md`, the four docs pages,
-      `to_do.md`, the module docstrings and comments
-- [ ] `CHANGELOG.md` Changed entry; README roadmap sentence
+- [x] §15 and the file pointers in the conventions doc *(2026-11-13)*
+- [x] `AGENTS.md`, `CONTRIBUTING.md`, the three docs pages,
+      `to_do.md`, the module docstrings and comments *(2026-11-13)*
+- [x] `CHANGELOG.md` Changed entry; README roadmap sentence *(2026-11-13)*
 
 ### Phase 4 — Packaging check
 
-- [ ] Wheel and sdist built from the branch, contents listed, wheel installed
-      in a clean venv, smoke script run
+- [x] Wheel and sdist built from the branch, contents listed, wheel installed
+      in a clean venv, smoke script run *(2026-11-13)*
 
 ## Deviations log
 
-- (empty — deviations from the green-lit plan are declared in the PR's
-  "Deviations from plan" section and folded back here before merge; silent
-  drift is the violation)
+- **Green-lit offline.**  The design was agreed at the sit-down of
+  2026-11-13, not in a Draft PR comment, and the agreed text was not kept:
+  the branch's first commit rebuilds it from the implementation commit's
+  plan by undoing only the status, header, box and log edits, the sit-down
+  participants confirm it, and the header names that commit's blob.  Phases
+  1 to 4 land in the commit after it.
+- **Review fixes after the green light.**  The reviewers' sweep found a
+  `mypy qarp/` command in `CONTRIBUTING.md`, an old-depth pointer in
+  `tests/test_devices/test_device.py`, and two includes in
+  `src/qarpx/tests/test_montecarlo_contexts.cpp` that resolved only through
+  the vendored include directories; all three are fixed and the two files
+  join Scope.  The Design's sentence on `docs/conf.py` and the sketch's sdist
+  pattern are corrected to what the code does.
+- **`src/` is on `sys.path`.**  The plan said nothing puts it there; the
+  editable `.pth` does.  `qarp/__init__.py` refuses a namespace-package
+  `qarpx`, the legacy bootstrap `.pth` names `src/` so `import qarp` keeps
+  working on that path, and the Design says what the install does.
+- **Stale pointers fixed in passing.**  §17 of the conventions doc and a
+  comment in `src/qarpx/python/bindings.cpp` named `blocks/block.py`;
+  `src/qarp/blocks/_block.py` named `engines/qarp_engine.py`;
+  `src/qarpx/include/qarpx/operators/transforms.h` named
+  `operators/mappings.py`.  None of those files exists; the pointers name
+  `_block.py`, `_qarp_engine.py` and `_mappings.py`, and the two docstrings in
+  `multi_onv_state_block.py` take the `src/qarp/` prefix like every other
+  repo path.  The three files join Scope.

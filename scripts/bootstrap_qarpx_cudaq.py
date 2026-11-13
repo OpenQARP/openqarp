@@ -44,7 +44,7 @@ import sysconfig
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LIBQARPX = REPO_ROOT / "cpp" / "libqarpx"
+LIBQARPX = REPO_ROOT / "src" / "qarpx"
 DEFAULT_BUILD_DIR = LIBQARPX / "build-cudaq-wheel"
 
 GPU_BACKEND = "nvqir-custatevec-fp64"
@@ -180,7 +180,8 @@ def register(build_dir: Path) -> None:
         _fail(f"site-packages directory not found at {site_dir}")
     pth = site_dir / "qarpx-dev.pth"
     try:
-        pth.write_text(str(pymod) + "\n")
+        # src/ holds the qarp package.
+        pth.write_text(f"{pymod}\n{REPO_ROOT / 'src'}\n")
     except PermissionError:
         _fail(
             f"cannot write to {pth} — looks like a system Python.\n"

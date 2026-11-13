@@ -330,7 +330,8 @@ Legacy build path
 =================
 
 ``scripts/bootstrap_qarpx.py`` predates the pip build (CMake build under
-``cpp/libqarpx/build/`` plus a ``.pth`` file in site-packages).  It still works,
+``src/qarpx/build/`` plus a ``.pth`` file in site-packages naming that build
+and ``src/``, where ``qarp`` lives).  It still works,
 but only where qarp was *not* pip-installed: any pip install of qarp ships its
 own ``qarpx`` module, which silently shadows the ``.pth``-registered build.  Its
 CMake defines mirror the wheel's, so both paths build the same backend —
@@ -362,7 +363,7 @@ CUDA-free host records remain usable in CPU builds.
 
 Use this checkout's own Python 3.12 ``.venv``. Both the interpreter and imported
 ``qarp``/``qarpx`` must resolve to this checkout, the native source stamp must
-match ``cpp/libqarpx``, and the paired ABI must match without a bypass.
+match ``src/qarpx``, and the paired ABI must match without a bypass.
 Install persistent build tools before an editable rebuild installation:
 
 .. code-block:: bash

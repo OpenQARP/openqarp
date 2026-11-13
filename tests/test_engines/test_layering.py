@@ -14,7 +14,7 @@ import qarp.algorithms
 from qarp.algorithms import Sampler
 from qarp.engines import Runnable
 
-ENGINES_DIR = Path(__file__).resolve().parents[2] / "qarp" / "engines"
+ENGINES_DIR = Path(__file__).resolve().parents[2] / "src" / "qarp" / "engines"
 
 _ALGO_IMPORT = re.compile(
     r"^\s*(?:from|import)\s+(?:qarp\.algorithms|\.\.algorithms)", re.MULTILINE
@@ -27,7 +27,7 @@ def test_engines_do_not_import_algorithms():
         for path in sorted(ENGINES_DIR.glob("*.py"))
         for match in _ALGO_IMPORT.finditer(path.read_text())
     ]
-    assert not offenders, f"qarp/engines/ must not import from qarp/algorithms/: {offenders}"
+    assert not offenders, f"qarp.engines must not import qarp.algorithms: {offenders}"
 
 
 def test_target_is_defined_below_the_engine_layer():

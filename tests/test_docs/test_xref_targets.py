@@ -14,14 +14,14 @@ import pytest
 
 import qarp
 
-_REPO = Path(qarp.__file__).resolve().parents[1]
+_REPO = Path(qarp.__file__).resolve().parents[2]
 _XREF = re.compile(r":(?:class|func|mod|meth|attr|data|exc|obj):`~?(qarp(?:\.\w+)+)`")
 
 
 def _targets():
     seen = {}
     for path in sorted((_REPO / "docs" / "source").glob("*.rst")) + sorted(
-        (_REPO / "qarp").rglob("*.py")
+        (_REPO / "src" / "qarp").rglob("*.py")
     ):
         for m in _XREF.finditer(path.read_text(encoding="utf-8")):
             seen.setdefault(m.group(1), str(path.relative_to(_REPO)))

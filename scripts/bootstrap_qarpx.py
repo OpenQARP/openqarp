@@ -2,11 +2,12 @@
 """Bootstrap the qarpx C++ backend for a fresh checkout.
 
 Configures cmake, builds the qarpx Python extension under
-``cpp/libqarpx/build/python/``, and drops a ``.pth`` file in the active
-interpreter's site-packages so that ``import qarpx`` works without any
+``src/qarpx/build/python/``, and drops a ``.pth`` file in the active
+interpreter's site-packages naming it and ``src/``, so that ``import qarpx``
+and ``import qarp`` work without any
 further setup.
 
-Subsequent C++ rebuilds (``cmake --build cpp/libqarpx/build``) are picked
+Subsequent C++ rebuilds (``cmake --build src/qarpx/build``) are picked
 up automatically — only re-run this script after deleting the build
 directory or switching virtual environments.
 
@@ -56,7 +57,7 @@ import sysconfig
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LIBQARPX = REPO_ROOT / "cpp" / "libqarpx"
+LIBQARPX = REPO_ROOT / "src" / "qarpx"
 BUILD_DIR = LIBQARPX / "build"
 PYMOD_DIR = BUILD_DIR / "python"
 
@@ -247,7 +248,8 @@ def register() -> None:
         pth = site_dir / "qarpx-dev.pth"
         try:
             site_dir.mkdir(parents=True, exist_ok=True)
-            pth.write_text(str(PYMOD_DIR) + "\n")
+            # src/ holds the qarp package.
+            pth.write_text(f"{PYMOD_DIR}\n{REPO_ROOT / 'src'}\n")
         except OSError:
             continue  # read-only or root-owned — try the next candidate
         print(f"  wrote {pth}  →  {PYMOD_DIR}")
@@ -264,10 +266,15 @@ def register() -> None:
 def verify() -> None:
     _step("Verifying import")
     rc = subprocess.call(
-        [sys.executable, "-c", "import qarpx; print('  qarpx loaded from', qarpx.__file__)"]
+        [
+            sys.executable,
+            "-c",
+            "import qarpx, qarp; print('  qarpx loaded from', qarpx.__file__); "
+            "print('  qarp loaded from', qarp.__file__)",
+        ]
     )
     if rc != 0:
-        _fail("qarpx import failed after bootstrap")
+        _fail("qarpx or qarp import failed after bootstrap")
 
 
 def main() -> None:
@@ -342,7 +349,7 @@ def main() -> None:
         verify()
 
     print("\n\033[1;32m✓\033[0m qarpx is ready.")
-    print("  For incremental C++ work:  cmake --build cpp/libqarpx/build")
+    print("  For incremental C++ work:  cmake --build src/qarpx/build")
 
 
 if __name__ == "__main__":

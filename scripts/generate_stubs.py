@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the committed type stub for qarpx, ``cpp/libqarpx/python/qarpx.pyi``.
+"""Generate the committed type stub for qarpx, ``src/qarpx/python/qarpx.pyi``.
 
 Run after any binding change, under the CI Python version, with this
 checkout's own qarpx build installed (``pip install -e ".[full-dev]"``):
@@ -8,7 +8,7 @@ checkout's own qarpx build installed (``pip install -e ".[full-dev]"``):
     python scripts/generate_stubs.py --check    # exit 1 if the stub is stale
 
 The stub is the bindings as nanobind's stubgen reads them, private members
-included, with ``cpp/libqarpx/python/stubgen_patterns.txt`` applied.  The
+included, with ``src/qarpx/python/stubgen_patterns.txt`` applied.  The
 script refuses to run when its output could differ from CI's: another
 checkout's build, another Python, another nanobind, or a pattern that no
 longer matches anything.
@@ -28,7 +28,7 @@ from pathlib import Path
 from types import ModuleType
 
 REPO = Path(__file__).resolve().parents[1]
-SOURCE_TREE = REPO / "cpp" / "libqarpx"
+SOURCE_TREE = REPO / "src" / "qarpx"
 STUB = SOURCE_TREE / "python" / "qarpx.pyi"
 PATTERNS = SOURCE_TREE / "python" / "stubgen_patterns.txt"
 # CI's PYTHON_VERSION (.github/workflows/ci.yml): stubgen's output depends on it.
@@ -40,18 +40,18 @@ def cmake_nanobind_version() -> str:
     text = (SOURCE_TREE / "CMakeLists.txt").read_text()
     match = re.search(r"FetchContent_Declare\(\s*nanobind\b.*?GIT_TAG\s+v?([\w.]+)", text, re.S)
     if match is None:
-        raise SystemExit("cannot find nanobind's GIT_TAG in cpp/libqarpx/CMakeLists.txt")
+        raise SystemExit("cannot find nanobind's GIT_TAG in src/qarpx/CMakeLists.txt")
     return match.group(1)
 
 
 def expected_abi() -> int:
-    tree = ast.parse((REPO / "qarp" / "_abi.py").read_text())
+    tree = ast.parse((REPO / "src" / "qarp" / "_abi.py").read_text())
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "EXPECTED_QARPX_ABI" for t in node.targets
         ):
             return int(ast.literal_eval(node.value))
-    raise SystemExit("cannot find EXPECTED_QARPX_ABI in qarp/_abi.py")
+    raise SystemExit("cannot find EXPECTED_QARPX_ABI in src/qarp/_abi.py")
 
 
 def environment_problems(qx: ModuleType) -> list[str]:
@@ -72,7 +72,7 @@ def environment_problems(qx: ModuleType) -> list[str]:
         problems.append(f"nanobind {have} is installed; CMake fetches {want}")
     abi = getattr(qx, "__abi_version__", None)
     if abi != expected_abi():
-        problems.append(f"qarpx reports ABI {abi!r}; qarp/_abi.py expects {expected_abi()}")
+        problems.append(f"qarpx reports ABI {abi!r}; src/qarp/_abi.py expects {expected_abi()}")
     built_from = Path(getattr(qx, "__source_dir__", "")).resolve()
     if built_from != SOURCE_TREE.resolve():
         problems.append(f"qarpx was built from {built_from}, not {SOURCE_TREE}")

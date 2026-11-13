@@ -304,7 +304,7 @@ def test_terms_read_patterns():
 
 
 def test_terms_full_reassignment_trotter_pattern():
-    # qarp/blocks/_primitives/trotter_block.py:296-301
+    # src/qarp/blocks/_primitives/trotter_block.py:296-301
     def strip_constant(cls):
         source = cls("X0", 0.5) + cls("Z1 Z2", -0.25) + cls("", 3.0)
         op = cls()
