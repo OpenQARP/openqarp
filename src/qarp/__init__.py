@@ -28,7 +28,7 @@ except ImportError as _e:
         "qarp requires the qarpx C++ backend, which is not importable.\n"
         "From the repository root, inside your virtualenv, run:\n"
         '    pip install -e ".[full-dev]"\n'
-        "See README.rst 'Installation'. On a box with < 8 GB RAM, first\n"
+        "See README.rst 'Install'. On a box with < 8 GB RAM, first\n"
         "export CMAKE_BUILD_PARALLEL_LEVEL=3 or SymEngine OOM-kills cc1plus."
     ) from _e
 

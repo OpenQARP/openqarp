@@ -98,8 +98,10 @@ def test_env_override_suppresses(monkeypatch):
 def test_a_namespace_qarpx_is_refused_before_the_abi_check(tmp_path):
     # A ``qarpx`` that is only a directory, as ``src/qarpx`` is when the
     # compiled module is missing; built here so a wheel install runs it too.
+    package = Path(qarp.__file__).parent
     (tmp_path / "qarp").mkdir()
-    shutil.copy(qarp.__file__, tmp_path / "qarp" / "__init__.py")
+    for name in ("__init__.py", "_abi.py"):
+        shutil.copy(package / name, tmp_path / "qarp" / name)
     (tmp_path / "qarpx").mkdir()
     script = f"import sys; sys.path[:0] = [{str(tmp_path)!r}]; import qarp"
     out = subprocess.run(

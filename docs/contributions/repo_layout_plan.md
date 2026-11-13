@@ -11,7 +11,7 @@
   `tests/cpp/` → `tests/`; `tests/python/test_mcm_bindings.py` →
   `tests/test_bindings/test_mcm_bindings.py` at the repository root, with an
   `__init__.py`.  A moved file changes content only where it names a path,
-  except the three functional edits below.
+  except the functional edits below.
 - Functional edits: `src/qarp/_abi.py` (the expected source tree),
   `src/qarp/__init__.py` (a namespace-package `qarpx` is refused),
   `scripts/bootstrap_qarpx.py` and `bootstrap_qarpx_cudaq.py` (the `.pth`
@@ -109,9 +109,10 @@ install.  `scripts/bootstrap_qarpx.py`'s `.pth` names `src/` too.  pytest
 puts it there (the `tests/` package sits under a root with no `__init__.py`),
 which is what `tests/test_benchmarks` and `tests/test_docs` rely on, and the
 subprocess tests insert it explicitly already.  `docs/conf.py` keeps its
-`sys.path.insert(0, "..")`, which is inert now: the root holds no package,
-and `src/` is not on the path, so the `src/qarpx/` directory cannot shadow
-the compiled module; autodoc imports the installed package.
+`sys.path.insert(0, "..")`, which is inert now: the root holds no package.
+Autodoc imports the installed package; under an editable install `src/` is
+on the path too, and the compiled module is served ahead of the `src/qarpx/`
+directory as described above.
 
 **§15 edits, deliberate.**  The path pointers (`cpp/libqarpx/python/bindings.cpp`,
 `cpp/libqarpx/python/qarpx.pyi`, `qarp/_abi.py`, `qarp/<pkg>/__init__.py`,
@@ -197,7 +198,7 @@ add_subdirectory(tests)
 
 | Test | Oracle | Location |
 |---|---|---|
-| No tracked file outside `docs/contributions/*_plan.md` and `*_review*.md` names `cpp/` or a `qarp/` path that is not `src/qarp/` | `git grep` count 0 | run by hand, recorded in the PR |
+| No tracked file outside `docs/contributions/*_plan.md`, `*_review*.md`, `third_party/` and the `CHANGELOG.md` entry that describes the move names `cpp/` as a path or a `qarp/` path that is not `src/qarp/`; the library name `libqarpx` in prose is not a path | `git grep` count 0 | run by hand, recorded in the PR |
 | Fresh editable install in the worktree; `qarp.__file__` is under `src/qarp`; `qarpx.__source_dir__` is `<root>/src/qarpx` and `import qarp` passes the ABI check | the paths | `tests/test_abi_stamp.py` (adapted), run by hand |
 | The whole suite passes against the editable install | the suite's own oracles, unchanged | `pytest` |
 | `mypy src/qarp tests/` resolves `qarpx` to the stub at `src/qarpx/python`, not to the `src/qarpx/` directory, and passes; `ruff check .`, `ruff format --check .` | the tools; `mypy -v` names the stub file | CI `mypy`, `lint` |
@@ -205,7 +206,7 @@ add_subdirectory(tests)
 | C++ tests build and pass from `src/qarpx/` | `ctest` | `scripts/run_cpp_tests.py`, CI `ctest` |
 | A wheel built from the branch contains `qarp/__init__.py`, one `qarpx.*.so`, `qarpx-stubs/__init__.pyi`, and no `src/` entry; an sdist contains `src/qarpx/third_party/` and `src/qarp/` | `unzip -l`, `tar -tf` | run by hand |
 | The wheel installed in a clean venv imports, and `scripts/ci/synthesis_smoke.py` passes | the smoke script's own oracle | run by hand, CI `wheel` |
-| `python -S` with only `src/` on the path: `import qarp` raises the "not importable" `ImportError`, never an ABI mismatch | the contract: the message | `tests/test_abi_stamp.py` |
+| `python -S` with a copy of the package beside an empty `qarpx/` directory on the path, the shape of `src/` without the compiled module: `import qarp` raises the "not importable" `ImportError`, never an ABI mismatch | the contract: the message | `tests/test_abi_stamp.py` |
 | The docs build and the API inventory check pass | `build_docs.sh` | CI `docs` |
 | `test_mcm_bindings.py` passes where pytest collects it | its own assertions | `tests/test_bindings/` |
 | `pytest --cov` reports `src/qarp/...` paths and the floor holds | the coverage xml | CI `coverage` |
@@ -254,7 +255,18 @@ add_subdirectory(tests)
 - **`src/` is on `sys.path`.**  The plan said nothing puts it there; the
   editable `.pth` does.  `qarp/__init__.py` refuses a namespace-package
   `qarpx`, the legacy bootstrap `.pth` names `src/` so `import qarp` keeps
-  working on that path, and the Design says what the install does.
+  working on that path, and the Design says what the install does.  The test
+  table gains the row for that guard, and row 1 excludes `*_review*.md`
+  (a second QSCI review file), the vendored tree, the changelog entry that
+  names the old paths on purpose, and the library name in prose.
+- **The bootstrap's `qarp` check is advisory.**  `bootstrap_qarpx.py` builds
+  the backend and installs none of `qarp`'s runtime dependencies, so after
+  the `.pth` gained `src/` its verification exited 1 in a fresh venv; it now
+  fails only on `qarpx` and prints the dependency list when `qarp` does not
+  import.  Three messages that cited a README section "Installation" name
+  the real one, "Install", and one claimed editable installs rebuild on
+  import.  Pre-existing install-doc traps the clean-clone walk-through found
+  are parked in `to_do.md`.
 - **Stale pointers fixed in passing.**  §17 of the conventions doc and a
   comment in `src/qarpx/python/bindings.cpp` named `blocks/block.py`;
   `src/qarp/blocks/_block.py` named `engines/qarp_engine.py`;

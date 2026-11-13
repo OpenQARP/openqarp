@@ -54,6 +54,7 @@ import site
 import subprocess
 import sys
 import sysconfig
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -219,8 +220,8 @@ def check_not_shadowed() -> None:
         f"      import qarpx  →  {origin}\n"
         "  That module always wins over the .pth this script writes, so the\n"
         "  dev build would be silently ignored.  Either use the pip install\n"
-        "  directly (editable installs rebuild the C++ on import — see\n"
-        "  README 'Installation'), or `pip uninstall openqarp` and re-run this."
+        "  directly (an editable install builds the C++ as it installs — see\n"
+        "  README 'Install'), or `pip uninstall openqarp` and re-run this."
     )
 
 
@@ -266,15 +267,22 @@ def register() -> None:
 def verify() -> None:
     _step("Verifying import")
     rc = subprocess.call(
-        [
-            sys.executable,
-            "-c",
-            "import qarpx, qarp; print('  qarpx loaded from', qarpx.__file__); "
-            "print('  qarp loaded from', qarp.__file__)",
-        ]
+        [sys.executable, "-c", "import qarpx; print('  qarpx loaded from', qarpx.__file__)"]
     )
     if rc != 0:
-        _fail("qarpx or qarp import failed after bootstrap")
+        _fail("qarpx import failed after bootstrap")
+    # qarp needs its runtime dependencies, which this script does not install.
+    probe = subprocess.run(
+        [sys.executable, "-c", "import qarp; print('  qarp loaded from', qarp.__file__)"],
+        capture_output=True,
+        text=True,
+    )
+    print(probe.stdout, end="")
+    if probe.returncode != 0:
+        deps = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+        print("  qarp not importable yet: " + probe.stderr.strip().splitlines()[-1])
+        print("  Its runtime dependencies are not installed by this script:")
+        print("    pip install " + " ".join(f"'{d}'" for d in deps))
 
 
 def main() -> None:

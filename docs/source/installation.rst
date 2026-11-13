@@ -114,7 +114,9 @@ See *Auto-rebuild on import* below — that flag needs both of its lines.
 
 Either an editable install opted into ``rebuild`` and lost its toolchain (see
 *Auto-rebuild on import*), or you are in a git worktree sharing another
-checkout's environment (see *Git worktrees*).
+checkout's environment (see *Git worktrees*).  A ``FileNotFoundError`` for
+``qarp/__init__.py`` means a pull moved the package under ``src/`` and the
+editable install still maps the old path: re-run the install.
 
 For developers
 ==============

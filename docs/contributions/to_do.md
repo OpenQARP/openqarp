@@ -69,6 +69,17 @@ a `0.x` minor with whatever else breaks then.
 
 ## Additive, no window needed
 
+- **Installation docs traps, from a clean-clone walk-through.**  "Checking it
+  worked" runs `pytest` after a plain `pip install .`, which installs no
+  pytest, and sends C++ tests to `bootstrap_qarpx.py --with-tests`, which
+  refuses beside a pip install; the route that works is
+  `cmake -S src/qarpx -B src/qarpx/build -DQARP_BUILD_TESTS=ON` then
+  `scripts/run_cpp_tests.py`, and the script's hint should say so.  On macOS
+  every re-run of `pip install -e` needs the `OpenMP_ROOT` define again or
+  the backend silently rebuilds serial.  `build_docs.sh` says one intersphinx
+  warning remains; the build shows nineteen duplicate-description warnings
+  for `SamplingDistribution`, documented twice on `docs/api/qarp.rst`.
+
 - **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
   and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
   at 12 threads is slow on its own.  Repeat the Threads measurements of
