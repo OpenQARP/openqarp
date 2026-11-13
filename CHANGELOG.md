@@ -7,7 +7,33 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
 ### Added
+
+- `qarp.algorithms.QSCI`, quantum-selected configuration interaction.  It
+  samples one block or a sequence of blocks in the computational basis, or
+  takes a `distribution` gathered elsewhere, keeps the most frequent
+  configurations of the `n_electrons` sector and diagonalizes the
+  Hamiltonian exactly in the subspace they span.  `max_subspace_dim` and
+  `prob_threshold` bound the selection, `n_roots` sets how many eigenpairs
+  `run()` returns, and a sequence of time-evolved blocks gives the
+  time-averaged TE-QSCI.  See
+  `examples/algorithms/composite/mwe_qsci.ipynb`.
+- `qarp.algorithms.AggregatedMonteCarlo` and `ResidentEvolutionConfig`:
+  Monte Carlo that holds all walkers on a basis label as one signed
+  population and keeps exact FP64 transition columns on the GPU across
+  steps and trajectories.  It needs a `CudaqEngine` in its default
+  StateVector/FP64 configuration and a build with
+  `QARP_WITH_CUDAQ_SEMICLASSICAL=ON`, which is off by default;
+  `qx.montecarlo_available()` reports it.  `MonteCarlo` is unchanged.  See
+  the *Native aggregated Monte Carlo* section of the installation page and
+  `examples/algorithms/composite/mwe_montecarlo_gpu.ipynb`.
+- `qarp.operators.ComputationalBasisSector`: disjoint qubit partitions with
+  fixed Hamming weights, with `contains`, `dimension`, `labels`,
+  `sample_labels` and `spin_resolved`.
+- `TrotterAnsatzBlock.generator_groups()`: the commuting Pauli groups of
+  each generator before Suzuki scaling, read without building the block.
 
 - Structured execution.  `Block.statevector` and `QarpEngine`'s sampling
   paths read the block tree and run each piece as the cheapest exact kernel:
@@ -149,7 +175,7 @@ All notable changes to OpenQARP are recorded here. The format follows
   no longer applies, and a call the stub does not describe (an `np.int64`
   qubit index, an attribute set on a block) is reported.  To opt out, set
   `follow_imports = skip` and `follow_imports_for_stubs = True` for `qarpx`.
-- The `qarpx` ABI is 15.  An editable checkout reinstalls after pulling,
+- The `qarpx` ABI is 17.  An editable checkout reinstalls after pulling,
   or `import qarp` refuses the old build.
 - `ShadowEstimate.delta` is an upper bound on the failure probability at
   the estimate's `n_batches`, today HKP's `min(1, 2 e^{-K/2})`, instead of
@@ -269,6 +295,7 @@ First public release.  Distributed on PyPI as `openqarp`; the import name
 is `qarp`.  Pre-release history from the internal repository is not carried
 over; this file records changes from 0.1.0 onward.
 
-[Unreleased]: https://github.com/OpenQARP/openqarp/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/OpenQARP/openqarp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/OpenQARP/openqarp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/OpenQARP/openqarp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/OpenQARP/openqarp/releases/tag/v0.1.0

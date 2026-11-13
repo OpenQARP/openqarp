@@ -11,7 +11,7 @@ of them is imported here, so ``import qarp`` stays thin; ``from qarp import *``
 pulls them all.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 try:
     import qarpx as _qarpx  # noqa: F401
