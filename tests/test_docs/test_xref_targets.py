@@ -12,9 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import qarp
-
-_REPO = Path(qarp.__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[2]
 _XREF = re.compile(r":(?:class|func|mod|meth|attr|data|exc|obj):`~?(qarp(?:\.\w+)+)`")
 
 

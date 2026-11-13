@@ -270,6 +270,16 @@ add_subdirectory(tests)
   sentence for the `FileNotFoundError` a stale editable install raises after
   the pull.  Pre-existing install-doc traps the clean-clone walk-through
   found are parked in `to_do.md`.
+- **CI's pytest job tests the wheel's `qarp` now.**  With the package at the
+  repository root, pytest's root insertion imported the checkout's `qarp`
+  ahead of the wheel CI had just installed, so the suite never ran the
+  wheel's Python; the first run on this branch did, and two "live build"
+  canaries in `tests/test_abi_stamp.py` that need a source tree beside the
+  package failed.  They skip under a wheel install, where the stamp check is
+  off by design, and `tests/test_docs/test_xref_targets.py` finds the
+  repository from its own path rather than through `qarp.__file__`, which
+  under a wheel install had pointed it at site-packages and left it nothing
+  to check.
 - **Stale pointers fixed in passing.**  §17 of the conventions doc and a
   comment in `src/qarpx/python/bindings.cpp` named `blocks/block.py`;
   `src/qarp/blocks/_block.py` named `engines/qarp_engine.py`;

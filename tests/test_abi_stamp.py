@@ -19,6 +19,9 @@ import qarpx
 from qarp._abi import EXPECTED_QARPX_ABI, check_qarpx_abi
 
 _SOURCE_TREE = Path(qarp.__file__).resolve().parents[1] / "qarpx"
+# A wheel install has no source tree beside the package, and the stamp check
+# is off there by design; the live canaries need a checkout.
+_from_checkout = pytest.mark.skipif(not _SOURCE_TREE.is_dir(), reason="no source tree beside qarp")
 
 
 def _stub(abi=EXPECTED_QARPX_ABI, source_dir=str(_SOURCE_TREE)):
@@ -40,6 +43,7 @@ def test_live_module_carries_matching_abi(enforced):
     check_qarpx_abi(qarpx)  # must not raise
 
 
+@_from_checkout
 def test_live_source_dir_roundtrip():
     # Round-trip (additional, not the oracle): the stamp names this checkout.
     assert Path(qarpx.__source_dir__).resolve() == _SOURCE_TREE
@@ -67,6 +71,7 @@ def test_error_names_rebuild_command(enforced):
 # ── source-dir mismatches ───────────────────────────────────────────────
 
 
+@_from_checkout
 def test_wrong_checkout_raises(enforced):
     with pytest.raises(ImportError, match="different checkout"):
         check_qarpx_abi(_stub(source_dir="/somewhere/else/src/qarpx"))
