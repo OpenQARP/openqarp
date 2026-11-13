@@ -2084,15 +2084,37 @@ Rows not listed keep their `15c7475` status.
 | Diagnostics and timing partition | Partial; host and native key lists (plan:835-872) asserted only as the top-level set |
 | Resident signed evolution, Request transport and replay, Example GPU cells, Engine ownership and GIL | GPU; oracles re-derive by hand |
 
-### Suggested reviewer focus
+### To do before Gate 2
 
-1. R1: one line in the identity payload and a test.
-2. The author's MC-enabled build and GPU run on this head. The CPU side is
-   now as strong as it can be without a GPU, and none of the GPU cases has
-   run.
-3. G13 and the plan edits: the PR body, the Deviations entries for the four
-   body edits, and folding the correction scope into the plan.
-4. R2 and R3 before merge, since they decide whether the CPU tests cover
-   the paths production runs.
-5. M3 to M7 are deferred as declared; whether that is acceptable for this
-   PR is the reviewer's call.
+Ordered so that the GPU run happens once, on the final head. Any change to a
+`.cu` file after that run invalidates it (plan:1144-1145).
+
+1. R1: add `track_transition_circuits` to the identity payload, plus a test
+   that flips it after a run.
+2. The CPU-checkable fixes: R3 (two Bernoulli-branch pmf cases and one
+   chi-square bound in ctest), R4, R6, R5 and R8 as docs, R9 as docs (state
+   the interval as (0, 1]; changing `uniform()` would change every random
+   stream for no wrong sample), R10, and the two G12 leftovers.
+3. The plan edits: Deviations entries for the four body edits, one term for
+   "complete-row support" and "metadata resets", the correction-scope
+   section folded into Design, Test plan and an out-of-scope list without
+   review IDs or process prose, and the box dates.
+4. The MC-enabled and MC-disabled builds and the full GPU run on that head
+   (plan:979, :992), with zero skipped required `gpu_` cases. Tighten R3's
+   GPU moment bounds in the same step, since only this run can check them.
+5. G13: the PR body, with the Deviations section (G11 a-h, M3-M7, and the
+   deferrals below) and the sanitized validation evidence, then mark the PR
+   ready.
+
+Deferred, declared in the PR Deviations section and in the plan's
+out-of-scope list:
+
+- R2. The duplicate protocol checks change no result, and the GPU run
+  exercises the production replay path. Merging them into one entry point
+  rewrites `complete_evolution.cu`, the file the deferred scaling work
+  (M3-M7) rewrites anyway, so it belongs with that follow-up. Until then the
+  CPU exact-once test covers the HostProtocol copy, not the CUDA path.
+- R7. Speed only, and the plan admits no performance claims in this
+  contribution (plan:1150-1151). It fits the deferred scaling work.
+- M3-M7 stay deferred as declared (plan:1146-1149); M10, M11 and M16 stay
+  optional.
