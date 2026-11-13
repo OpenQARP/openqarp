@@ -6,9 +6,11 @@ are the rows that catch a real skew, so they must run against a build made
 from this checkout.
 """
 
+import runpy
 import shutil
 import subprocess
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -115,3 +117,12 @@ def test_a_namespace_qarpx_is_refused_before_the_abi_check(tmp_path):
     assert out.returncode != 0
     assert "not importable" in out.stderr
     assert "ABI mismatch" not in out.stderr
+
+
+def test_a_namespace_qarpx_is_refused_in_process(monkeypatch):
+    # The guard line itself, under coverage: a ``qarpx`` with no ``__file__``
+    # stands in for the source directory, and the package init runs afresh.
+    monkeypatch.setitem(sys.modules, "qarpx", types.ModuleType("qarpx"))
+    with pytest.raises(ImportError, match="not importable") as info:
+        runpy.run_path(qarp.__file__, run_name="qarp_guard_probe")
+    assert "resolved to a directory" in str(info.value.__cause__)

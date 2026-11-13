@@ -207,7 +207,7 @@ add_subdirectory(tests)
 | C++ tests build and pass from `src/qarpx/` | `ctest` | `scripts/run_cpp_tests.py`, CI `ctest` |
 | A wheel built from the branch contains `qarp/__init__.py`, one `qarpx.*.so`, `qarpx-stubs/__init__.pyi`, and no `src/` entry; an sdist contains `src/qarpx/third_party/` and `src/qarp/` | `unzip -l`, `tar -tf` | run by hand |
 | The wheel installed in a clean venv imports, and `scripts/ci/synthesis_smoke.py` passes | the smoke script's own oracle | run by hand, CI `wheel` |
-| `python -S` with a copy of the package beside an empty `qarpx/` directory on the path, the shape of `src/` without the compiled module: `import qarp` raises the "not importable" `ImportError`, never an ABI mismatch | the contract: the message | `tests/test_abi_stamp.py` |
+| `python -S` with a copy of the package beside an empty `qarpx/` directory on the path, the shape of `src/` without the compiled module: `import qarp` raises the "not importable" `ImportError`, never an ABI mismatch; the same guard driven in-process with a stub `qarpx` that has no `__file__`, so the raise is covered | the contract: the message | `tests/test_abi_stamp.py` |
 | The docs build and the API inventory check pass | `build_docs.sh` | CI `docs` |
 | `test_mcm_bindings.py` passes where pytest collects it | its own assertions | `tests/test_bindings/` |
 | `pytest --cov` reports `src/qarp/...` paths and the floor holds | the coverage xml | CI `coverage` |
