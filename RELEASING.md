@@ -81,9 +81,8 @@ Branch `chore/release-X.Y.Z` off `develop` and change:
 * `CHANGELOG.md` — move the `[Unreleased]` entries under
   `## [X.Y.Z] - <date>`, fill in anything the merged PRs did not record,
   and update the compare links at the bottom.
-* `CITATION.cff` — `version`, `date-released`, and remove the previous
-  release's *version* DOI.  Keep the concept DOI; the new version DOI does
-  not exist until step 7.
+* `CITATION.cff` — `version` and `date-released`.  Its only DOI is the
+  concept DOI, which resolves to the latest release and needs no change.
 
 This is a trivial-tier PR into `develop` (no plan).  Merge it as usual.
 
@@ -140,16 +139,6 @@ gh release create vX.Y.Z --verify-tag --title vX.Y.Z --notes-file notes.md
 Publishing the release makes Zenodo archive the tag and create the version
 DOI (listed on the concept DOI's record,
 <https://doi.org/10.5281/zenodo.22755228>).  The freeze ends here.
-
-### 8. Record the version DOI
-
-A trivial PR into `develop` adds the new version DOI to `CITATION.cff`:
-
-```yaml
-  - type: doi
-    value: "10.5281/zenodo.<id>"
-    description: "Version DOI — this release (vX.Y.Z)"
-```
 
 ## When something goes wrong
 

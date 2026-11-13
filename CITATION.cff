@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use OpenQARP in your research, please cite the paper listed under preferred-citation. To reference a specific software release, cite the version DOI below alongside it."
+message: "If you use OpenQARP in your research, please cite the paper listed under preferred-citation. To reference a specific software release, cite its version DOI alongside it; the Zenodo record of the DOI below lists one for each release."
 type: software
 title: "OpenQARP: Open Quantum Application Research Package"
 authors:
