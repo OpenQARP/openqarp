@@ -33,8 +33,8 @@ authors:
   - family-names: "Kirsopp"
     given-names: "Josh"
     affiliation: "Fujitsu Research of Europe"
-version: 0.1.1
-date-released: "2026-09-25"
+version: 0.2.0
+date-released: "2026-11-13"
 doi: "10.5281/zenodo.22755228"
 identifiers:
   - type: doi
