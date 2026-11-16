@@ -222,6 +222,8 @@ One PR, one phase.
   a conventions edit.
 - Robledo-Moreno's orbital permutation to place the largest `J^{αβ}` on kept
   pairs (eqs. 27–31).
+- Motta's bootstrapping (all-to-all → square → hex → heavy-hex): a helper that
+  remaps a converged K vector onto another interaction-pair set.
 - Spin-unbalanced UCJ (ffsim `UCJOpSpinUnbalanced`); complex `SlaterDeterminantBlock`.
 
 ## Deviations log
