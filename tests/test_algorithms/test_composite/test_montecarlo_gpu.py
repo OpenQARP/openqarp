@@ -429,3 +429,50 @@ def test_request_rejects_bool_scalar_metadata():
         args[slot] = True
         with pytest.raises(TypeError):
             qx.TransitionRequest(*args)
+
+
+@pytest.mark.parametrize("transport", ["complete", "measured"])
+def test_gpu_selected_pair_transport_against_literal_transfer(transport):
+    _require_gpu()
+    from qarp.algorithms import SelectedPairReadout
+    from qarp.blocks import selected_pair_unitary
+    from qarp.engines import QarpEngine
+    from qarp.operators import QubitOperator
+
+    theta = 0.31
+    hamiltonian = QubitOperator("Z0")
+    rotations = ((0, 1, theta),)
+    readout = (
+        None
+        if transport == "complete"
+        else SelectedPairReadout(
+            hamiltonian, 4, rotations, engine=QarpEngine(seed=19), n_shots=4000, real_only=True
+        )
+    )
+    mc = AggregatedMonteCarlo(
+        hamiltonian,
+        -1.0,
+        0.02,
+        0.01,
+        3,
+        selected_pair_unitary(4, rotations),
+        engine=CudaqEngine(),
+        initial_walker_count=16,
+        num_trajectories=1,
+        seed=7,
+        resident_evolution=None
+        if readout is None
+        else ResidentEvolutionConfig(ComputationalBasisSector.spin_resolved(2, 1, 1)),
+        transition_readout=readout,
+    ).build()
+    coefficients = mc._transition_coefficients([(3, 3), (3, 12)])
+    targets = [-np.cos(2 * theta), np.sin(2 * theta)]
+    if readout is None:
+        np.testing.assert_allclose(coefficients, targets, atol=1e-12)
+    else:
+        estimates = readout.estimate([(3, 3), (3, 12)])
+        for estimate, expected in zip(estimates, targets, strict=True):
+            assert abs(estimate.value - expected) <= 6 * estimate.standard_error_real
+    assert np.isfinite(mc.run()[0])
+    assert mc.diagnostics["completed_steps"] == 2
+    assert (mc.diagnostics["measurement_circuits_executed"] > 0) == (readout is not None)

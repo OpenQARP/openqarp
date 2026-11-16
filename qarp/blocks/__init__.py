@@ -24,6 +24,7 @@ from ._block import (
     CompositeBlockBase,
 )
 from ._composite_block import CompositeBlock
+from ._primitives.selected_pair_unitary import selected_pair_unitary
 from ._prepares_known_state import (
     PreparesKnownState,
     declaring_blocks,
@@ -184,6 +185,7 @@ __all__ = [
     "QSPAngleFinder",
     "declaring_blocks",
     "prepares_known_state",
+    "selected_pair_unitary",
 ]
 
 # VUMPOBrickworkBlock needs quimb (via qarp.operators.VUMPO; the [mps]

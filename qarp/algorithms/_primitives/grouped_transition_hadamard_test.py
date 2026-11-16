@@ -7,6 +7,7 @@ same joint ancilla/data measurement.  It therefore uses one real and/or one
 imaginary transition circuit per group instead of one Hadamard test per term.
 """
 
+from math import fsum, sqrt
 from typing import List, Optional, Union
 
 import qarpx as qx
@@ -82,6 +83,8 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
         self.result_real: Optional[float] = None
         self.result_imaginary: Optional[float] = None
         self.group_results: List[complex] = []
+        self.standard_error_real: Optional[float] = None
+        self.standard_error_imaginary: Optional[float] = None
 
         # Populated by build().  Terms omit the identity, which is represented
         # by ``_constant`` and folded into the first group as an overlap term.
@@ -172,13 +175,13 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
                 )
         return circuits
 
-    def _estimate_group(self, result, group_index: int) -> float:
+    def _group_statistics(self, result, group_index: int) -> tuple[float, Optional[float]]:
         if result.n_shots <= 0:
             raise ValueError("sampling result must contain at least one shot")
 
         masks = self._group_masks[group_index]
         group = self._groups[group_index]
-        weighted_sum = 0.0
+        outcomes = []
         for raw_outcome, count in result.counts.items():
             outcome = int(raw_outcome)
             ancilla_sign = 1.0 if (outcome & 1) == 0 else -1.0
@@ -187,14 +190,30 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
             for local_index, term_index in enumerate(group):
                 parity = -1.0 if ((data_outcome & masks[local_index]).bit_count() & 1) else 1.0
                 operator_value += self._coeffs[term_index] * parity
-            weighted_sum += float(count) * ancilla_sign * operator_value
-        return weighted_sum / float(result.n_shots)
+            outcomes.append((float(count), ancilla_sign * operator_value))
+        mean = fsum(count * value for count, value in outcomes) / float(result.n_shots)
+        if getattr(result, "is_exact", False):
+            return mean, 0.0
+        if result.n_shots == 1:
+            return mean, None
+        # Joint weighted outcomes retain covariance between Paulis in a group.
+        variance_of_mean = fsum(count * (value - mean) ** 2 for count, value in outcomes) / (
+            result.n_shots * (result.n_shots - 1)
+        )
+        return mean, variance_of_mean
+
+    def _estimate_group(self, result, group_index: int) -> float:
+        return self._group_statistics(result, group_index)[0]
 
     def run(self, results: list) -> Union[float, complex]:
+        self.standard_error_real = None
+        self.standard_error_imaginary = None
         expected = len(self.sub_blocks)
         if len(results) != expected:
             raise ValueError(f"Expected {expected} grouped transition results, got {len(results)}")
         if not self._groups:
+            self.standard_error_real = 0.0 if self.real else None
+            self.standard_error_imaginary = 0.0 if self.imaginary else None
             self.result_real = 0.0 if self.real else None
             self.result_imaginary = 0.0 if self.imaginary else None
             self.result = complex(0.0, 0.0) if self.real and self.imaginary else 0.0
@@ -203,22 +222,34 @@ class GroupedTransitionHadamardTest(PrimitiveAlgorithm):
         real_part = 0.0
         imaginary_part = 0.0
         self.group_results = []
+        real_variances: list[Optional[float]] = []
+        imaginary_variances: list[Optional[float]] = []
         result_index = 0
         for group_index in range(len(self._groups)):
             group_real = 0.0
             group_imaginary = 0.0
             if self.real:
-                group_real = self._estimate_group(results[result_index], group_index)
+                group_real, variance = self._group_statistics(results[result_index], group_index)
+                real_variances.append(variance)
                 result_index += 1
                 real_part += group_real
             if self.imaginary:
-                group_imaginary = self._estimate_group(results[result_index], group_index)
+                group_imaginary, variance = self._group_statistics(
+                    results[result_index], group_index
+                )
+                imaginary_variances.append(variance)
                 result_index += 1
                 imaginary_part += group_imaginary
             self.group_results.append(complex(group_real, group_imaginary))
 
         self.result_real = real_part if self.real else None
         self.result_imaginary = imaginary_part if self.imaginary else None
+        if self.real and all(v is not None for v in real_variances):
+            self.standard_error_real = sqrt(fsum(v for v in real_variances if v is not None))
+        if self.imaginary and all(v is not None for v in imaginary_variances):
+            self.standard_error_imaginary = sqrt(
+                fsum(v for v in imaginary_variances if v is not None)
+            )
         if self.real and self.imaginary:
             self.result = complex(real_part, imaginary_part)
         elif self.real:

@@ -151,5 +151,6 @@ something else, parked until they are picked up.
 | [`qsci_plan.md`](qsci_plan.md) | Quantum-selected configuration interaction (QSCI / SQD): diagonalize the Hamiltonian in sampled configurations |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` |
+| [`selected_pair_rotations_plan.md`](selected_pair_rotations_plan.md) | Bounded selected-pair preparations and certified requested-transition readout for GPU Monte Carlo |
 | [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels |
 | [`symbols_always_tuple_plan.md`](symbols_always_tuple_plan.md) | `.symbols` is a tuple on every block that has a registry and a `RuntimeError` before |

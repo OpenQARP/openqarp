@@ -53,6 +53,128 @@ def _ansatz():
     return block.set_symbols({theta: 0.2})
 
 
+def _measured_pair_mc(**kwargs):
+    from qarp import EXACT
+    from qarp.algorithms import SelectedPairReadout
+    from qarp.blocks import selected_pair_unitary
+    from qarp.engines import QarpEngine
+
+    hamiltonian = QubitOperator("Z0")
+    rotations = ((0, 1, 0.31),)
+    readout = SelectedPairReadout(
+        hamiltonian, 4, rotations, engine=QarpEngine(seed=19), n_shots=EXACT, real_only=True
+    )
+    arguments = dict(
+        hamiltonian=hamiltonian,
+        unitary_block=selected_pair_unitary(4, rotations),
+        reference_walker_label=3,
+        resident_evolution=ResidentEvolutionConfig(ComputationalBasisSector.spin_resolved(2, 1, 1)),
+        transition_readout=readout,
+    )
+    arguments.update(kwargs)
+    return _mc(**arguments)
+
+
+def test_pair_measured_transport_has_no_exact_columns_or_complete_uploads(monkeypatch):
+    class Context(_ScriptedContext):
+        def request_transitions(self, attempts):
+            return SimpleNamespace(
+                request_id=self.calls + 1,
+                trajectory_index=self.reset[-1],
+                step_index=self.calls,
+                attempts_per_walker=attempts,
+                sources=np.array([3], dtype=np.uint64),
+                proposal_attempts=np.array([8], dtype=np.uint64),
+            )
+
+        def apply_transition_batch(self, *args):
+            # Uniform sector has four labels. The only nonzero off-diagonal
+            # from 3 is 12, with <12|U† Z0 U|3> = sin(2 theta).
+            expected = [np.sin(0.62) if target == 12 else 0 for target in args[5]]
+            np.testing.assert_allclose(args[8], expected, atol=1e-12)
+            np.testing.assert_allclose(args[7], 1 / 3)
+            np.testing.assert_allclose(args[10], [-np.cos(0.62)], atol=1e-12)
+            assert sum(args[6]) == 8
+            self.calls += 1
+            return qx.EvolutionResult(
+                qx.EvolutionStatus.Completed,
+                1,
+                reference_population_history=np.array([8], dtype=np.int64),
+                projected_energy_history=np.array([-np.cos(0.62)], dtype=np.float64),
+                projected_numerator_history=np.array([-8 * np.cos(0.62)], dtype=np.float64),
+            )
+
+    context = Context()
+    monkeypatch.setattr(qx, "make_resident_evolution_context", lambda *args: context)
+    monkeypatch.setattr(module, "_PersistentGpuRows", lambda *args: pytest.fail("exact columns"))
+    mc = _measured_pair_mc().build()
+    assert mc.run() == pytest.approx([-np.cos(0.62)])
+    assert context.reset[3] == pytest.approx(-np.cos(0.62))
+    assert context.uploads == [] and mc._uploaded_rows == set()
+    assert mc._coefficient_cache.entries == {}
+    diagnostics = mc.diagnostics
+    assert diagnostics["column_provider"] is None
+    assert diagnostics["readout"]["submissions"] > 0
+    before = diagnostics["readout"]["submissions"]
+    mc.run()
+    assert mc.diagnostics["readout"]["submissions"] == before
+    with pytest.raises(CapabilityError, match="complete"):
+        mc._upload_complete_rows([3])
+    with pytest.raises(CapabilityError, match="complete"):
+        mc._acquire_columns([3])
+
+
+def test_pair_provider_column_to_row_conversion_is_complex_conjugation(monkeypatch):
+    from dataclasses import replace
+
+    mc = _measured_pair_mc()
+    readout = mc.transition_readout
+    record = readout.estimate([(3, 12)])[0]
+    monkeypatch.setattr(readout, "estimate", lambda pairs: (replace(record, value=1 + 2j),))
+    checked = []
+    monkeypatch.setattr(mc, "_require_real", lambda value, source, target: checked.append(value))
+    assert mc._transition_coefficients([(3, 12)]) == [1 - 2j]
+    assert checked == [1 - 2j]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"resident_evolution": None},
+        {"track_transition_circuits": True},
+        {"transition_prefetch": "adaptive"},
+    ],
+)
+def test_pair_measured_configuration_rejects_complete_row_modes(kwargs):
+    with pytest.raises(CapabilityError):
+        _measured_pair_mc(**kwargs)
+
+
+def test_pair_measured_frozen_mc_copy_must_match():
+    mc = _measured_pair_mc()
+    mc.U = mc.U.dagger()
+    with pytest.raises(ValueError, match="match MC"):
+        mc._transition_coefficients([(3, 12)])
+
+
+def test_pair_readout_replacement_requires_rebuild_and_releases_exact_provider(monkeypatch):
+    monkeypatch.setattr(module, "_PersistentGpuRows", _ScriptedRows)
+    monkeypatch.setattr(qx, "make_resident_evolution_context", lambda *args: _ScriptedContext())
+    mc = _measured_pair_mc()
+    readout = mc.transition_readout
+    mc.transition_readout = None
+    mc.build()
+    assert hasattr(mc, "_gpu_rows")
+    mc.transition_readout = readout
+    with pytest.raises(RuntimeError, match="instance changed"):
+        mc._transition_coefficients([(3, 3)])
+    mc.build()
+    assert not hasattr(mc, "_gpu_rows")
+    mc.transition_readout = _measured_pair_mc().transition_readout
+    with pytest.raises(RuntimeError, match="instance changed"):
+        mc.run()
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

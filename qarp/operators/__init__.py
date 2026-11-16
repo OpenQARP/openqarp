@@ -29,6 +29,7 @@ from ._grouping import (
     group_basis,
 )
 from ._mappings import BravyiKitaev, JordanWigner, Mapping, Parity
+from ._selected_pairs import pair_generator, pair_projector, selected_pair_amplitudes
 from ._tensor_operators import (
     fermion_operator_from_tensor,
     orbital_rotation_generator,
@@ -63,9 +64,12 @@ __all__ = [
     "orbital_rotation_generator",
     "orbital_rotation_matrix",
     "orbital_rotation_parameters",
+    "pair_generator",
+    "pair_projector",
     "pyscf",
     "qDRIFT",
     "rotate_tensor",
+    "selected_pair_amplitudes",
     "ucc",
 ]
 
