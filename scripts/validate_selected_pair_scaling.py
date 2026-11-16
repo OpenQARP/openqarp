@@ -564,9 +564,9 @@ def supervise(args):
     sources = [
         Path(__file__),
         Path(__file__).with_name("validate_selected_pair_preparations.py"),
-        Path("qarp/operators/_selected_pairs.py"),
-        Path("qarp/algorithms/_composite/selected_pair_readout.py"),
-        Path("qarp/algorithms/_primitives/grouped_transition_hadamard_test.py"),
+        Path("src/qarp/operators/_selected_pairs.py"),
+        Path("src/qarp/algorithms/_composite/selected_pair_readout.py"),
+        Path("src/qarp/algorithms/_primitives/grouped_transition_hadamard_test.py"),
     ]
     manifest = {
         "kind": "new_reproduction",

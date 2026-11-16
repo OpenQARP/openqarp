@@ -6,6 +6,10 @@
 **Tier:** Structural
 **Branch:** Current audit checkout `research/selected_pairs_qmc`; proposed contribution
 branch `feature/selected-pair-rotations`, pending owner decision. No branch changed.
+**Post-merge checkpoint (2026-11-16):** `6dd2ebfbd8087963451f4daf47cecd1a20ffc0fd`
+merges develop into the implementation commit `19b225b`. Current package/native
+roots are `src/qarp/` and `src/qarpx/`. Historical paths in earlier evidence below
+describe the original runs and are retained as provenance.
 **Green-lit:**
 **Local research exception:** Owner authorized implementation and cheap local tests
 before a PR on 2026-11-13. This explicitly overrides the plan-first PR gate for
@@ -30,15 +34,15 @@ remain pending approval. Molecular finite-shot/live stage 5 is not authorized.
 - `docs/source/algorithms.rst`
 - `docs/source/blocks.rst`
 - `docs/source/operators.rst`
-- `qarp/operators/_selected_pairs.py` (new)
-- `qarp/operators/__init__.py`
-- `qarp/blocks/_primitives/selected_pair_unitary.py` (new)
-- `qarp/blocks/__init__.py`
-- `qarp/algorithms/_composite/selected_pair_readout.py` (new)
-- `qarp/algorithms/_composite/aggregated_montecarlo.py`
-- `qarp/algorithms/_composite/__init__.py`
-- `qarp/algorithms/__init__.py`
-- `qarp/algorithms/_primitives/grouped_transition_hadamard_test.py`
+- `src/qarp/operators/_selected_pairs.py` (new)
+- `src/qarp/operators/__init__.py`
+- `src/qarp/blocks/_primitives/selected_pair_unitary.py` (new)
+- `src/qarp/blocks/__init__.py`
+- `src/qarp/algorithms/_composite/selected_pair_readout.py` (new)
+- `src/qarp/algorithms/_composite/aggregated_montecarlo.py`
+- `src/qarp/algorithms/_composite/__init__.py`
+- `src/qarp/algorithms/__init__.py`
+- `src/qarp/algorithms/_primitives/grouped_transition_hadamard_test.py`
 - `tests/test_operators/test_selected_pairs.py` (new)
 - `tests/selected_pair_oracles.py` (new, independent tiny-matrix helpers)
 - `tests/test_blocks/test_primitives/test_selected_pair_unitary.py` (new)
@@ -654,6 +658,17 @@ pushes remain pending. Reviewer approval and publication remain pending.
 
 ## Deviations log
 
+- Post-develop merge audit (2026-11-16): selected-pair library files, their
+  exports, the modified MC/grouped primitive, and native MC/transition-column
+  implementation files are byte-identical to `19b225b` after path mapping.
+  Updated the scaling harness's three source-manifest paths to `src/qarp/`;
+  the old paths would raise `FileNotFoundError` before launching validation.
+  The current local binary still has ABI 17 but is stamped for `cpp/libqarpx`,
+  so the new `src/qarpx` source guard correctly refuses it. No rebuild or ABI
+  bypass was performed. Azalea must use a build stamped for its current
+  checkout/layout; a pre-migration build is not automatically admissible.
+  The original package and raw stage 1–2 `/tmp` directories are no longer
+  present locally; the retained results above are not a fresh artifact audit.
 - Owner-authorized local research exception (2026-11-13): implement and run cheap
   local tests before creating a PR. No reviewer green-light is claimed.
 - Minimal measurement engines are unrouted/no-device QarpEngine and default
