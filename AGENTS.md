@@ -61,13 +61,13 @@ touching those areas.
   dies at `import qarp` with `UnsupportedOperation`.
 - Lint + format, blocking in CI and pre-commit (config in `[tool.ruff]`):
   `ruff check --fix . && ruff format .`
-- Types: `mypy qarp/ tests/ --disable-error-code=import-untyped`.  mypy reads
-  `qarpx` from the committed stub, `cpp/libqarpx/python/qarpx.pyi`.  After a
+- Types: `mypy src/qarp/ tests/ --disable-error-code=import-untyped`.  mypy reads
+  `qarpx` from the committed stub, `src/qarpx/python/qarpx.pyi`.  After a
   binding change, regenerate it with `python scripts/generate_stubs.py` under
   Python 3.12 and commit it with the change; `tests/test_stubs.py` fails on a
   stale stub (§15).
 - Git worktrees: a shared venv resolving `qarpx` to another checkout's build
-  now fails fast at `import qarp` (ABI + source-dir stamps, `qarp/_abi.py`).
+  now fails fast at `import qarp` (ABI + source-dir stamps, `src/qarp/_abi.py`).
   The fix is a venv + editable install inside the worktree;
   `QARP_SKIP_ABI_CHECK=1` bypasses for deliberate cross-checkout runs.
 

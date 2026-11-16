@@ -16,11 +16,11 @@ from qarp.operators import QubitOperator
 # below.  It was not always: the ZYZ base case emitted a wrong global phase on
 # its diagonal / anti-diagonal branches, which DOSQPE reads directly as an
 # eigenphase shift.  Phase exactness is pinned at source by
-# `cpp/libqarpx/tests/cpp/test_synthesis_unitary.cpp` and
+# `src/qarpx/tests/test_synthesis_unitary.cpp` and
 # `tests/test_blocks/test_primitives/test_synthesized_blocks.py`.
 #
 # Transpiler-level optimisation is covered separately by the C++ suite in
-# `cpp/libqarpx/tests/cpp/test_transpiler*.cpp`.
+# `src/qarpx/tests/test_transpiler*.cpp`.
 
 
 def test_dosqpe_plot(scaled_h2_hamiltonian_jw):

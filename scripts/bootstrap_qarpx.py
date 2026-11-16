@@ -2,11 +2,12 @@
 """Bootstrap the qarpx C++ backend for a fresh checkout.
 
 Configures cmake, builds the qarpx Python extension under
-``cpp/libqarpx/build/python/``, and drops a ``.pth`` file in the active
-interpreter's site-packages so that ``import qarpx`` works without any
+``src/qarpx/build/python/``, and drops a ``.pth`` file in the active
+interpreter's site-packages naming it and ``src/``, so that ``import qarpx``
+and ``import qarp`` work without any
 further setup.
 
-Subsequent C++ rebuilds (``cmake --build cpp/libqarpx/build``) are picked
+Subsequent C++ rebuilds (``cmake --build src/qarpx/build``) are picked
 up automatically — only re-run this script after deleting the build
 directory or switching virtual environments.
 
@@ -53,10 +54,11 @@ import site
 import subprocess
 import sys
 import sysconfig
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LIBQARPX = REPO_ROOT / "cpp" / "libqarpx"
+LIBQARPX = REPO_ROOT / "src" / "qarpx"
 BUILD_DIR = LIBQARPX / "build"
 PYMOD_DIR = BUILD_DIR / "python"
 
@@ -218,8 +220,8 @@ def check_not_shadowed() -> None:
         f"      import qarpx  →  {origin}\n"
         "  That module always wins over the .pth this script writes, so the\n"
         "  dev build would be silently ignored.  Either use the pip install\n"
-        "  directly (editable installs rebuild the C++ on import — see\n"
-        "  README 'Installation'), or `pip uninstall openqarp` and re-run this."
+        "  directly (an editable install builds the C++ as it installs — see\n"
+        "  README 'Install'), or `pip uninstall openqarp` and re-run this."
     )
 
 
@@ -247,7 +249,8 @@ def register() -> None:
         pth = site_dir / "qarpx-dev.pth"
         try:
             site_dir.mkdir(parents=True, exist_ok=True)
-            pth.write_text(str(PYMOD_DIR) + "\n")
+            # src/ holds the qarp package.
+            pth.write_text(f"{PYMOD_DIR}\n{REPO_ROOT / 'src'}\n")
         except OSError:
             continue  # read-only or root-owned — try the next candidate
         print(f"  wrote {pth}  →  {PYMOD_DIR}")
@@ -268,6 +271,19 @@ def verify() -> None:
     )
     if rc != 0:
         _fail("qarpx import failed after bootstrap")
+    # qarp needs its runtime dependencies, which this script does not install.
+    probe = subprocess.run(
+        [sys.executable, "-c", "import qarp; print('  qarp loaded from', qarp.__file__)"],
+        capture_output=True,
+        text=True,
+    )
+    print(probe.stdout, end="")
+    if probe.returncode != 0:
+        deps = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+        last = (probe.stderr.strip().splitlines() or ["(no output)"])[-1]
+        print("  qarp not importable yet: " + last)
+        print("  Its runtime dependencies are not installed by this script:")
+        print("    pip install " + " ".join(f"'{d}'" for d in deps))
 
 
 def main() -> None:
@@ -342,7 +358,7 @@ def main() -> None:
         verify()
 
     print("\n\033[1;32m✓\033[0m qarpx is ready.")
-    print("  For incremental C++ work:  cmake --build cpp/libqarpx/build")
+    print("  For incremental C++ work:  cmake --build src/qarpx/build")
 
 
 if __name__ == "__main__":

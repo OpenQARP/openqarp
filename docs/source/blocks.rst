@@ -3014,7 +3014,7 @@ have minimal bond dimension.
 .. note::
 
    Converting from a third-party MPS library's own tensors may need an endianness fix —
-   ``quimb``'s ``from_dense`` is kron/MSB-ordered (``qarp/endianness.py``), the opposite of this
+   ``quimb``'s ``from_dense`` is kron/MSB-ordered (``src/qarp/endianness.py``), the opposite of this
    block's LSB convention; reverse the site order and swap each tensor's bond axes when converting.
 
 .. code-block:: python

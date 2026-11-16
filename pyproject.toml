@@ -1,5 +1,5 @@
 [build-system]
-# scikit-build-core drives the existing cpp/libqarpx/CMakeLists.txt and provides
+# scikit-build-core drives the existing src/qarpx/CMakeLists.txt and provides
 # cmake + ninja. nanobind and SymEngine are pulled in by CMake via FetchContent;
 # Eigen is vendored.  <2: the 1.x metadata table below is the supported form.
 requires = ["scikit-build-core>=1.0,<2"]
@@ -7,7 +7,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "openqarp"
-dynamic = ["version"]                       # single-sourced from qarp/__init__.py
+dynamic = ["version"]                       # single-sourced from src/qarp/__init__.py
 description = "Open Quantum Application Research Package"
 readme = { file = "README.rst", content-type = "text/x-rst" }
 requires-python = ">=3.11"
@@ -108,12 +108,12 @@ test = [
 # no pre-commit hook): a new release adds checks, so an unpinned bump turns a
 # green pipeline red on a day nobody touched the code.
 # nanobind is scripts/generate_stubs.py's stubgen, pinned to the GIT_TAG
-# cpp/libqarpx/CMakeLists.txt fetches (tests/test_stubs.py checks both extras).
+# src/qarpx/CMakeLists.txt fetches (tests/test_stubs.py checks both extras).
 dev = ["ruff==0.15.22", "mypy==1.19.1", "pre-commit>=3.5", "nanobind==3.0.1"]
 # Executes examples/**/*.ipynb (`pytest --nbmake examples/`; job-notebooks).
 # nbmake is pinned like the other CI tooling — it decides what counts as a
 # notebook failure. `pymoo` is imported by mwe_parameter_optimization.ipynb
-# alone, as the external-optimizer demo, and by nothing in qarp/.
+# alone, as the external-optimizer demo, and by nothing in src/qarp/.
 # Deliberately NOT in [full-dev]: notebooks are a nightly leg, and the extra
 # must not enter the install the coverage floor is measured from.
 # pyscf: the chemistry notebooks derive their integrals through the inline
@@ -203,7 +203,7 @@ line-length = 100
 # nbstripout governs notebooks; their stripped schema trips ruff's notebook parser.
 # qarpx.pyi is generated (scripts/generate_stubs.py); force-exclude keeps it
 # excluded when a hook or editor passes the file explicitly.
-extend-exclude = ["*.ipynb", "cpp/libqarpx/python/qarpx.pyi"]
+extend-exclude = ["*.ipynb", "src/qarpx/python/qarpx.pyi"]
 force-exclude = true
 
 [tool.ruff.lint]
@@ -230,7 +230,7 @@ ignore = [
 # (it sequences package init to avoid circular imports) — no F401, no sorting.
 "**/__init__.py" = ["F401", "I001"]
 # Deliberate ordering: EXACT alias is defined mid-imports.
-"qarp/__init__.py" = ["F401", "E402"]
+"src/qarp/__init__.py" = ["F401", "E402"]
 # pytest.importorskip guards must precede the imports they protect.
 "tests/**" = ["E402"]
 
@@ -262,7 +262,7 @@ relative_files = true
 
 [tool.coverage.paths]
 # Fold a site-packages-resolved qarp back onto the checkout at combine/report.
-source = ["qarp", "*/site-packages/qarp"]
+source = ["src/qarp", "*/site-packages/qarp"]
 
 [tool.coverage.report]
 # NO `fail_under` HERE, deliberately.  The ratchet floor lives in
@@ -283,14 +283,14 @@ exclude_lines = [
 
 [tool.pyright]
 # The committed qarpx stub; pyright and Pylance do not read mypy.ini.
-stubPath = "cpp/libqarpx/python"
+stubPath = "src/qarpx/python"
 
 [tool.scikit-build]
-# The CMake project root is cpp/libqarpx, NOT the repository root.
-cmake.source-dir = "cpp/libqarpx"
+# The CMake project root is src/qarpx, NOT the repository root.
+cmake.source-dir = "src/qarpx"
 cmake.version = ">=3.20"
 # Include the pure-Python package alongside the compiled `qarpx` module.
-wheel.packages = ["qarp"]
+wheel.packages = ["src/qarp"]
 # Install ONLY the nanobind module (COMPONENT python). The dev install-tree
 # artefacts (static lib in lib/, headers in include/) are gated out of the wheel
 # in CMake with `if(NOT SKBUILD)`.
@@ -301,9 +301,9 @@ build-dir = "build/{wheel_tag}"
 # the vendored csim/Eigen ship and an sdist build works. (nanobind, and
 # SymEngine/Boost when enabled, are still fetched via FetchContent, so an sdist
 # *source* build needs network.)  No sdist.include: an include pattern is
-# force-include — it beats sdist.exclude AND .gitignore, so listing "cpp/**"
-# here would drag a local cpp/libqarpx/build/ tree into the sdist.
-sdist.exclude = ["cpp/libqarpx/build/**", "**/__pycache__/**", "**/*.so", "**/*.pyd"]
+# force-include — it beats sdist.exclude AND .gitignore, so listing "src/**"
+# here would drag a local src/qarpx/build/ tree into the sdist.
+sdist.exclude = ["src/qarpx/build/**", "**/__pycache__/**", "**/*.so", "**/*.pyd"]
 
 [tool.scikit-build.cmake.define]
 QARP_BUILD_PYTHON = "ON"
@@ -332,7 +332,7 @@ mode = "redirect"
 [[tool.dynamic-metadata]]
 field = "version"
 provider = "scikit_build_core.metadata.regex"
-input = "qarp/__init__.py"
+input = "src/qarp/__init__.py"
 regex = '__version__\s*=\s*"(?P<value>[^"]+)"'
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -375,7 +375,7 @@ environment = { CMAKE_BUILD_PARALLEL_LEVEL = "3" }
 archs = ["native"]                           # macos-15 → arm64, macos-15-intel → x86_64
 # 13.3 is the floor: Apple's libc++ gates floating-point std::to_chars
 # (core/param.cpp, operators/detail_parse.h) behind macOS 13.3; an older
-# target fails to compile.  Enforced in cpp/libqarpx/CMakeLists.txt.
+# target fails to compile.  Enforced in src/qarpx/CMakeLists.txt.
 environment = { MACOSX_DEPLOYMENT_TARGET = "13.3" }
 # Boost headers for the SymEngine symbolic backend (build-time only; the
 # wheel bundles nothing from Boost). Usually preinstalled on GH runners —

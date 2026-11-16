@@ -123,10 +123,10 @@ jobs:
       - name: Build and run the C++ suite on the LAPACK zuncsd CSD
         run: |
           ccache --zero-stats
-          cmake -S cpp/libqarpx -B cpp/libqarpx/build-ci-lapack -DQARP_BUILD_TESTS=ON -DQARP_USE_LAPACK=ON -DCMAKE_BUILD_TYPE=Release \
+          cmake -S src/qarpx -B src/qarpx/build-ci-lapack -DQARP_BUILD_TESTS=ON -DQARP_USE_LAPACK=ON -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build cpp/libqarpx/build-ci-lapack --target qarpx_tests --parallel "$(nproc)"
-          ctest --test-dir cpp/libqarpx/build-ci-lapack --output-on-failure -j "$(nproc)"
+          cmake --build src/qarpx/build-ci-lapack --target qarpx_tests --parallel "$(nproc)"
+          ctest --test-dir src/qarpx/build-ci-lapack --output-on-failure -j "$(nproc)"
           ccache --show-stats
 
   container-cpu-limit:

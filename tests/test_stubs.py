@@ -1,4 +1,4 @@
-"""The committed qarpx stub (``cpp/libqarpx/python/qarpx.pyi``) and its generator."""
+"""The committed qarpx stub (``src/qarpx/python/qarpx.pyi``) and its generator."""
 
 import ast
 import importlib.util
@@ -18,12 +18,12 @@ from qarp.blocks import SimpleBlock
 
 REPO = Path(__file__).resolve().parents[1]
 GENERATOR = REPO / "scripts" / "generate_stubs.py"
-STUB = REPO / "cpp" / "libqarpx" / "python" / "qarpx.pyi"
+STUB = REPO / "src" / "qarpx" / "python" / "qarpx.pyi"
 STUB_PYTHON = (3, 12)
 
 
 def _cmake_nanobind_tag() -> str:
-    text = (REPO / "cpp" / "libqarpx" / "CMakeLists.txt").read_text()
+    text = (REPO / "src" / "qarpx" / "CMakeLists.txt").read_text()
     match = re.search(r"FetchContent_Declare\(\s*nanobind\b.*?GIT_TAG\s+v?([\w.]+)", text, re.S)
     assert match is not None
     return match.group(1)
@@ -320,7 +320,7 @@ def test_mypy_verdict_on_the_stub_matches_the_runtime(tmp_path):
     config = tmp_path / "mypy.ini"
     # qarp from the checkout: an editable install's import hook is invisible to mypy.
     config.write_text(
-        f"[mypy]\nmypy_path = {STUB.parent}:{REPO}\n[mypy-qarp.*]\nfollow_imports = silent\n"
+        f"[mypy]\nmypy_path = {STUB.parent}:{REPO / 'src'}\n[mypy-qarp.*]\nfollow_imports = silent\n"
     )
     stdout, _, _ = api.run(
         [

@@ -9,7 +9,7 @@ The script is a thin wrapper around ``cmake --build`` + ``ctest`` — pass
 verbose, ``-R name`` for filtering, ``--rerun-failed`` to repeat only
 failures from the last run).
 
-The build directory defaults to ``cpp/libqarpx/build/`` (the default
+The build directory defaults to ``src/qarpx/build/`` (the default
 bootstrap's); if that is absent, any other configured ``build*`` dir is
 auto-detected (e.g. ``build-cudaq-wheel/`` from bootstrap_qarpx_cudaq.py).
 Pass ``--build-dir`` to pick one explicitly.
@@ -21,7 +21,7 @@ Usage:
     python scripts/run_cpp_tests.py --no-rebuild        # use existing binaries
     python scripts/run_cpp_tests.py --rerun-failed      # only previously-failed
     python scripts/run_cpp_tests.py --list              # list registered tests
-    python scripts/run_cpp_tests.py --build-dir cpp/libqarpx/build-cudaq-wheel
+    python scripts/run_cpp_tests.py --build-dir src/qarpx/build-cudaq-wheel
     python scripts/run_cpp_tests.py -- -V               # pass-through to ctest
 """
 
@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LIBQARPX = REPO_ROOT / "cpp" / "libqarpx"
+LIBQARPX = REPO_ROOT / "src" / "qarpx"
 DEFAULT_BUILD_DIR = LIBQARPX / "build"
 
 
@@ -144,7 +144,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--build-dir",
-        help="cmake build directory (default: cpp/libqarpx/build/, else the "
+        help="cmake build directory (default: src/qarpx/build/, else the "
         "sole other configured build* dir)",
     )
     parser.add_argument(

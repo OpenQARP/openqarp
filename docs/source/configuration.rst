@@ -72,7 +72,7 @@ For circuit cutting operations, limit the maximum number of cuts:
 Implementation Details
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The configuration object is defined in ``qarp/_config.py`` and provides:
+The configuration object is defined in ``src/qarp/_config.py`` and provides:
 
 - Property-based getters and setters with validation
 - Automatic propagation of settings to dependent libraries
@@ -84,7 +84,7 @@ Type Definitions
 ================
 
 OpenQARP defines type aliases for improved code clarity and type checking. These are defined 
-in ``qarp/_types.py``.
+in ``src/qarp/_types.py``.
 
 SamplingDictionary
 ------------------

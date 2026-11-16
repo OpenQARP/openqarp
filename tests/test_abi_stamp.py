@@ -1,4 +1,4 @@
-"""Guard tests for the qarpx ABI / source-dir import stamp (qarp/_abi.py).
+"""Guard tests for the qarpx ABI / source-dir import stamp (src/qarp/_abi.py).
 
 Stub rows exercise the check logic against synthetic modules; the live rows
 assert the compiled qarpx in this environment carries matching stamps — they
@@ -6,6 +6,11 @@ are the rows that catch a real skew, so they must run against a build made
 from this checkout.
 """
 
+import runpy
+import shutil
+import subprocess
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,7 +20,10 @@ import qarp
 import qarpx
 from qarp._abi import EXPECTED_QARPX_ABI, check_qarpx_abi
 
-_SOURCE_TREE = Path(qarp.__file__).resolve().parent.parent / "cpp" / "libqarpx"
+_SOURCE_TREE = Path(qarp.__file__).resolve().parents[1] / "qarpx"
+# A wheel install has no source tree beside the package, and the stamp check
+# is off there by design; the live canaries need a checkout.
+_from_checkout = pytest.mark.skipif(not _SOURCE_TREE.is_dir(), reason="no source tree beside qarp")
 
 
 def _stub(abi=EXPECTED_QARPX_ABI, source_dir=str(_SOURCE_TREE)):
@@ -37,6 +45,7 @@ def test_live_module_carries_matching_abi(enforced):
     check_qarpx_abi(qarpx)  # must not raise
 
 
+@_from_checkout
 def test_live_source_dir_roundtrip():
     # Round-trip (additional, not the oracle): the stamp names this checkout.
     assert Path(qarpx.__source_dir__).resolve() == _SOURCE_TREE
@@ -64,21 +73,22 @@ def test_error_names_rebuild_command(enforced):
 # ── source-dir mismatches ───────────────────────────────────────────────
 
 
+@_from_checkout
 def test_wrong_checkout_raises(enforced):
     with pytest.raises(ImportError, match="different checkout"):
-        check_qarpx_abi(_stub(source_dir="/somewhere/else/cpp/libqarpx"))
+        check_qarpx_abi(_stub(source_dir="/somewhere/else/src/qarpx"))
 
 
 def test_wheel_layout_skips_source_dir(enforced, tmp_path):
-    # No cpp/libqarpx next to the package → wheel install → dir check off.
+    # No src/qarpx next to the package → wheel install → dir check off.
     check_qarpx_abi(
         _stub(source_dir="/somewhere/else"),
-        source_tree=tmp_path / "cpp" / "libqarpx",
+        source_tree=tmp_path / "src" / "qarpx",
     )
 
 
 def test_source_tree_layout_enforces(enforced, tmp_path):
-    tree = tmp_path / "cpp" / "libqarpx"
+    tree = tmp_path / "src" / "qarpx"
     tree.mkdir(parents=True)
     with pytest.raises(ImportError, match="different checkout"):
         check_qarpx_abi(_stub(source_dir="/somewhere/else"), source_tree=tree)
@@ -90,3 +100,29 @@ def test_source_tree_layout_enforces(enforced, tmp_path):
 def test_env_override_suppresses(monkeypatch):
     monkeypatch.setenv("QARP_SKIP_ABI_CHECK", "1")
     check_qarpx_abi(_stub(abi=-1, source_dir="/somewhere/else"))  # no raise
+
+
+def test_a_namespace_qarpx_is_refused_before_the_abi_check(tmp_path):
+    # A ``qarpx`` that is only a directory, as ``src/qarpx`` is when the
+    # compiled module is missing; built here so a wheel install runs it too.
+    package = Path(qarp.__file__).parent
+    (tmp_path / "qarp").mkdir()
+    for name in ("__init__.py", "_abi.py"):
+        shutil.copy(package / name, tmp_path / "qarp" / name)
+    (tmp_path / "qarpx").mkdir()
+    script = f"import sys; sys.path[:0] = [{str(tmp_path)!r}]; import qarp"
+    out = subprocess.run(
+        [sys.executable, "-S", "-c", script], capture_output=True, text=True, check=False
+    )
+    assert out.returncode != 0
+    assert "not importable" in out.stderr
+    assert "ABI mismatch" not in out.stderr
+
+
+def test_a_namespace_qarpx_is_refused_in_process(monkeypatch):
+    # The guard line itself, under coverage: a ``qarpx`` with no ``__file__``
+    # stands in for the source directory, and the package init runs afresh.
+    monkeypatch.setitem(sys.modules, "qarpx", types.ModuleType("qarpx"))
+    with pytest.raises(ImportError, match="not importable") as info:
+        runpy.run_path(qarp.__file__, run_name="qarp_guard_probe")
+    assert "resolved to a directory" in str(info.value.__cause__)

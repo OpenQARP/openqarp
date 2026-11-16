@@ -8,8 +8,8 @@ OpenQARP's distributions contain, verbatim, one section per component.
 
 OpenQARP binary distributions (PyPI wheels) contain object code compiled from the
 third-party components listed below; the source repository and sdist
-additionally contain the qulacs csim sources (cpp/libqarpx/third_party/csim/)
-and the Eigen headers (cpp/libqarpx/third_party/eigen/).  The other components
+additionally contain the qulacs csim sources (src/qarpx/third_party/csim/)
+and the Eigen headers (src/qarpx/third_party/eigen/).  The other components
 are downloaded at build time and are not present in the source distribution.
 The Linux wheels additionally contain the GCC OpenMP runtime, libgomp,
 copied in from the build toolchain (last section).
@@ -58,7 +58,7 @@ this binary - 3.4.0, commit 3147391d946bb4b6c68edd901f2add6ac1f31f8c - is
 distributed by us together with this software, in the OpenQARP source distribution
 (sdist) and in the OpenQARP source repository, at:
 
-    cpp/libqarpx/third_party/eigen/
+    src/qarpx/third_party/eigen/
 
 The sdist is published with every OpenQARP release, alongside the binary wheels,
 and may be obtained from the same place you obtained this software at no
@@ -128,7 +128,7 @@ Assign_MKL.h, MKL_support.h, misc/lapacke.h, PardisoSupport.h).  They are gated
 behind EIGEN_USE_BLAS / EIGEN_USE_LAPACKE / EIGEN_USE_MKL, none of which OpenQARP
 defines, so they are distributed as source but contribute no object code to any
 OpenQARP binary.  Their license text is
-cpp/libqarpx/third_party/eigen/COPYING.BSD.
+src/qarpx/third_party/eigen/COPYING.BSD.
 ==============================================================================
 
 Mozilla Public License Version 2.0

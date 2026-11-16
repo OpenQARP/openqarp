@@ -2,7 +2,7 @@
 
 Module name starts with ``_`` so pytest doesn't auto-collect it.
 
-The helpers here mirror ``cpp/libqarpx/tests/cpp/gate_test_helpers.h`` on the
+The helpers here mirror ``src/qarpx/tests/gate_test_helpers.h`` on the
 Python side: build a block's unitary via the qarpx simulator, and compare two
 unitary matrices element-wise with a clear failure message.
 """
