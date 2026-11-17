@@ -154,7 +154,8 @@ contraction ``⟨bra|H|ket⟩`` runs in C++ (``QarpSimulator.transition``): the
 Pauli terms are grouped by their X/Y flip pattern and the whole sum is
 evaluated in one pass over the two statevectors, so a 2000-term molecular
 Hamiltonian at 20 qubits costs about 0.1 s on a laptop.  Z-only observables
-(Ising / MaxCut costs) use a cached diagonal instead.  A simulator that only
+(Ising / MaxCut costs) use a diagonal instead, built at the first
+evaluation and cached.  A simulator that only
 provides ``statevector`` (the GPU engine's host path, third-party backends)
 falls back to the numpy sweep ``qarp.algorithms._primitives.state_vector.pauli_expectation``
 with the same result.
@@ -562,12 +563,16 @@ The estimator uses median-of-means; each :code:`expval` returns a
 :code:`ShadowEstimate` carrying the value and :code:`error`, the accuracy
 half-width :math:`\varepsilon = \sqrt{34\,\hat{V}/N}` of Huang–Kueng–Preskill
 Theorem 1 — the :math:`\varepsilon` for which
-:math:`\Pr[\,|\text{value} - \text{true}| \ge \varepsilon\,] \le \delta` at the
-:code:`delta` that fixed the batch count, with :math:`\hat{V}` the empirical
-single-setting variance and :math:`N` the per-batch size.  It is a worst-case
-bound carrying the paper's own deliberately loose constant 34, so it typically
-sits several times above the scatter you observe between repeats: read it as a
-guarantee, not as a standard error.  Only the random-Pauli ensemble ships today;
+:math:`\Pr[\,|\text{value} - \text{true}| > \varepsilon\,] \le \delta`, where
+:code:`delta` is an upper bound on the failure probability at the batch count
+:math:`K` used, today HKP's :math:`\min(1, 2e^{-K/2})`,
+:math:`\hat{V}` the empirical single-setting variance and :math:`N` the per-batch
+size.  It is a worst-case bound carrying the paper's own deliberately loose
+constant 34, so it typically sits several times above the scatter you observe
+between repeats: read it as a worst-case bar, not as a standard error.  The
+guarantee holds at the true variance; :math:`\hat{V}` stands in for it, so an
+observable driven by rare outcomes, whose :math:`\hat{V}` is often 0, can carry a
+bar far too narrow.  Only the random-Pauli ensemble ships today;
 matchgate and global-Clifford ensembles are planned as additional kernels.
 
 Composite Algorithms
@@ -2805,6 +2810,135 @@ and overlap matrices.
     primitive used by the :code:`QSE` object to evaluate the elements of :math:`\mathbf{S}`.
 
 
+.. _qsci-section:
+
+Quantum-Selected Configuration Interaction (QSCI)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+QSCI samples one or more prepared states in the computational basis, keeps the
+most frequently observed configurations, and diagonalizes the Hamiltonian
+classically in the subspace :math:`\{|x_i\rangle\}` they span,
+
+.. math::
+
+   H_{ij} = \langle x_i|H|x_j\rangle,
+
+following Kanno et al., `Quantum-Selected Configuration Interaction
+<https://arxiv.org/abs/2302.11320>`_. Unlike QSE, the quantum device only
+samples: shot noise affects *which* configurations are selected, never the
+matrix elements, which are computed exactly.
+
+**Samples.** Exactly one of two arguments supplies them:
+
+- ``ket``: a block, or a sequence of blocks of equal width, sampled with a
+  ``Sampler`` (``Sampler()`` by default; it must measure every qubit in
+  register order). Every block runs the same shot count and the results are
+  pooled as their plain mean. A sequence of Trotterized time-evolution blocks
+  is the time-averaged TE-QSCI of Mikkelsen and Nakagawa, `QSCI with
+  time-evolved state <https://arxiv.org/abs/2412.13839>`_; equal weight per
+  block is the time average only for equally spaced times.
+- ``distribution``: a ``{bits: probability}`` mapping produced elsewhere, such
+  as a hardware job, another sampler, or an earlier run's ``qsci.distribution``.
+  Keys are LSB-first bit tuples (qubit ``q`` at position ``q``); weights must
+  sum to one within ``1e-10`` and are never renormalized.
+
+**Hamiltonian and sector.** ``hamiltonian`` is a ``QubitOperator`` or a
+``FermionOperator``, which is Jordan-Wigner-transformed. ``n_electrons =
+(n_alpha, n_beta)`` declares the sector, with alpha spin orbitals on even
+qubits and beta on odd (abab). It is required for a ``FermionOperator``; for a
+``QubitOperator`` it is optional and asserts a Jordan-Wigner occupation basis.
+Jordan-Wigner is a precondition QSCI cannot check: the sector filter and the
+reading of bitstrings as occupations both assume the sampled states were
+prepared under it.
+
+**Selection** runs in a fixed order: pool the samples, filter to the sector,
+apply ``prob_threshold`` (an inclusive floor on in-sector probability), then
+keep at most ``max_subspace_dim`` configurations, most frequent first, with
+ties broken by ascending LSB label. Out-of-sector samples raise a
+``UserWarning``, are excluded, and are kept on ``qsci.rejected``;
+``qsci.in_sector_mass`` reports the in-sector share.
+
+**Solve.** The subspace Hamiltonian is built by walking Pauli terms, so no
+:math:`2^n` object is formed. Up to 2000 configurations it is diagonalized
+densely with ``scipy.linalg.eigh``, and above that with ARPACK's ``eigsh``, for
+the ``n_roots`` lowest eigenpairs. ARPACK can skip a copy of a degenerate level,
+so with ``n_roots > 1`` one extra single-root solve checks for a skipped copy,
+and the solve is repeated with one more root while it finds one, raising
+``RuntimeError`` after 30 re-solves; ``verify_roots=False`` turns the check
+off. ``run()`` returns ``(energies, coefficients)``, as ``QSE`` does, and sets
+``energies``, ``coefficients`` (row ``i`` is the amplitude on
+``configurations[i]``), ``configurations``,
+``distribution`` (the pooled samples before any filter or cut, normalized to
+unit total mass so they can be passed straight back as ``distribution=``),
+``in_sector_mass`` and ``rejected``.
+
+As an example, we reuse the :math:`H_4` chain from the QSE example and sample
+Hartree-Fock evolved under Trotterized :math:`e^{-iHt}` at four times. Run the
+snippet from the repository root:
+
+.. code-block:: python
+
+    from pathlib import Path
+    import numpy as np
+
+    from qarp.algorithms import QSCI, Sampler
+    from qarp.blocks import CompositeBlock, MappedONVStateBlock, TrotterBlock
+    from qarp.engines import QarpEngine
+    from qarp.operators import JordanWigner
+    from qarp.operators.integrals import restricted_integrals_to_fermion_operator
+    from qarp.operators.onv import onv_from_spatial_occupations
+
+    asset = Path("tests/assets/molecules/h4_1.000_sto3g.npz")
+    with np.load(asset) as data:
+        fermion_hamiltonian = restricted_integrals_to_fermion_operator(
+            float(data["constant"]), data["one_electron"], data["two_electron"]
+        )
+    hf = onv_from_spatial_occupations([2, 2, 0, 0])
+    qubit_hamiltonian = JordanWigner().encode_operator(fermion_hamiltonian)
+
+    blocks = [
+        CompositeBlock(
+            [
+                MappedONVStateBlock(hf, JordanWigner()),
+                TrotterBlock(len(hf), qubit_hamiltonian, steps=2, time=t),
+            ]
+        )
+        for t in (0.5, 1.0, 1.5, 2.0)
+    ]
+    qsci = QSCI(
+        fermion_hamiltonian,
+        ket=blocks,
+        primitive=Sampler(n_shots=2000),
+        engine=QarpEngine(seed=7),
+        n_electrons=(2, 2),
+    ).build()
+    energies, coefficients = qsci.run()
+
+Re-selecting from the same samples costs no circuits, which is how an
+energy-versus-subspace-size curve is drawn:
+
+.. code-block:: python
+
+    capped = QSCI(
+        fermion_hamiltonian,
+        distribution=qsci.distribution,
+        n_electrons=(2, 2),
+        max_subspace_dim=10,
+    ).build()
+    capped_energies, _ = capped.run()
+
+.. Note::
+    Two limits of the method are worth knowing. Only particle number and
+    :math:`S_z` are filtered, not :math:`S^2`, and a determinant subspace need
+    not be closed under spin; where spin states of the same spatial symmetry
+    are nearly degenerate, as near bond dissociation, the eigenvectors can be
+    spin-contaminated. And sampling frequency is only a proxy for importance:
+    time-evolved states started from a Hartree-Fock determinant with small
+    ground-state overlap rank the important configurations poorly, so
+    diagonalizing the whole sampled pool is far more reliable than capping it
+    aggressively.
+
+
 Quantum Imaginary-Time Evolution (QITE)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -2843,3 +2977,114 @@ roughly six qubits). The state is carried forward through the QarpSimulator
 The optimized state is a re-simulable block via
 :code:`qite.get_final_state_block()`, and the per-step energies are recorded in
 :code:`qite.energy_history`.
+
+Aggregated Monte Carlo
+----------------------
+
+``AggregatedMonteCarlo`` represents all walkers on a computational-basis label
+as one signed integer population. A capable engine supplies persistent exact
+FP64 transition columns and resident evolution; the implementation
+requires ``CudaqEngine`` with its default single-device StateVector/FP64
+configuration and the separately enabled native MC build option. It executes
+no quantum measurement circuits. Existing ``MonteCarlo`` retains its CPU and
+Quantum modes.
+
+The Hamiltonian is a finite Hermitian ``QubitOperator`` in LSB order and the
+copied unitary must be fully bound. Register width comes from the unitary,
+not from the highest nonidentity Hamiltonian term. Startup constructs neither
+a full host unitary nor the dense transformed computational basis. Persistent
+batched columns, compact sector gathering and caches reuse allocations and
+coefficients across steps and trajectories.
+
+``resident_evolution=None`` uses complete transition support. A
+``ResidentEvolutionConfig`` instead samples uniform destinations other than
+the current source within its certified ``ComputationalBasisSector``;
+coefficients remain exact. Sector certification is sufficient, not necessary:
+each emitted Trotter generator group must conserve each partition's charge.
+For example XX+YY conserves total number as one fully commuting group, but
+its individual XX and YY groups fail that certificate. Request transport also
+requires a real Hamiltonian and a real-orthogonal ansatz up to scalar phase.
+
+Compact coefficients retain ``abs(value) > 1e-12``; complete-row realness
+allows imaginary residue up to ``1e-10`` and request coefficients up to
+``1e-12``. Complete-row support then applies ``dt*abs(real(value)) > 1e-14``
+with the reference-source exception. These cutoffs and the LSB convention
+are part of the numerical contract.
+
+``projected_energy_estimator="instantaneous"`` contributes each trajectory's
+final-step numerator and reference population. ``"ratio_of_sums"`` contributes
+signed sums after each trajectory's own ``estimator_burn_in_steps``.
+``run()`` returns a one-element list containing the pooled numerator divided
+by the pooled signed denominator across all requested trajectories. This
+is not an average of the individual ratios. The combined diagnostics report
+leave-one-trajectory jackknife standard error, or ``None`` with one trajectory
+or an invalid replica. A zero pooled denominator yields NaN and status
+``ZeroDenominator``. A failed trajectory aborts the run with partial histories
+retained and combined status ``Incomplete``; no reduced ensemble is returned.
+
+An explicit ``estimator_block_size`` additionally enables within-trajectory
+block jackknife for ratio-of-sums; ``None`` disables only that local uncertainty.
+Instantaneous estimation rejects burn-in/block options and directs users to
+ratio-of-sums. Local and across-trajectory errors occupy separate diagnostic
+mappings and are never combined as independent error estimates.
+
+``seed`` creates local, event-keyed streams without reseeding process-wide
+RNGs. Explicit seeds reproduce results within a backend/configuration; CPU and
+GPU trajectories need not match. Diagnostics record the generated root for
+``seed=None``. ``CudaqEngine(seed=...)`` controls its circuit execution, not the
+walker's RNG.
+
+``track_transition_circuits=False`` avoids companion circuit construction.
+When enabled, one lazy QWC circuit list supplies per-pair counts: constructed
+``generated_circuits`` and hypothetical ``measurement_settings`` are distinct
+from executed measurement circuits and shots, which remain zero.
+
+The scalar coefficient cache is bounded host RAM, accounting 256 bytes per
+entry, with a default 16 GiB budget and LRU eviction. The separate 16 GiB
+complete-support forecast is not a hard GPU allocator limit. Request transport
+accepts a smaller ``cache_max_bytes``; adaptive complete-row prefetch is bounded
+and unavailable for request transport. A changed H/U/configuration requires a
+rebuild.
+
+Unsupported capabilities raise ``CapabilityError``. Invalid values raise
+``ValueError``; incompatible types/dtypes/shapes raise ``TypeError``. Host
+checked count/size overflow raises ``OverflowError``. Device integer overflow
+returns ``IntegerOverflow`` and retained partial histories before the algorithm
+raises ``RuntimeError``. Runtime/state failures also raise ``RuntimeError``.
+Read-only record array views retain their owners; column outputs own their
+storage independently of provider lifetime.
+
+The bounded example is
+``examples/algorithms/composite/mwe_montecarlo_gpu.ipynb``. Its independent CPU
+oracle always runs; GPU cells require ``QARP_RUN_CUDAQ_GPU_TESTS=1`` and an
+MC-enabled build. A CPU-only run explicitly reports the GPU path unverified.
+
+The engine extension point is ``Engine._resident_simulator(n_qubits)``. Its
+simulator exposes ``CudaqSimulator.make_transition_column_provider``; C++
+consumers include ``qarpx/montecarlo/contexts.h`` for evolution records and
+factories. These public headers contain no CUDA types.
+
+``aggregated_binomial_calls`` counts logical binomial sampler invocations.
+Complete-row spawning counts edges of active sources above the ``1e-14``
+spawning cutoff; inactive sources and edges at or below the cutoff are skipped.
+Death/cloning counts calls with probability zero or one; request fractional
+spawning also counts probability zero. The counter does not count the underlying uniform
+variates: inversion may restart, while the Bernoulli branch draws per walker.
+The existing FP64 uniform conversion produces values in ``(0, 1]``; rounding
+can produce exactly one. Inversion restarts when a uniform exceeds the rounded
+total probability mass.
+Complete-row edge visits count cached outgoing edges of active sources;
+request-path edge visits count sampled proposal multiplicities.
+Automatic sector/realness certification requires the concrete canonical
+``TrotterAnsatzBlock``, not an arbitrary subclass overriding its accessors.
+Circuit accounting resets per run and includes retained pair labels from both
+transport paths; a warm coefficient cache does not lower the logical
+measurement-setting count. Changing ``track_transition_circuits`` after
+``build()`` requires rebuilding the contexts before running again.
+
+The column provider's ``handle_creations`` is the total handle count on its
+shared simulator resource lease. The evolution context reports the increase
+since that context was constructed, including handles created by other users
+of the same lease. It measures shared resource activity, rather than attributing
+each handle to a particular context. The algorithm constructs the provider
+before the evolution context, so its existing handle is outside that baseline.

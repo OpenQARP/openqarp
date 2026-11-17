@@ -4,7 +4,7 @@ Replaces the pre-pytket-removal skip-marked file.  Covers Device, Architecture,
 NoiseModel, the router, and the rebase → route → re-rebase pipeline
 exposed via ``qarp.devices.compile_for_device``.
 
-The C++ side already has unit-level coverage (tests/cpp/test_architecture.cpp,
+The C++ side already has unit-level coverage (src/qarpx/tests/test_architecture.cpp,
 test_router.cpp, test_noise_model.cpp, test_device.cpp).  This file complements
 those by exercising the Python surface end-to-end through Block construction,
 the Engine, and the SamplingResult contract.

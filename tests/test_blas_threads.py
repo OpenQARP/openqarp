@@ -1,4 +1,4 @@
-"""The three ``QARP_BLAS_THREADS`` modes of ``qarp/_blas_threads.py``: OpenBLAS's
+"""The three ``QARP_BLAS_THREADS`` modes of ``src/qarp/_blas_threads.py``: OpenBLAS's
 thread count lowered to qarpx's by default, its parallel jobs on a qarpx-owned
 pool under ``pool``, nothing under ``native``.
 

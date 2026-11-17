@@ -573,7 +573,7 @@ def test_engine_third_party_imports_are_declared_in_the_mps_extra():
         re.split(r"[<>=!\[ ;]", dep)[0].lower().replace("-", "_")
         for dep in project["dependencies"] + project["optional-dependencies"]["mps"]
     }
-    tree = ast.parse((root / "qarp" / "operators" / "_vumpo_network.py").read_text())
+    tree = ast.parse((root / "src" / "qarp" / "operators" / "_vumpo_network.py").read_text())
     imported = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

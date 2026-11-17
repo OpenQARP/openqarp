@@ -324,7 +324,21 @@ def test_adapt_vqe_empty_pool_terminates():
 
 
 def test_adapt_vqd_run_breaks_on_convergence():
-    # AdaptVQD converges on the gradient threshold (no energy-difference
-    # test): the first pool scan is below 1e9, so exactly one iterate runs.
+    # The first pool scan is below gradient_thresh=1e9, so exactly one iterate runs.
     adapt = _adapt_vqd(StateVector(), gradient_thresh=1e9).build()
     assert _count_iterates(adapt) == 1
+
+
+def test_adapt_vqd_run_breaks_on_energy_convergence():
+    # 1st iterate adds an operator; the 2nd sees |dE| < 1e9 and converges.
+    adapt = _adapt_vqd(StateVector(), convergence_thresh=1e9).build()
+    assert _count_iterates(adapt) == 2
+    assert adapt.converged
+    assert len(adapt.iter_energies) == 2
+
+
+def test_adapt_vqd_zero_convergence_thresh_runs_to_max_iter():
+    # No |dE| is below 0 and no gradient below 0: only max_iter stops the run.
+    adapt = _adapt_vqd(StateVector(), convergence_thresh=0.0, gradient_thresh=0.0).build()
+    assert _count_iterates(adapt, max_iter=4) == 4
+    assert not adapt.converged

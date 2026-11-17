@@ -7,9 +7,11 @@ Expected values are written out by hand from the §1 encoding: key tuple
 import copy
 import pickle
 import random
+import typing
 from functools import reduce
 from itertools import product
 from math import cos, prod, sin, sqrt
+from typing import Union
 
 import numpy as np
 import pytest
@@ -31,6 +33,31 @@ _AS_DICT = {(0, 0, 0): 0.2, (1, 1, 0): 0.3, (1, 0, 1): 0.5}
 
 def _dist():
     return SamplingDistribution(_OUTCOMES, _PROBS, 3)
+
+
+def test_primitive_result_is_exported_from_qarp():
+    from qarp import _sampling_distribution
+
+    assert qarp.PrimitiveResult is _sampling_distribution.PrimitiveResult
+    assert "PrimitiveResult" in qarp.__all__
+
+
+def test_primitive_result_annotations_resolve_at_runtime():
+    from qarp.algorithms import PrimitiveAlgorithm
+    from qarp.engines import Engine
+
+    expected = Union[float, complex, SamplingDistribution]
+
+    def user_function() -> qarp.PrimitiveResult:
+        return 0.0
+
+    assert typing.get_type_hints(user_function)["return"] == expected
+    assert typing.get_type_hints(PrimitiveAlgorithm.run)["return"] == expected
+    assert typing.get_type_hints(Engine.run)["return"] == list[expected]
+    assert typing.get_type_hints(Engine.batch_run)["return"] == list[list[expected]]
+    assert typing.get_type_hints(QarpEngine.batch_run)["return"] == list[list[expected]]
+    assert isinstance(_dist(), qarp.PrimitiveResult)
+    assert not isinstance("0", qarp.PrimitiveResult)
 
 
 # ── reading like a dict ─────────────────────────────────────────────────

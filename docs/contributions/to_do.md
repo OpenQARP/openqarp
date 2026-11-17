@@ -7,37 +7,11 @@ entry leaves when it lands.  Anything that needs a plan gets its own
 `<topic>_plan.md` and an index row in [`README.md`](README.md); this file
 never stands in for one.
 
-## Before 0.2.0
-
-0.2.0 is tagged after `lazy_circuit_derivation_plan.md`, the compiled-backend
-type stubs and the repository layout move land, in that order.  These ride
-the same window.
-
-- **`CHANGELOG.md` carries each PR's lines.**  Every PR into `develop`
-  before the release adds its entries under `[Unreleased]`; the release PR
-  only moves them.
-- **`PrimitiveResult` is a public annotation without an export.**
-  `qarp/_types.py` defines it and `PrimitiveAlgorithm.run`, `Engine.run` and
-  `Engine.batch_run` return it, but `qarp.__all__` exports only
-  `SamplingDictionary`.  Export it next to `SamplingDictionary`, or annotate
-  with the public types.
-- **`lambda_factor()` is the last compatibility shim.**
-  `BlockEncodingBlock.lambda_factor` and the projector blocks' copy return
-  `lambda_norm`; `QSVTBlock` is the one caller and `QubitizationBlock` sets
-  an attribute of the same name.  Drop it in the release or keep it for
-  good.
-- **Plan text on the plan-only branch.**  `pauli_engine_plan.md` names an
-  ABI bump 8 → 9; the counter is 16.  Fix when the branch rebases.
-
 ## Breaking changes waiting for a minor release
 
 Each changes a default, a width, a return value or a class shape, so it rides
-a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
+a `0.x` minor with whatever else breaks then.
 
-- **`Engine.batch_run` without an implicit rebuild.**  `rebuild=True` is the
-  default, so every sweep transpiles its primitives again.  Default
-  `rebuild=False`, reusing the prior `build()`, and a `RuntimeError` naming
-  `engine.build` when nothing is built.  Tutorial 03 builds first.
 - **Optimisation stages inside `compile_for_device`.**  The binding takes
   `commands, n_qubits, device, router` and routes the rebased circuit as is.
   Intended pipeline: rebase to the routable set, optimise, route, lower
@@ -58,21 +32,49 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   returns the value for `c = 1`.  Apply `abs(coefficient)` where the
   primitive can express it, reject a non-unit modulus where it cannot; §18
   oracles for both.
-- **Shadow confidence from the actual batch count.**  `ShadowEstimate.delta`
-  stores the requested value even when `n_batches` overrides the count it
-  implies, and at `n_batches=1` the bound `2e^{-K/2}` exceeds 1.  Report
-  the achieved confidence `min(1, 2e^{-K/2})` from the actual `K`.  A public
-  field changes meaning.
-- **`HEABlock` as a tree.**  `qarp/blocks/_primitives/hea_block.py` builds
+- **`HEABlock` as a tree.**  `src/qarp/blocks/_primitives/hea_block.py` builds
   it as a `SimpleBlock` leaf; its layers are a composition that a
   `CompositeBlockBase` tree expresses.  `isinstance` answers change; ships
   with the symbol-contract regression test.
 - **`Consumes.OBSERVABLE` on the engine boundary.**
   `pauli_engine_plan.md` adds the member and makes `StateVector.consumes` a
   property, so a third-party engine that dispatches on `consumes` adapts.
+- **Shadow error bar from a certified variance.**  `ShadowEstimate.error`
+  puts the empirical `V_hat` where HKP Theorem 1 needs the true variance.
+  On an observable driven by rare outcomes `V_hat` is usually 0, and so is
+  the bar: `X = 100` with probability `1e-4` over 200 settings misses at
+  `K = 8` 98 % of the time against a reported `delta` of 0.037.  Bound the
+  variance from above instead, by the shadow norm (state-independent) or a
+  confidence bound on `V_hat`.  The same change can report the tighter
+  failure bound the half-width already earns: Chebyshev gives each batch
+  mean `1/34`, so a median of `K` fails at most `P[Bin(K, 1/34) >=
+  ceil(K/2)]`, `2.9e-2` at `K = 1` and `4.8e-5` at `K = 8` against HKP's
+  1 and 0.037.  Both change the reported values: `error` widens, and
+  `delta` stops being HKP's bound, so a public field changes meaning.
+  §18 oracles for each.
 
 ## Additive, no window needed
 
+- **A `CHANGELOG.md` line in the PR checklist.**  Nothing asks a PR for its
+  `[Unreleased]` entry: `CONTRIBUTING.md` and the PR template do not mention
+  the changelog, so a feature can merge without one and the release PR
+  writes it by hand.  Add an author checkbox to both paths of
+  `.github/PULL_REQUEST_TEMPLATE.md`, struck through for a PR with no
+  user-visible change.
+- **Plan text on the plan-only branch.**  `pauli_engine_plan.md` names an
+  ABI bump 8 → 9; the counter is 18.  It names paths under `qarp/` and
+  `cpp/libqarpx/`; the trees are `src/qarp/` and `src/qarpx/`.  Fix when
+  the branch rebases.
+- **Installation docs traps, from a clean-clone walk-through.**  "Checking it
+  worked" runs `pytest` after a plain `pip install .`, which installs no
+  pytest, and sends C++ tests to `bootstrap_qarpx.py --with-tests`, which
+  refuses beside a pip install; the route that works is
+  `cmake -S src/qarpx -B src/qarpx/build -DQARP_BUILD_TESTS=ON` then
+  `scripts/run_cpp_tests.py`, and the script's hint should say so.  On macOS
+  every re-run of `pip install -e` needs the `OpenMP_ROOT` define again or
+  the backend silently rebuilds serial.  `build_docs.sh` says one intersphinx
+  warning remains; the build shows nineteen duplicate-description warnings
+  for `SamplingDistribution`, documented twice on `docs/api/qarp.rst`.
 - **`OqtopusEngine` checks the device basis at construction.**  The
   transport's `get_device` serves the topology JSON only and
   `device_from_oqtopus` assumes `x, sx, rz, cx`, so a device with another
@@ -81,8 +83,8 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   developers plan to have the gateway publish its supported gates.  Once it
   does, widen `get_device` to carry that list, have `LocalOqtopusTransport`
   serve the `sx_rz` set by default, and raise `CapabilityError` when the
-  four are not all present.  Start at `qarp/engines/_oqtopus/_transport.py`
-  and `qarp/devices/_oqtopus.py`.
+  four are not all present.  Start at `src/qarp/engines/_oqtopus/_transport.py`
+  and `src/qarp/devices/_oqtopus.py`.
 - **`OqtopusEngine` checks the device's shot limit before submitting.**
   The gateway reports `max_shots` but nothing enforces it, and the cloud
   device record does not carry it, so an `n_shots` above the device's limit
@@ -90,14 +92,14 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   and submit-time validation.  Once the record carries it, have
   `get_device` pass it through and raise `CapabilityError` at `build` when a
   primitive's resolved shots exceed it; no fixed cap, the limit varies by
-  device.  Start at `qarp/engines/_oqtopus/_transport.py` (`oqtopus_plan.md`
+  device.  Start at `src/qarp/engines/_oqtopus/_transport.py` (`oqtopus_plan.md`
   open item 8).
 - **Refuse readers of the per-shot register on a counts-only engine.**
   `CuttingPrimitive` and the QPD path read `cbit_history`, which
   `OqtopusEngine` leaves empty, and raise `RuntimeError` at `run`, after the
   job has run.  Add `requires_cbit_history` on the two primitives and
   `provides_cbit_history` on engines, checked in `Engine.build` next to the
-  `requires_noiseless` check in `qarp/engines/_engine.py`; the engines
+  `requires_noiseless` check in `src/qarp/engines/_engine.py`; the engines
   package cannot name the primitives (`test_layering.py`).
 - **`QARP_BLAS_THREADS` default on bare metal.**  The `limit` default
   and the pool's standing as opt-in rest on WSL2 timings, where OpenBLAS
@@ -105,20 +107,17 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   `openblas_thread_sharing_plan.md` on bare-metal Linux and revisit the
   default from them.
 - **`check_untyped_defs` for `tests/`.**  `compiled_backend_stubs_plan.md`
-  turns it on for `qarp/` only, so unannotated test bodies, which is nearly
+  turns it on for `src/qarp/` only, so unannotated test bodies, which is nearly
   every test, are still unchecked.  It reports 762 errors in 134 test files
   on macOS, 416 of them `arg-type`.  It touches nearly half the test files,
-  so it gets its own plan; land it after the layout move, which would
-  otherwise conflict with it across them.
+  so it gets its own plan.
 - **`qarp` typed for its users.**  `qarp` ships no `py.typed`, so user code
   sees it untyped.  Running mypy over the example notebooks and the docs
-  snippets finds five gaps to close before it does: a list of Python blocks
+  snippets finds four gaps to close before it does: a list of Python blocks
   of different kinds infers as `list[_BlockMixin]`, which a
   `Sequence[QarpBlock]` parameter rejects, so the six classes need one
-  shared typing base; `symbols` is `Optional`, so `len(block.symbols)` fails
-  in 22 notebook cells and 3 docs snippets, and making it always a tuple
-  changes `symbols is None` checks; `PreparesKnownState`'s members are
-  attached by `setattr`, so mypy sees none of them on the state blocks;
+  shared typing base; `PreparesKnownState`'s members are attached by
+  `setattr`, so mypy sees none of them on the state blocks;
   `run()` returns `PrimitiveResult`, `float | complex | SamplingDistribution`,
   so 45 notebook and docs sites must narrow a result before reading it, which
   a return typed by primitive kind would remove; and a `MonteCarlo` walker's
@@ -129,7 +128,7 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   carries `n_shots` the same way.  Post-selected qubits must be measured and
   leave the key.
 - **`QarpEngine`'s plan cache is bounded by count, not size.**
-  `_PLAN_CACHE_SIZE` (`qarp/engines/_qarp_engine.py`) keeps 64 programs of
+  `_PLAN_CACHE_SIZE` (`src/qarp/engines/_qarp_engine.py`) keeps 64 programs of
   the built path, whatever their tables weigh: sixteen distinct 22-qubit
   permutation circuits held 517 MB after every primitive was gone, and 64
   such tables at 26 qubits reach 32 GB.  Bound it by the bytes its
@@ -140,7 +139,7 @@ a `0.x` minor with whatever else breaks then; none is close enough for 0.2.0.
   parametric ket is flattened only to be declined.  A cache would need a
   key for an unbuilt composition, which has no stream to digest.
 - **A parametric planned program copies its tables on every binding.**
-  `Program::substituted` (`cpp/libqarpx/src/simulator/program.cpp`) copies
+  `Program::substituted` (`src/qarpx/src/simulator/program.cpp`) copies
   every permutation table and dense matrix by value, and `QarpEngine`
   substitutes a parametric program once per `run(params)` and per
   `batch_run` set.  Structural kernels never hold a parameter, so a built

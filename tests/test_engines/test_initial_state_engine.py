@@ -149,6 +149,7 @@ def test_batch_run_finite_shots_samples_from_the_seeded_state():
     b.ry(0, theta)
     sampler = Sampler(ket=b, initial_state=np.array([0.0, 1.0], dtype=complex))
     eng = QarpEngine(seed=11)
+    eng.build([sampler])
     at_zero, at_pi = eng.batch_run([sampler], [{"theta": 0.0}, {"theta": np.pi}], n_shots=100)
     assert dict(at_zero[0]) == {(1,): 1.0}
     assert dict(at_pi[0]) == {(0,): 1.0}

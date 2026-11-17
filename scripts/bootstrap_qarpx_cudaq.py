@@ -44,7 +44,7 @@ import sysconfig
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LIBQARPX = REPO_ROOT / "cpp" / "libqarpx"
+LIBQARPX = REPO_ROOT / "src" / "qarpx"
 DEFAULT_BUILD_DIR = LIBQARPX / "build-cudaq-wheel"
 
 GPU_BACKEND = "nvqir-custatevec-fp64"
@@ -162,7 +162,7 @@ def check_not_shadowed() -> None:
         f"      import qarpx  →  {origin}\n"
         "  That module always wins over the .pth this script writes, so the\n"
         "  CUDA-Q build would be silently ignored.  Build CUDA-Q through pip\n"
-        "  instead (see the GPU note in README 'Installation'):\n"
+        "  instead (see the GPU note in README 'Install'):\n"
         "      pip install -e . --no-build-isolation -C build-dir=build-cudaq \\\n"
         "        -C cmake.define.QARP_WITH_CUDAQ=ON ...\n"
         "  or `pip uninstall openqarp` and re-run this script."
@@ -180,7 +180,8 @@ def register(build_dir: Path) -> None:
         _fail(f"site-packages directory not found at {site_dir}")
     pth = site_dir / "qarpx-dev.pth"
     try:
-        pth.write_text(str(pymod) + "\n")
+        # src/ holds the qarp package.
+        pth.write_text(f"{pymod}\n{REPO_ROOT / 'src'}\n")
     except PermissionError:
         _fail(
             f"cannot write to {pth} — looks like a system Python.\n"

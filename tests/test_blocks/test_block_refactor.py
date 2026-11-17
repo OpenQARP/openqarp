@@ -155,7 +155,6 @@ class _SymRx(SimpleBlock):
 def test_sympy_symbols_collected_at_build():
     s = _SymRx(1)
     s.build()
-    assert s.symbols is not None
     assert [str(sym) for sym in s.symbols] == ["theta"]
 
 

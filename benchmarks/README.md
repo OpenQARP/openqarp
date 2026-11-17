@@ -6,7 +6,7 @@ pennylane, pytket, qulacs, and cirq.  Generated tables:
 
 ## Ground rules
 
-- **Bench-only dependencies (§15).**  Nothing under `qarp/` or `cpp/` imports
+- **Bench-only dependencies (§15).**  Nothing under `src/` imports
   this package or any competitor SDK; `benchmarks/` imports `qarp` one-way.
   Deps: `pip install -e ".[full-dev,integrations,bench]"`.
 - **Every row carries a correctness check.**  Each workload reduces its result

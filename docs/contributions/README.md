@@ -108,8 +108,9 @@ cut.
 **First post-launch window** — cleanup with no public surface change, cleared
 before any layout move.  The configuration and agent-guide tidy-up.
 
-**The 0.2 cycle** — layout, so paths break once rather than twice.  The `src/`
-source root and the `cpp/` flattening.  `Sampler` also returns a read-only
+**The 0.2 cycle** — layout, so paths break once rather than twice: `src/qarp/`
+and `src/qarpx/` under one source root
+([`repo_layout_plan.md`](repo_layout_plan.md)).  `Sampler` also returns a read-only
 `SamplingDistribution` from this cycle
 ([`sampler_distribution_plan.md`](sampler_distribution_plan.md)), which breaks
 `isinstance(result, dict)` and mutating a result.  The compiled backend
@@ -142,10 +143,16 @@ something else, parked until they are picked up.
 
 | Plan | Theme |
 |---|---|
+| [`batch_run_no_implicit_rebuild_plan.md`](batch_run_no_implicit_rebuild_plan.md) | `Engine.batch_run` reuses the prior build by default and raises on a primitive that was never built |
 | [`compiled_backend_stubs_plan.md`](compiled_backend_stubs_plan.md) | Ship type stubs for `qarpx` and type-check `qarp` against them |
 | [`lazy_circuit_derivation_plan.md`](lazy_circuit_derivation_plan.md) | Primitives derive circuits lazily; declared structure planned inside `Engine.build`; `Target` below the engine layer |
 | [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator |
 | [`oqtopus_plan.md`](oqtopus_plan.md) | `OqtopusEngine`, the first remote engine, over `oqtopus-client`; `sx_rz` rebase target; `SamplingResult` constructor |
+| [`qmc_gpu_plan.md`](qmc_gpu_plan.md) | Persistent GPU Monte Carlo with exact transitions and resident signed evolution |
+| [`qmc_measurement_layouts_plan.md`](qmc_measurement_layouts_plan.md) | Reusable grouped transition layouts and general commuting measurement bases |
+| [`qsci_plan.md`](qsci_plan.md) | Quantum-selected configuration interaction (QSCI / SQD): diagonalize the Hamiltonian in sampled configurations |
+| [`repo_layout_plan.md`](repo_layout_plan.md) | `src/qarp/` and `src/qarpx/` under one source root; paths break once, in 0.2 |
 | [`sampler_distribution_plan.md`](sampler_distribution_plan.md) | `Sampler` returns an array-backed read-only `SamplingDistribution` |
 | [`sampling_distribution_utilities_plan.md`](sampling_distribution_utilities_plan.md) | Analysis utilities and shot metadata on `SamplingDistribution` |
 | [`structured_execution_plan.md`](structured_execution_plan.md) | Execute block structure (permutations, dense kernels, controlled powers) as typed kernels |
+| [`symbols_always_tuple_plan.md`](symbols_always_tuple_plan.md) | `.symbols` is a tuple on every block that has a registry and a `RuntimeError` before |

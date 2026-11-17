@@ -7,6 +7,7 @@
    :show-inheritance:
 
 .. autodata:: qarp.EXACT
+.. autodata:: qarp.PrimitiveResult
 .. autodata:: qarp.SamplingDictionary
 .. autoclass:: qarp.SamplingDistribution
    :members: outcomes, probabilities, n_bits_measured, n_shots, probability_of, to_dict,

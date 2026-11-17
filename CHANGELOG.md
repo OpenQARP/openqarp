@@ -2,11 +2,38 @@
 
 All notable changes to OpenQARP are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/).
+[Semantic Versioning](https://semver.org/); `RELEASING.md` gives how it reads
+`0.x` versions.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
 ### Added
+
+- `qarp.algorithms.QSCI`, quantum-selected configuration interaction.  It
+  samples one block or a sequence of blocks in the computational basis, or
+  takes a `distribution` gathered elsewhere, keeps the most frequent
+  configurations of the `n_electrons` sector and diagonalizes the
+  Hamiltonian exactly in the subspace they span.  `max_subspace_dim` and
+  `prob_threshold` bound the selection, `n_roots` sets how many eigenpairs
+  `run()` returns, and a sequence of time-evolved blocks gives the
+  time-averaged TE-QSCI.  See
+  `examples/algorithms/composite/mwe_qsci.ipynb`.
+- `qarp.algorithms.AggregatedMonteCarlo` and `ResidentEvolutionConfig`:
+  Monte Carlo that holds all walkers on a basis label as one signed
+  population and keeps exact FP64 transition columns on the GPU across
+  steps and trajectories.  It needs a `CudaqEngine` in its default
+  StateVector/FP64 configuration and a build with
+  `QARP_WITH_CUDAQ_SEMICLASSICAL=ON`, which is off by default;
+  `qx.montecarlo_available()` reports it.  `MonteCarlo` is unchanged.  See
+  the *Native aggregated Monte Carlo* section of the installation page and
+  `examples/algorithms/composite/mwe_montecarlo_gpu.ipynb`.
+- `qarp.operators.ComputationalBasisSector`: disjoint qubit partitions with
+  fixed Hamming weights, with `contains`, `dimension`, `labels`,
+  `sample_labels` and `spin_resolved`.
+- `TrotterAnsatzBlock.generator_groups()`: the commuting Pauli groups of
+  each generator before Suzuki scaling, read without building the block.
 
 - Structured execution.  `Block.statevector` and `QarpEngine`'s sampling
   paths read the block tree and run each piece as the cheapest exact kernel:
@@ -47,9 +74,26 @@ All notable changes to OpenQARP are recorded here. The format follows
   `parameter_map`).  It works with `isinstance`.
 - `qx.__with_symengine__`: whether the build has symbolic coefficients.
 - A `ConditionalBlock` with only an `else_body`: pass `then_body=None`.
+- `qarp.PrimitiveResult`, returned by `PrimitiveAlgorithm.run` and the
+  element type of `Engine.run` and `Engine.batch_run`: a `float`, a
+  `complex` or a `SamplingDistribution`.
 
 ### Changed
 
+- The Python package lives at `src/qarp/` and the C++ project at
+  `src/qarpx/`; `cpp/libqarpx/` is gone.  Import names, module paths and the
+  wheel are unchanged.  A checkout re-runs its editable install with the same
+  options in every worktree, configures CMake with `-S src/qarpx`, and reads
+  the stub from `src/qarpx/python/qarpx.pyi`.  Until the install is redone,
+  `import qarp` fails with `FileNotFoundError` for `qarp/__init__.py`.
+  Delete the old checkout's leftover `cpp/` and `qarp/` trees; both are
+  ignored, so `git status` does not show them.
+- `Engine.batch_run` reuses the circuits a prior `build()` compiled, with
+  `rebuild=False` the default, and raises `RuntimeError` for a primitive that
+  has circuits but none compiled: build first, or pass `rebuild=True`, which
+  compiles every primitive afresh.  A sweep after `build()` on an unchanged
+  engine no longer recompiles.  A sweep no longer changes the primitives
+  `run()` and `run_gradient()` evaluate: they stay those of the last `build()`.
 - `Sampler` and `PostSelection.apply` return a `SamplingDistribution`
   instead of a `dict`, and `SamplingDictionary` is a read-only `Mapping`
   alias.  `isinstance(result, dict)` and mutating a result no longer work;
@@ -85,6 +129,11 @@ All notable changes to OpenQARP are recorded here. The format follows
 - `is_built` is a read-only property on raw `qx` blocks, as on the Python
   blocks.  `b.is_built()` and `qx.Block.is_built(b)` become `b.is_built`.
 - `build()` on a raw `qx` block returns the block instead of `None`.
+- `block.symbols` is a tuple on every block that has a registry, and reading
+  it before the block has one raises `RuntimeError` where it returned `None`:
+  build the block, or declare its symbols in the constructor.  A
+  `block.symbols is None` probe for built-ness is `not block.is_built`, and
+  code that narrowed the `Optional` can stop.
 - A gate method, or `set_commands` with any command, called on a block
   that holds other blocks (composite, controlled, conditional) raises
   `TypeError`; the gate was recorded and never run.  Add it to a block it
@@ -126,17 +175,52 @@ All notable changes to OpenQARP are recorded here. The format follows
   no longer applies, and a call the stub does not describe (an `np.int64`
   qubit index, an attribute set on a block) is reported.  To opt out, set
   `follow_imports = skip` and `follow_imports_for_stubs = True` for `qarpx`.
-- The `qarpx` ABI is 15.  An editable checkout reinstalls after pulling,
+- The `qarpx` ABI is 17.  An editable checkout reinstalls after pulling,
   or `import qarp` refuses the old build.
+- `ShadowEstimate.delta` is an upper bound on the failure probability at
+  the estimate's `n_batches`, today HKP's `min(1, 2 e^{-K/2})`, instead of
+  the `delta` that was requested: an explicit `n_batches`, or a family
+  estimated with `expval_many`, changed the count without changing the
+  field.  At `n_batches=1` the formula exceeds 1, so the field reports 1.
+  An exact constant reports 0 and `n_batches=1`.  An estimate from
+  `expval_many` carries its own bound, at most `delta / M`, where it
+  carried the family's `delta`; the family's joint bound is
+  `min(1, sum(r.delta for r in results))`.  `expval` and `expval_many`
+  check `delta` even when `n_batches` is given, and reject `n_batches < 1`
+  for a constant too.  The `n_batches` that `expval` and `expval_many`
+  derive from `delta` can be one higher, where float rounding of the log
+  left the bound a few ulp above `delta / M`.
 
 ### Removed
 
 - `Engine.prepare_structured_qpe`, `StructuredQPEPlan` and the
   `QarpSimulator.simulate_qpe_structured` and `simulate_dosqpe_structured`
   bindings.  Structured execution covers their case for any block.
+- `BlockEncodingBlock.lambda_factor()` and the same method on the LCU
+  projector blocks; read `lambda_norm`, the value they returned.
+  `QubitizationBlock.lambda_factor` is `lambda_norm`, the name its `BE`
+  uses.
 
 ### Fixed
 
+- `StateVector` with a Z-only observable no longer builds the full
+  `2**n` diagonal at build.  The first host-side evaluation builds it once,
+  in O(n·2^n) with float64 storage for real coefficients, and later runs
+  reuse it; `CudaqEngine`'s expectation path never builds it.  At 20 qubits
+  and 435 terms a build drops from 1.7 s to under a millisecond and the
+  diagonal takes 24 ms on a laptop.
+- `typing.get_type_hints` resolves annotations that use `PrimitiveResult`,
+  among them `Engine.run` and `Engine.batch_run`, instead of raising
+  `NameError`.  `isinstance(x, qarp.PrimitiveResult)` works for a
+  `SamplingDistribution`.
+- Circuits compiled by `Engine.build(params=...)` are reused only under the
+  same binding: `build(params=..., rebuild=False)` with new values and a
+  sweep after a bound build used the old values.  `run()` or
+  `run_gradient()` naming a bound symbol raises `ValueError` instead of
+  dropping its value.
+- `AdaptVQD` stops once the energy changes by less than
+  `convergence_thresh` between iterations, as `AdaptVQE` does; it ignored
+  the argument and ran until the gradient threshold or `max_iter`.
 - `QPEBlock` and `DOSQPEBlock` place a copy of the eigenstate block, so one
   state block can serve two QPE blocks; sharing it corrupted the first.
 - `build(rebuild=False)` and `batch_run(rebuild=False)` reuse a primitive's
@@ -211,6 +295,7 @@ First public release.  Distributed on PyPI as `openqarp`; the import name
 is `qarp`.  Pre-release history from the internal repository is not carried
 over; this file records changes from 0.1.0 onward.
 
-[Unreleased]: https://github.com/OpenQARP/openqarp/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/OpenQARP/openqarp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/OpenQARP/openqarp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/OpenQARP/openqarp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/OpenQARP/openqarp/releases/tag/v0.1.0

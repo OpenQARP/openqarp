@@ -14,8 +14,8 @@
 > new sections instead.
 
 The numerical contract is pinned by tests: the per-gate unitary tests in
-`tests/cpp/test_gate_unitaries.cpp` and the dagger round-trip tests in
-`tests/cpp/test_dagger_round_trip.cpp` assert exactly the matrices and behaviours specified
+`src/qarpx/tests/test_gate_unitaries.cpp` and the dagger round-trip tests in
+`src/qarpx/tests/test_dagger_round_trip.cpp` assert exactly the matrices and behaviours specified
 here, and the OpenQASM 3 emitter (§12) produces output that — when re-parsed — yields the same
 unitaries.
 
@@ -26,7 +26,7 @@ The load-bearing rules in one place; details in the linked sections.
 | Rule | Where |
 |------|-------|
 | Import as `import qarpx as qx`; every Python block **is** a C++ `qarpx::Block` subclass (annotate with `AnyBlock`, or `QarpBlock` where Python-only members are read) | §13 |
-| No `pytket` (or any SDK) in `qarp/` code paths; not a runtime or `[full-dev]` dependency — test-only `[integrations]` extra | §15 |
+| No `pytket` (or any SDK) in `src/qarp/` code paths; not a runtime or `[full-dev]` dependency — test-only `[integrations]` extra | §15 |
 | **Endianness is LSB** — qubit 0 is the least-significant bit and the first statevector element | §1 |
 | **Rotations are `exp(-iθP/2)`; all angles in radians**; `Rz(θ) = e^{-iθ/2}·P(θ)` | §2.3–§2.4 |
 | **Two-qubit ordering: `q0 = control, q1 = target`** | §3.1 |
@@ -43,9 +43,9 @@ The load-bearing rules in one place; details in the linked sections.
 
 - Qubit indices in `Command::qubits` are **0-indexed**.
 - Qubit 0 is the **least significant bit (LSB)** of measurement outcomes. A 3-qubit measurement that yields integer `6 = 0b110` corresponds to `(q2=1, q1=1, q0=0)`.
-- Reading order: binary *notation* is written MSB-first, so in `0b110` the digit for qubit 0 is the **rightmost** one. Bitstring *containers* (sampler keys, ONVs, basis-state lists, `ControlledBlock.ctrl_state` — §6) are LSB-first, with qubit 0 as the **first** element: `6 = 0b110` ↔ `(0, 1, 1)`. Converting between the two requires a reversal — use `label_to_bits` / `bits_to_label` from `qarp/endianness.py` rather than `int("".join(...), 2)` or `bin(...)`, which silently bit-reverse.
+- Reading order: binary *notation* is written MSB-first, so in `0b110` the digit for qubit 0 is the **rightmost** one. Bitstring *containers* (sampler keys, ONVs, basis-state lists, `ControlledBlock.ctrl_state` — §6) are LSB-first, with qubit 0 as the **first** element: `6 = 0b110` ↔ `(0, 1, 1)`. Converting between the two requires a reversal — use `label_to_bits` / `bits_to_label` from `src/qarp/endianness.py` rather than `int("".join(...), 2)` or `bin(...)`, which silently bit-reverse.
 - The statevector layout is the standard Kronecker product with qubit 0 innermost: `|q_{n-1} … q_1 q_0⟩` is enumerated in column-major order over the qubit registers, i.e. amplitude index `i = Σ_k 2^k · b_k` where `b_k` is the bit value of qubit `k`.
-- Operator matrices: `QubitOperator.sparse_matrix()` / `FermionOperator.sparse_matrix()` realize in this LSB convention and are the **only** matrix API in `qarp.operators` — directly contractable with qarpx statevectors and unitaries, no conversion anywhere in qarp. openfermion's MSB layout (qubit 0 = most significant bit, shared by cirq/pennylane) is available only as `qarp.operators.compat.get_sparse_operator`, for interop. Crossing an *external* MSB boundary (an openfermion/cirq/pennylane matrix or statevector) uses the bit-reversal helpers in `qarp/endianness.py`.
+- Operator matrices: `QubitOperator.sparse_matrix()` / `FermionOperator.sparse_matrix()` realize in this LSB convention and are the **only** matrix API in `qarp.operators` — directly contractable with qarpx statevectors and unitaries, no conversion anywhere in qarp. openfermion's MSB layout (qubit 0 = most significant bit, shared by cirq/pennylane) is available only as `qarp.operators.compat.get_sparse_operator`, for interop. Crossing an *external* MSB boundary (an openfermion/cirq/pennylane matrix or statevector) uses the bit-reversal helpers in `src/qarp/endianness.py`.
 - Cross-references: `core/command.h`, `simulator/qarp_simulator.h`, `simulator/sampling_result.h`, `operators/sparse.h`.
 
 ## 2. Single-qubit gates
@@ -96,7 +96,7 @@ U(θ, φ, λ) = [[ cos(θ/2),                  -e^{iλ}     · sin(θ/2)],
 
 `U` is the only general single-qubit `GateType`. The legacy OpenQASM `U2(φ, λ)` shorthand has no dedicated `GateType` — it is constructed as `U(π/2, φ, λ)`. The Python layer may expose a `u2(q, φ, λ)` convenience constructor, but the IR carries only `U`.
 
-The analytic 2×2 form lives in `cpp/libqarpx/src/transpiler/fusion.cpp` and matches OpenQASM 3 exactly.
+The analytic 2×2 form lives in `src/qarpx/src/transpiler/fusion.cpp` and matches OpenQASM 3 exactly.
 
 ### 2.6 sqrt-X pair `SX`/`SXdg` and the identity `Id`
 
@@ -178,7 +178,7 @@ i.e. eigenvalue `e^{-iθ/2}` for the `+1` eigenstates of `Z⊗Z` (`|00⟩`, `|11
 `CCX(c0, c1, t)` — first two qubits are controls, last is target.
 `CSWAP(c, q0, q1)` — first qubit is control, last two are swapped.
 
-Both match the OpenQASM 3 stdgates definitions. Decompositions are pinned in `cpp/libqarpx/src/transpiler/decompositions.cpp`.
+Both match the OpenQASM 3 stdgates definitions. Decompositions are pinned in `src/qarpx/src/transpiler/decompositions.cpp`.
 
 ## 5. Multi-controlled gates
 
@@ -207,7 +207,7 @@ where `ctrl_bits(k) = k & (2^n − 1)` and `inner_idx(k) = k >> n`.
 
 This contract is implementation-independent: the wrapper is free to pick any equivalent decomposition (single-controlled standard gates, recursive Barenco for multi-control, etc.). The unitary above is what `QarpSimulator::unitary_matrix` returns regardless of the lowering path.
 
-Tests pinning the contract: `tests/cpp/test_controlled_block_unitaries.cpp`.
+Tests pinning the contract: `src/qarpx/tests/test_controlled_block_unitaries.cpp`.
 
 ### 6.2 Supported inner-gate basis
 
@@ -309,7 +309,7 @@ canonical form to a different circuit's symbols).
 
 ## 11. Canonical decompositions
 
-The lowering rules in `cpp/libqarpx/src/transpiler/decompositions.cpp`. Every one is
+The lowering rules in `src/qarpx/src/transpiler/decompositions.cpp`. Every one is
 phase-exact: each emits the compensating `GPhase` that makes the identity hold on the
 nose, not merely up to phase (§9, §16). Products are written in circuit (time) order:
 the leftmost factor is applied first.
@@ -391,7 +391,7 @@ C++ API.
 
 ### 12.1 OpenQASM 3
 
-The `qarpx::QASM3Emitter` (in `cpp/libqarpx/include/qarpx/emit/qasm3_emitter.h`) takes a flattened command sequence plus a qubit count and produces an OpenQASM 3 program string. Mapping rules:
+The `qarpx::QASM3Emitter` (in `src/qarpx/include/qarpx/emit/qasm3_emitter.h`) takes a flattened command sequence plus a qubit count and produces an OpenQASM 3 program string. Mapping rules:
 
 | qarpx | OpenQASM 3 (`stdgates.inc`) |
 |-------|------------------------------|
@@ -430,7 +430,7 @@ concretizes it on read.)
 
 ### 12.2 OpenQASM 2
 
-The `qarpx::QASM2Emitter` (in `cpp/libqarpx/include/qarpx/emit/qasm2_emitter.h`) produces an OpenQASM 2.0 program string; `qarpx::QASM2Absorber` reads one back. `Block.to_qasm2()` / `SimpleBlock.from_qasm2()` are the Python surface, `Block.to_qasm3()` / `SimpleBlock.from_qasm3()` the OpenQASM 3 one. **The dialect is always in the method name.** The two languages carry different things — QASM 2 refuses symbolic parameters, `GPhase` and `MCZ`, QASM 3 takes all three — so a call site that does not name its version hides which capability envelope it got, and no longer matches the `can_emit_to("qasm2")` / `can_emit_to("qasm3")` pre-flight that guards it.
+The `qarpx::QASM2Emitter` (in `src/qarpx/include/qarpx/emit/qasm2_emitter.h`) produces an OpenQASM 2.0 program string; `qarpx::QASM2Absorber` reads one back. `Block.to_qasm2()` / `SimpleBlock.from_qasm2()` are the Python surface, `Block.to_qasm3()` / `SimpleBlock.from_qasm3()` the OpenQASM 3 one. **The dialect is always in the method name.** The two languages carry different things — QASM 2 refuses symbolic parameters, `GPhase` and `MCZ`, QASM 3 takes all three — so a call site that does not name its version hides which capability envelope it got, and no longer matches the `can_emit_to("qasm2")` / `can_emit_to("qasm3")` pre-flight that guards it.
 
 | qarpx | OpenQASM 2 (`qelib1.inc`) |
 |-------|----------------------------|
@@ -503,7 +503,7 @@ Two further branch shapes are rejected, and by a different mechanism: the gramma
 
 ## 13. Block & circuit-construction conventions
 
-How circuits are built in the Python layer (`qarp/blocks/`), on top of the numerical contract
+How circuits are built in the Python layer (`src/qarp/blocks/`), on top of the numerical contract
 above.
 
 - **Block is a C++ subclass.** Every Python block class is a real subclass of its `qarpx`
@@ -591,6 +591,16 @@ How circuits run.
   engine runs **rebase → route → re-rebase → simulate**; both rebase passes are skipped when no
   gate set is set. `compile_for_device(block, device)` is the standalone, non-executing helper (a
   Python wrapper with `(block, device)` and `(commands, n_qubits, device)` forms).
+- **Stateful Monte Carlo ownership.** `AggregatedMonteCarlo` obtains its
+  simulator through `Engine._resident_simulator(n_qubits)`, implemented by
+  `CudaqEngine`, without a host statevector-width cap. Batched transformed
+  columns, CSR compaction and sector gathering belong to the simulator layer.
+  `qarpx::montecarlo` owns resident walker evolution, transport and result
+  records. The engine's simulator lends opaque lifetime-safe resource leases; a
+  lease prevents reconfiguration, and a use guard serializes access with
+  simulator runs. Leases remain valid after simulator move/destruction. Native
+  MC executes no primitives; engines lacking the resident capability raise
+  `CapabilityError`.
 - **Routing defaults to SABRE, correctness-first.** `RouterKind.Sabre` — DAG front-layer SABRE
   with lookahead + decay heuristics and reverse-traversal initial-mapping search (skipped when an
   explicit `initial_mapping` is supplied), with a portfolio guarantee of never using more SWAPs
@@ -649,6 +659,13 @@ How circuits run.
 - **CUDA-Q is build-gated.** Off unless `QARP_WITH_CUDAQ=ON`; CPU-only builds compile a throwing
   stub with `available()==false`. Backend + precision are chosen by the `CUDAQ_DEFAULT_SIMULATOR`
   env var (read once per process), not `cudaq::set_target`.
+- **Native Monte Carlo is separately build-gated.**
+  `QARP_WITH_CUDAQ_SEMICLASSICAL` defaults OFF and requires `QARP_WITH_CUDAQ`,
+  CUDA C++20 and development cuStateVec with batched matrix support. Disabled
+  builds expose host records and `montecarlo_available() == False`; numerical
+  evolution factories and `CudaqSimulator.make_transition_column_provider` raise
+  `CapabilityError`. The column factory uses the same gate and
+  `montecarlo_available()` probe, including for consumers outside MC.
 - **`CapabilityError` is the engine-capability exception.** An engine that cannot honor a
   request (true mid-circuit measurement, `initial_state`, `n_shots=EXACT`, device
   capacity / routing / rebase failures at compile, an undeclared gradient method, …) raises
@@ -666,6 +683,13 @@ How circuits run.
   prime stride keeps `QarpEngine.batch_run`'s per-set `+i` offsets from colliding: set 0
   draws `run()`'s seeds, and each later set steps every circuit's seed by its index.
   `CudaqEngine`'s sweep seeds each circuit once and draws every set from that stream.
+- **Resident walker seeds are event-keyed.** Native MC uses Philox streams keyed
+  by root seed, trajectory, step and event. Host proposal destinations use a
+  local NumPy Generator derived from the same root and trajectory with a
+  separate proposal tag. Neither stream uses executed-circuit prime-stride seeds
+  or mutates a process-wide RNG. Repeated explicit seeds reproduce a trajectory
+  within one backend/configuration; CPU and GPU tapes need not match.
+  `seed=None` generates a fresh root seed recorded in diagnostics.
 - **`initial_state` support is declared, and enforced in validation.** A primitive carrying
   `initial_state` is rejected in `Engine._validate_primitive` unless the *primitive* declares
   `accepts_initial_state` **and** the engine sets `supports_initial_state` — both guards live
@@ -697,7 +721,7 @@ How circuits run.
 - **Structured execution.**  `Block.statevector` and `QarpEngine`'s sampling paths (the
   sample-once `run` path and `EXACT` readout, and `batch_run`, which evaluates each set as
   `run` does) lower a block tree to a `qx.Program` of typed kernels where that is cheaper
-  than its gates (`qarp/_program.py`, `simulator/program.cpp`).  Kernels:
+  than its gates (`src/qarp/_program.py`, `simulator/program.cpp`).  Kernels:
   `Gates` (a verbatim slice of the gate stream, dispatched and fused as above),
   `Permutation` (`|x⟩ → |table[x]⟩` on listed qubits, one gather; adjacent ones compose
   into one table up to 26 qubits, and two on the same qubits merge across kernels on other
@@ -768,9 +792,14 @@ How circuits run.
   plans the built block as above.  Each circuit compiles to one `CompiledCircuit` on its
   primitive (`prim.compiled`): the gate stream, empty for a circuit lowered this way, its
   program, the simulator width and the routing layout, stamped with the engine settings it
-  was compiled under; `build(rebuild=False)` reuses a primitive's circuits only under an
-  equal stamp.  `QarpEngine` runs a counts circuit through its program, or its gate stream
-  as one `Gates` kernel when the stream needs no trajectory (no noise, no mid-circuit
+  was compiled under, and the `build(params=)` binding baked into it; `build(rebuild=False)`
+  reuses a primitive's circuits only under an equal stamp and binding, and `run` or
+  `run_gradient` naming a bound symbol is a `ValueError`.  `batch_run` reuses them by default,
+  recompiles a bound build, and raises `RuntimeError` naming `engine.build` for a primitive
+  that has circuits but none compiled; `rebuild=True` compiles afresh.  A sweep leaves the
+  primitives `run` evaluates as the last `build` set them.  `QarpEngine` runs a counts
+  circuit through its program, or its gate stream as one `Gates` kernel when the stream
+  needs no trajectory (no noise, no mid-circuit
   operation), so `run`, `EXACT` readout and `batch_run` bind a parameter set in C++; a
   circuit with no free symbol is not substituted.  The engine knows
   no algorithm and no block class: `QPE` and `DOSQPE` hand their block to a `Sampler` and
@@ -781,7 +810,7 @@ How circuits run.
   `CuttingPrimitive`, whose cut reads the gate stream, and `PauliShadow`, whose symbol
   check needs a built block.  Programs of the built path are cached on the engine by the
   stream's digest and the block tree's signature (the plan is read from both), so a rebuild
-  of the same circuit (every `batch_run`) never plans twice.
+  of the same circuit (a repeated `build()`, `batch_run(rebuild=True)`) never plans twice.
 
 ## 15. Project & repository conventions
 
@@ -795,17 +824,17 @@ How circuits run.
 - **Import name** is `qarpx`, conventionally `import qarpx as qx`.
 - **The qarpx ABI counter moves with the bindings.** Any commit that changes a binding
   signature, enum, or class shape bumps `QARPX_ABI_VERSION`
-  (`cpp/libqarpx/python/bindings.cpp`) and `EXPECTED_QARPX_ABI` (`qarp/_abi.py`)
+  (`src/qarpx/python/bindings.cpp`) and `EXPECTED_QARPX_ABI` (`src/qarp/_abi.py`)
   together; `import qarp` fails fast on a mismatched or wrong-checkout build
   (`QARP_SKIP_ABI_CHECK=1` bypasses for deliberate cross-checkout runs).
-- **The `qarpx` stub moves with the bindings.** `cpp/libqarpx/python/qarpx.pyi` is generated
+- **The `qarpx` stub moves with the bindings.** `src/qarpx/python/qarpx.pyi` is generated
   from the built module and committed; a commit that changes a binding regenerates it with
   `python scripts/generate_stubs.py`, under the CI Python version, and the drift test fails
   otherwise. A wrong or vague type is fixed in the binding (`nb::arg`, `nb::sig`), not in the
   stub; `stubgen_patterns.txt` holds only what nanobind cannot express and values that vary
   by build.
 - **A package's public surface is its `__all__`.** Every public
-  `qarp/<pkg>/__init__.py` declares `__all__`; it is the sole definition of what
+  `src/qarp/<pkg>/__init__.py` declares `__all__`; it is the sole definition of what
   that package exports — symbols and public namespaces alike.  A name absent
   from `__all__` is private regardless of whether the `__init__` imports it, and
   a submodule is exported only by being listed there.  Lists are sorted; a
@@ -822,7 +851,7 @@ How circuits run.
 - **Public depth is declared per package, not derived from the directory tree.**
   A public namespace is listed in `__all__` and justified in the package
   docstring, which names every one of them and why.  A submodule its package
-  does not re-export is private unless it appears in both. `qarp/__init__.py` is
+  does not re-export is private unless it appears in both. `src/qarp/__init__.py` is
   thin — cross-cutting names only (`EXACT`, `Shots`, `config`) plus the
   `errors` and `endianness` namespaces; its subpackages are listed in `__all__`
   as namespaces but not imported — so `import qarp` costs ~70 ms where eagerly
@@ -848,7 +877,7 @@ How circuits run.
 - **`examples/` is executed CI surface, not documentation.** The nightly runs every notebook via
   `pytest --nbmake`. A standard/structural feature ships an example, and that example is expected
   to keep running — breaking one is breaking a test.
-- **Top-level trees import in one direction.**  `qarp/` is the library; `tests/`,
+- **Top-level trees import in one direction.**  `src/qarp/` is the library; `tests/`,
   `benchmarks/`, `scripts/` and `examples/` consume it and never import each other.
   The one exception is a tree that is itself the *subject under test* —
   `tests/test_docs/` imports `scripts/ci/check_docs_code.py` because it tests that
@@ -856,8 +885,9 @@ How circuits run.
   outside the type and coverage gates on purpose — annotating `benchmarks/code_volume`
   would inflate the line count it exists to measure — so an import from `tests/` drags
   ungated code, and the optional competitor SDKs behind it, into the strictest gate in
-  CI.  An editable install puts the repository root on `sys.path`, so every tree is
-  importable: this is a convention the reviewer enforces, not an `ImportError`.
+  CI.  pytest puts the repository root on `sys.path` (the `tests/` package sits
+  under a root with no `__init__.py`), so every tree is importable from a test:
+  this is a convention the reviewer enforces, not an `ImportError`.
 - **Changing a convention is a deliberate edit here first.** Update this document, then make the
   code match. Numerical drift from this doc is a bug, not a new convention.
 - **Narrative docs are gated.** Python code-blocks in `docs/source/*.rst` are
@@ -910,9 +940,9 @@ optimization and routing stages, swapped in and out at their boundaries.
   it touches — `test_sabre_output_pins.py` pins the output bit for bit). `RouterKind::Lite`
   (greedy sweep, milliseconds) remains available explicitly. Both share one contract
   (`RoutingResult`, throw conditions).
-- **A frozen linear `eliminate_identities`** lives in `tests/cpp/dag_test_helpers.h` as a
+- **A frozen linear `eliminate_identities`** lives in `src/qarpx/tests/dag_test_helpers.h` as a
   differential oracle; the production name routes through the DAG pass.
-- **Independent mathematical oracle.** `tests/cpp/reference_unitary.h` assembles circuit
+- **Independent mathematical oracle.** `src/qarpx/tests/reference_unitary.h` assembles circuit
   unitaries from this document's analytic gate definitions, sharing no code with csim; the
   passes are pinned against it (and csim is cross-validated against it) in
   `test_pass_reference_equivalence.cpp`.
@@ -950,13 +980,15 @@ Enforced by `tests/test_blocks/test_symbols_contract.py`.
 
 **The invariant.** On any **built** Python-layer block, `block.symbols` is a
 **tuple** in canonical order — sorted by string representation
-(`_sorted_symbols`, `qarp/blocks/block.py`). Every surface that republishes
+(`_sorted_symbols`, `src/qarp/blocks/_block.py`). Every surface that republishes
 the same symbol set (a rebuilt composite ket, a renamed block, a deepcopy)
 publishes the identical order. Every positional parameter vector in the
 public API (`initial_parameters`, optimizer `res.x`) aligns to this order.
 The setter of the `symbols` property is the sole write path and
 canonicalizes on assignment; the tuple makes in-place corruption
-(`.append`, `.sort()`) raise immediately.
+(`.append`, `.sort()`) raise immediately.  Reading `symbols` on a block that
+has not published a registry raises `RuntimeError`; it is never `None`, and
+never `()` for a block that failed to build.
 
 Canonical order is sorted-by-string (not generation order) because it is
 derivable without shared state — independent processes must agree despite
@@ -997,7 +1029,7 @@ returns one array per built primitive, columns in the params mapping's
 **insertion order** (`_gradients.py`: `symbol_names = list(params.keys())`)
 — for every method.  Pinned by `tests/test_engines/test_gradient_order.py`
 and `test_gradient_registry.py`.  The method registry lives in the private
-module `qarp/engines/_gradients.py` (`"default"`, `"adjoint"`,
+module `src/qarp/engines/_gradients.py` (`"default"`, `"adjoint"`,
 `"parameter-shift"`, `"finite-diff"`, `"spsa"`; `"hadamard"` and
 `"metric-tensor"` reserved); `"default"` is a per-engine *policy*, not a
 method, and may change between releases.  dtype is decided by the
@@ -1101,8 +1133,8 @@ number never moves without a migration.
 
 ## 20. References
 
-- `cpp/libqarpx/include/qarpx/core/gates.h` — authoritative `GateType` enum and metadata helpers.
-- `cpp/libqarpx/src/transpiler/fusion.cpp` — single-qubit analytic 2×2 matrices.
-- `cpp/libqarpx/src/transpiler/decompositions.cpp` — multi-qubit decompositions and qubit-ordering conventions.
-- `cpp/libqarpx/src/core/command.cpp::dagger()` — adjoint dispatch (see §9).
+- `src/qarpx/include/qarpx/core/gates.h` — authoritative `GateType` enum and metadata helpers.
+- `src/qarpx/src/transpiler/fusion.cpp` — single-qubit analytic 2×2 matrices.
+- `src/qarpx/src/transpiler/decompositions.cpp` — multi-qubit decompositions and qubit-ordering conventions.
+- `src/qarpx/src/core/command.cpp::dagger()` — adjoint dispatch (see §9).
 - OpenQASM 3.0 specification, `stdgates.inc`: <https://openqasm.com/>

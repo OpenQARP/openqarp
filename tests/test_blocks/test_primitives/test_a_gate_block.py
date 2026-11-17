@@ -55,7 +55,6 @@ def test_a_gate_block_symbolic_params():
     block = AGateBlock(theta=theta_sym, phi=phi_sym)
     block.build()
 
-    assert block.symbols is not None
     symbol_names = {str(s) for s in block.symbols}
     assert "theta" in symbol_names
     assert "phi" in symbol_names

@@ -96,11 +96,11 @@ ruff format --check .
 
 We use [mypy][mypy] to enforce consistency of data types:
 ```
-mypy qarp/ tests/ --disable-error-code=import-untyped
+mypy src/qarp/ tests/ --disable-error-code=import-untyped
 ```
 
 mypy reads the compiled backend, `qarpx`, from a stub committed beside its
-bindings, `cpp/libqarpx/python/qarpx.pyi`. A change to the bindings
+bindings, `src/qarpx/python/qarpx.pyi`. A change to the bindings
 regenerates it in the same commit, under Python 3.12 and with the checkout's
 own build installed; a test fails when the committed stub is stale:
 ```

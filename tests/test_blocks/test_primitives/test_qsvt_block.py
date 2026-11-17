@@ -38,7 +38,7 @@ def small_real_hermitian():
     """Hermitian 2×2 with ``λ = 0.8`` (rescaled internally to ``A / λ``)."""
     A = np.array([[0.5, 0.3], [0.3, -0.5]])
     be = BlockEncodingBlock(A)
-    return A / be.lambda_factor()
+    return A / be.lambda_norm
 
 
 def _be_n_qubits(A) -> int:
@@ -167,7 +167,7 @@ def test_qsvt_applies_x_cubed_2x2():
     np.random.seed(7)
     H = np.random.rand(2, 2)
     A = (H + H.T) / 2
-    A = A / BlockEncodingBlock(A).lambda_factor()
+    A = A / BlockEncodingBlock(A).lambda_norm
 
     angles = QSPAngleFinder([0, 0, 0, 1]).QSVT()  # x³
     qsvt = QSVTBlock(A, angles).build()
@@ -180,7 +180,7 @@ def test_qsvt_applies_chebyshev_t3_on_random_4x4():
     np.random.seed(8)
     H = np.random.rand(4, 4)
     A = (H + H.T) / 2
-    A = A / BlockEncodingBlock(A).lambda_factor()
+    A = A / BlockEncodingBlock(A).lambda_norm
 
     angles = QSPAngleFinder([0, -1.5, 0, 2.5]).QSVT()
     qsvt = QSVTBlock(A, angles).build()
@@ -199,7 +199,7 @@ def test_qsvt_2x_squared_minus_one_on_random_hermitian(dim):
     np.random.seed(9 + dim)
     H = np.random.rand(dim, dim)
     A = (H + H.T) / 2
-    A = A / BlockEncodingBlock(A).lambda_factor()
+    A = A / BlockEncodingBlock(A).lambda_norm
 
     angles = QSPAngleFinder([-1, 0, 2]).QSVT()
     qsvt = QSVTBlock(A, angles).build()
@@ -221,7 +221,7 @@ def test_qsvt_qubit_operator_input():
     """
 
     A = QubitOperator("X0 Z1", 0.5) + QubitOperator("Y1 Y0", -0.3) + QubitOperator("", 0.4)
-    lam = BlockEncodingBlock(A).lambda_factor()
+    lam = BlockEncodingBlock(A).lambda_norm
     A_resc = A / lam
 
     angles = QSPAngleFinder([0, -1.5, 0, 2.5]).QSVT()

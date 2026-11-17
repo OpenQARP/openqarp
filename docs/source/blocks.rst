@@ -753,8 +753,8 @@ so ``'XI'`` is :math:`X_0` and ``'IX'`` is :math:`X_1`. The full LCU API is cove
 ``BlockEncodingBlock`` turns that LCU into a unitary circuit. It first prepares the
 ancilla amplitudes :math:`\sqrt{|c_i|/\lambda}`, applies the selected Pauli term and its
 coefficient phase, then unprepares the ancillas. Here
-:math:`\lambda = \sum_i |c_i|`, available as ``lambda_norm`` (or
-``lambda_factor()`` for compatibility). Consequently, the all-zero ancilla sector obeys
+:math:`\lambda = \sum_i |c_i|`, available as ``lambda_norm``.
+Consequently, the all-zero ancilla sector obeys
 
 .. math::
 
@@ -1144,7 +1144,7 @@ denotes the desired projector and :math:`U_P` the complete circuit, then
 
 The LCU ancillas are the lowest-index qubits and the system register is exposed
 as ``system_qubits``. ``num_controls`` gives the number of LCU ancillas and
-``lambda_norm`` (also returned by ``lambda_factor()``) is :math:`\lambda`.
+``lambda_norm`` is :math:`\lambda`.
 Consequently, applying the full unitary does not deterministically project a
 state: the projector is obtained from the all-zero ancilla branch, with
 success probability :math:`\|P|\psi\rangle\|^2/\lambda^2`.
@@ -1439,7 +1439,7 @@ so the resulting unitary is
 
 ``A`` may be an ``np.ndarray`` or a ``QubitOperator``. The
 underlying ``BlockEncodingBlock`` encodes :math:`A/\lambda`, and its
-normalization is exposed as ``lambda_factor``. For Hermitian
+normalization is exposed as ``lambda_norm``. For Hermitian
 :math:`A` with eigenvalue :math:`E`, the walk has eigenphases
 :math:`\exp(\mathord{\pm}i\arccos(E/\lambda))`. Therefore, if phase
 estimation reports a phase :math:`\theta` in :math:`[0,1)`, then
@@ -1458,7 +1458,7 @@ For example, a two-term one-qubit Hamiltonian needs one LCU ancilla qubit:
    walk = QubitizationBlock(hamiltonian, operator_name="H").build()
 
    assert walk.BE.num_controls == 1
-   assert walk.lambda_factor == 1.0
+   assert walk.lambda_norm == 1.0
 
 .. figure:: images/qubitizationblock.svg
    :width: 70%
@@ -1493,7 +1493,7 @@ block unambiguous:
    from qarp.blocks import BlockEncodingBlock, QSVTBlock, QSPAngleFinder
 
    A = np.array([[0.5, 0.3], [0.3, -0.5]])
-   A /= BlockEncodingBlock(A).lambda_factor()
+   A /= BlockEncodingBlock(A).lambda_norm
    phases = QSPAngleFinder([-1, 0, 1]).QSVT()
    qsvt = QSVTBlock(A, phases).build()
 
@@ -3014,7 +3014,7 @@ have minimal bond dimension.
 .. note::
 
    Converting from a third-party MPS library's own tensors may need an endianness fix —
-   ``quimb``'s ``from_dense`` is kron/MSB-ordered (``qarp/endianness.py``), the opposite of this
+   ``quimb``'s ``from_dense`` is kron/MSB-ordered (``src/qarp/endianness.py``), the opposite of this
    block's LSB convention; reverse the site order and swap each tensor's bond axes when converting.
 
 .. code-block:: python
@@ -3157,3 +3157,15 @@ controlled-rotation structure legible:
    :width: 100%
    :align: center
    :alt: Piecewise-linear payoff circuit with a one-breakpoint comparator on a two-qubit domain
+
+Trotter generator inspection
+----------------------------
+
+``TrotterAnsatzBlock.generator_groups()`` returns immutable tuples of
+``(pauli_tuple, symbol_name, coefficient)`` triples grouped within each original
+generator, before Suzuki scaling/repetition. It does not build or mutate the
+block and uses the same grouping source as gate emission. Coefficients follow
+the block's real/imaginary-generator convention. The Pauli tuple is in local
+LSB qubit order; symbol names are not a positional parameter vector. Use
+``parameter_map`` for binding. This accessor supports conservation checks
+without depending on a private grouping method.

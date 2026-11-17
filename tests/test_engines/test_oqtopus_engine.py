@@ -164,7 +164,7 @@ def test_unbound_symbols_are_refused_before_any_submit():
     with pytest.raises(ValueError, match="theta"):
         eng.run()
     with pytest.raises(ValueError, match="theta"):
-        eng.batch_run([Sampler(ket=_ry_symbolic())], [{}])
+        eng.batch_run([Sampler(ket=_ry_symbolic())], [{}], rebuild=True)
     assert _submits(transport) == []
 
 
@@ -259,6 +259,7 @@ def test_sweep_submits_all_then_waits():
     eng = OqtopusEngine("local", transport=transport, n_shots=4000)
     pa = PauliAveraging(operator=QubitOperator("Z0", 1.0), ket=_ry_symbolic())
     thetas = [0.3, 1.1, 2.5]
+    eng.build([pa])
     out = eng.batch_run([pa], [{"theta": t} for t in thetas])
     calls = [e["call"] for e in transport.log if e["call"] in ("submit", "wait_all")]
     n_circuits = len(pa.compiled_circuits)
@@ -371,6 +372,7 @@ def test_exact_rejected_at_construction():
 def test_batch_run_exact_override_rejected():
     eng = _engine(1)
     pa = PauliAveraging(operator=QubitOperator("Z0", 1.0), ket=_ry_symbolic())
+    eng.build([pa])
     with pytest.raises(CapabilityError, match="amplitudes"):
         eng.batch_run([pa], [{"theta": 0.3}], n_shots=qarp.EXACT)
 

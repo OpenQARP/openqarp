@@ -420,8 +420,8 @@ construction — same seed, same shots:
 Parameter sweeps with ``batch_run``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For many parameter sets over the same circuits, ``batch_run`` builds once
-and evaluates every set as ``run`` would:
+For many parameter sets over the same circuits, ``batch_run`` evaluates
+every set of a built primitive as ``run`` would:
 
 .. code-block:: python
 
@@ -431,6 +431,7 @@ and evaluates every set as ``run`` would:
     ]
 
     batch_engine = QarpEngine()
+    batch_engine.build([eng_expval])
     batch = batch_engine.batch_run([eng_expval], param_sets)
     for ps, row in zip(param_sets, batch):
         print(f"theta={list(ps.values())[0]:+.3f}  <H> = {row[0]:+.6f}")

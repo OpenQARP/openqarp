@@ -243,3 +243,16 @@ def test_run_does_not_clear_circuits_and_release_does():
     assert s.sub_blocks == [] and s.compiled_circuits == []
     _ = s.dataset  # still valid after release
     assert first == first  # (sanity; first is a number)
+
+
+def test_a_refused_sweep_keeps_a_released_shadows_dataset():
+    s = PauliShadow(QubitOperator("Z0 Z1"), _bell(), n_settings=50, seed=0)
+    eng = QarpEngine(seed=1)
+    eng.build([s])
+    estimate = eng.run()[0]
+    s.release()
+    dataset = s.dataset
+    with pytest.raises(RuntimeError, match="not compiled"):
+        eng.batch_run([s], [{}])
+    assert s.dataset is dataset and s.sub_blocks == []
+    assert dataset.estimator().expval(s.operator).value == estimate
