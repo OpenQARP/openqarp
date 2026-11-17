@@ -7,6 +7,41 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `qarp.engines.OqtopusEngine`, the first remote engine: it runs
+  counts-consuming primitives on an OQTOPUS device through sampling jobs.
+  It compiles every circuit for the device itself, to the `x, sx, rz, cx`
+  basis and the directed coupling map of the service's `device_info`, and
+  submits one OpenQASM 3 program per circuit with server-side transpilation
+  switched off; counts come back in logical qubit order.  `Sampler`,
+  `PauliAveraging`, VQE and the parameter-shift, finite-difference and SPSA
+  gradients work unchanged, and `batch_run` submits every job of a sweep
+  before waiting once, so a parameter-shift gradient is one round trip.
+  What a remote device cannot do raises `CapabilityError` before any job is
+  submitted, and `mitigation_info` is forwarded to the service's readout
+  mitigation.  See the *OqtopusEngine — remote execution* section of the
+  engines page and `examples/engines/mwe_oqtopus.ipynb`.
+- `qarp.engines.RemoteOqtopusTransport`, the default transport, over the
+  `oqtopus-client` SDK that the new `oqtopus` extra installs
+  (`pip install "openqarp[oqtopus]"`); `LocalOqtopusTransport`, which runs
+  the same programs on the local simulator with no extra and no credential;
+  and the `OqtopusTransport` protocol both implement.
+- `qarp.devices.device_from_oqtopus`: a `Device` from the service's
+  `device_info`.
+- `qarp.errors.RemoteJobError`, raised for a job the service fails or
+  cancels, carrying `job_id`, `status` and the service message.
+- The `sx_rz` rebase target, `{X, SX, Rz, CX}`: `qx.sx_rz_gateset()` and the
+  `"sx_rz"` rule set, which rewrites every other single-qubit gate as an
+  `Rz·SX·Rz` sandwich with its exact global phase.
+- `qx.SamplingResult(n_qubits, counts, n_shots, n_cbits=0)`: a result built
+  from counts produced outside the simulator.
+
+### Changed
+
+- The `qarpx` ABI is 18.  An editable checkout reinstalls after pulling,
+  or `import qarp` refuses the old build.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added

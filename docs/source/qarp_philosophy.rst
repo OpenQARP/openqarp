@@ -369,7 +369,7 @@ Understanding how data flows through OpenQARP helps clarify the architecture:
        <div class="qarp-flow-row">
          <code>Engine</code>
          <ul>
-           <li>executes circuits on a backend (QarpEngine, CudaqEngine)</li>
+           <li>executes circuits on a backend (QarpEngine, CudaqEngine, OqtopusEngine)</li>
            <li>substitutes parameters</li>
            <li>returns measurement results</li>
          </ul>

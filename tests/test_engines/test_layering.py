@@ -17,7 +17,7 @@ from qarp.engines import Runnable
 ENGINES_DIR = Path(__file__).resolve().parents[2] / "src" / "qarp" / "engines"
 
 _ALGO_IMPORT = re.compile(
-    r"^\s*(?:from|import)\s+(?:qarp\.algorithms|\.\.algorithms)", re.MULTILINE
+    r"^\s*(?:from|import)\s+(?:qarp\.algorithms|\.{2,}algorithms)", re.MULTILINE
 )
 
 

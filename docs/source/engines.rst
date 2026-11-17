@@ -249,18 +249,20 @@ what the example notebook uses:
    engine = OqtopusEngine("local", transport=LocalOqtopusTransport(n_qubits=3, seed=1),
                           n_shots=4000)
    engine.build([Sampler(ket=ghz)])
-   print(engine.run()[0])            # {(0, 0, 0): 0.50, (1, 1, 1): 0.50}
+   print(engine.run()[0])
+   # SamplingDistribution({(0, 0, 0): 0.50025, (1, 1, 1): 0.49975})
 
    # The real thing: the SDK reads OQTOPUS_URL / OQTOPUS_API_TOKEN.
    engine = OqtopusEngine("qulacs", n_shots=4000)
 
 What a remote device cannot do is refused with :class:`~qarp.errors.CapabilityError`
 before any job is submitted: ``StateVector`` and every other amplitude consumer,
-``n_shots=qarp.EXACT``, ``initial_state=``, mid-circuit measurement with reuse,
-and the adjoint gradient.  A job the service fails or cancels raises
+``n_shots=qarp.EXACT``, ``initial_state=``, mid-circuit measurement, reset and
+classical control, and the adjoint gradient.  A job the service fails or cancels raises
 :class:`~qarp.errors.RemoteJobError`, carrying ``job_id``, ``status`` and the
-service message; a timed-out or interrupted wait cancels every outstanding job
-of that call before the error propagates.  There is no ``seed`` — hardware
+service message.  Any error raised while a call's jobs are submitted or awaited,
+a timeout or an interrupt included, cancels every outstanding job of that call
+before it propagates.  There is no ``seed`` — hardware
 randomness is not seedable — and no ``device=``: the device is fetched, never
 passed.  ``mitigation_info=`` is forwarded verbatim on every job for the
 service's readout mitigation (``{"ro_error_mitigation": "pseudo_inverse"}``).

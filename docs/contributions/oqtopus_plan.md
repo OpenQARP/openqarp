@@ -615,3 +615,12 @@ Declared during implementation and folded into the sections above:
   can sum below `shots`, so `counts_to_sampling_result` gained `mitigated=`
   and the engine sets it whenever `mitigation_info` is passed, without
   reading its keys (open item 4).
+- **Ported to 0.2.0** (the `develop` merge that brought the `src/` layout).
+  `PrimitiveResult` is imported from `_sampling_distribution`.  `batch_run`
+  no longer rebuilds by default, so three engine tests build first or pass
+  `rebuild=True`.  The ABI bump is 17 → 18, and `test_montecarlo_gpu.py`,
+  which pins the counter, follows it.  `ci.yml`'s mypy job installs the
+  `oqtopus` extra so the transport's SDK import resolves, the layering lint
+  also matches a three-dot relative import from the subpackage,
+  `docs/source/qarp_philosophy.rst` names the engine in the execution layer,
+  and `CHANGELOG.md` carries the entry.
