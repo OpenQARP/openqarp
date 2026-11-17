@@ -36,7 +36,6 @@
 /src/qarp/cutting/                           @vicentesolovievfujitsu
 /src/qarp/absorb/                            @vicentesolovievfujitsu
 /src/qarp/emit/                              @vicentesolovievfujitsu
-/src/qarp/devices/                           @vicentesolovievfujitsu
 /src/qarp/utils/                             @vicentesolovievfujitsu @amrFRE
 /src/qarp/engines/_engine.py                 @mekise @vicentesolovievfujitsu
 /src/qarp/engines/_gradients.py              @josh-fujitsu
@@ -83,7 +82,6 @@
 /tests/test_cutting/                     @vicentesolovievfujitsu
 /tests/test_absorb/                      @vicentesolovievfujitsu
 /tests/test_emit/                        @vicentesolovievfujitsu
-/tests/test_devices/                     @vicentesolovievfujitsu
 /tests/test_operators/test_vumpo.py      @brian-fujitsu
 /tests/test_operators/test_mappings.py   @amrFRE
 /tests/test_engines/test_gradient_registry.py     @josh-fujitsu
