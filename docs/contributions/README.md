@@ -147,6 +147,7 @@ something else, parked until they are picked up.
 | [`compiled_backend_stubs_plan.md`](compiled_backend_stubs_plan.md) | Ship type stubs for `qarpx` and type-check `qarp` against them |
 | [`lazy_circuit_derivation_plan.md`](lazy_circuit_derivation_plan.md) | Primitives derive circuits lazily; declared structure planned inside `Engine.build`; `Target` below the engine layer |
 | [`openblas_thread_sharing_plan.md`](openblas_thread_sharing_plan.md) | Keep OpenBLAS's idle workers from starving the simulator |
+| [`optimization_problems_plan.md`](optimization_problems_plan.md) | Declarative `qarp.problems` builder (variables, objective, constraints) compiling to the existing Graph/QubitOperator forms for QAOA/PCE |
 | [`qmc_gpu_plan.md`](qmc_gpu_plan.md) | Persistent GPU Monte Carlo with exact transitions and resident signed evolution |
 | [`qmc_measurement_layouts_plan.md`](qmc_measurement_layouts_plan.md) | Reusable grouped transition layouts and general commuting measurement bases |
 | [`qsci_plan.md`](qsci_plan.md) | Quantum-selected configuration interaction (QSCI / SQD): diagonalize the Hamiltonian in sampled configurations |
