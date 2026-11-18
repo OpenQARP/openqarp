@@ -1,11 +1,18 @@
 # Respect PySCF integral settings and extract active spaces directly
 
-**Status:** Planned
+**Status:** Implemented; PR review pending
 **Author:** Antonio Márquez Romero (+ Codex)
 **Date:** 2026-11-16
-**Tier:** Standard
+**Updated:** 2026-11-18
+**Tier:** Trivial (bugfix + regression tests; proposed, subject to reviewer confirmation)
 **Branch:** `fix/molecular_integrals`
-**Green-lit:**
+**Green-lit:** Not applicable for the proposed tier.
+**Workflow:** [The contribution guide](../../CONTRIBUTING.md#how-contributions-flow)
+lists a bugfix with regression tests under the Trivial tier. This change corrects
+existing PySCF adapters, with no new public API or convention changes. Use the
+Trivial PR checklist and request normal implementation review. This file records
+the design and validation; Gate 1 applies only if a reviewer promotes the PR to
+a planned contribution.
 **Scope:**
 
 - `docs/contributions/molecular_integrals_plan.md` (this plan)
@@ -82,7 +89,8 @@ energy. Both it and the effective one-electron matrix must use the same
 conventional/DF Hamiltonian as the active two-electron tensor. Only active MO
 columns reach the two-electron transformation. PySCF computes the core potential
 in the AO basis; this avoids a full MO tensor but does not eliminate AO/DF work
-or the returned `N_active**4` tensor. Keep the existing ONV construction.
+or the returned `N_active**4` tensor. Construct the reference ONV from the
+remaining alpha/beta counts after freezing the core, preserving ROHF spin.
 
 The extraction mechanism follows PySCF's [CASCI getters](
 https://pyscf.org/_modules/pyscf/mcscf/casci.html) and [DF-CASCI implementation](
@@ -152,6 +160,7 @@ qarpx objects inside tests. Guard numerical tests when PySCF is absent.
 | Custom `_eri` takes precedence over molecular recomputation with DF disabled (`with_df=None` included) | Deliberately modified symmetric AO tensor with direct NumPy MO contraction; CASCI effective integrals for the same custom Hamiltonian | `tests/test_operators/test_pyscf_helpers.py` |
 | Conventional RHF/ROHF/UHF behavior and reference ONVs remain correct | Existing independent HF/FCI oracles and analytic occupation patterns, retained | `tests/test_operators/test_pyscf_helpers.py` |
 | Direct active extraction agrees term by term for conventional/DF inputs, frozen cores and no core | PySCF CASCI effective terms plus QARP operator eigenenergy versus independently run CASCI in fixed `(n_alpha, n_beta)` sector | `tests/test_operators/test_pyscf_helpers.py` |
+| Orbital permutations crossing the active/external boundary are honored without changing the supplied MO coefficients | PySCF CASCI effective terms evaluated with the explicitly permuted coefficient matrix; independent small AO-to-MO contraction | `tests/test_operators/test_pyscf_helpers.py` |
 | Named LiH incident: fully DF Hamiltonian matches DF-CASCI; changing the auxiliary basis is respected | Independently run DF-CASCI total energies; conventional recomputation on the same DF orbitals is a negative control exceeding the energy tolerance | `tests/test_operators/test_pyscf_helpers.py` |
 | Generic restricted/unrestricted frozen-core reductions also accept DF tensors | PySCF effective core/one-electron terms for supported reference cases; direct factor contractions for active two-electron blocks | `tests/test_operators/test_active_space.py` |
 | Active extraction never builds full-MO ERIs or runs an electronic solver | Instrument conventional and DF transformations to require `ncas` MO columns; make `integrals_from_mf` and solver kernels fail if called (structural guard, additional to energy oracles) | `tests/test_operators/test_pyscf_helpers.py` |
@@ -162,30 +171,55 @@ qarpx objects inside tests. Guard numerical tests when PySCF is absent.
 
 ### Phase 1 — Honor the full-space integral source
 
-- [ ] Add the restricted/UHF DF and custom-AO regressions with independent oracles.
-- [ ] Implement private dispatch and update adapter docstrings; retain conventional tests.
+- [x] *(2026-11-17)* Add the restricted/UHF DF and custom-AO regressions with independent oracles.
+- [x] *(2026-11-17)* Implement private dispatch and update adapter docstrings; retain conventional tests.
 
 ### Phase 2 — Extract active-space integrals directly
 
-- [ ] Replace full-space extraction/reduction with validated CASCI effective getters.
-- [ ] Add the named incident, frozen/no-core and ROHF cases, fixed-sector energy
+- [x] *(2026-11-17)* Replace full-space extraction/reduction with validated CASCI effective getters.
+- [x] *(2026-11-17)* Add the named incident, frozen/no-core and ROHF cases, fixed-sector energy
   comparisons, and guards against full-MO transformations and solver calls.
-- [ ] Check generic DF tensor reductions without changing their numerical algorithms.
+- [x] *(2026-11-17)* Check generic DF tensor reductions without changing their numerical algorithms.
 
 ### Phase 3 — Document and validate the behavior
 
-- [ ] Update narrative docs and reducer docstrings; add the executable notebook and
+- [x] *(2026-11-17)* Update narrative docs and reducer docstrings; add the executable notebook and
   changelog entry, including the DF behavior change and J-only fitting limitation.
-- [ ] Run the two affected operator test modules and existing integral tests in the
+- [x] *(2026-11-17)* Run the two affected operator test modules and existing integral tests in the
   checkout's `.venv`; run the new notebook with `pytest --nbmake` and
   `SKBUILD_EDITABLE_VERBOSE=0`.
-- [ ] Run Ruff, mypy and documentation code checks appropriate to the edited files;
+- [x] *(2026-11-17)* Run Ruff, mypy and documentation code checks appropriate to the edited files;
   verify >=80% changed-line coverage and retain the coverage floor. Check numerical
   regressions on PySCF 2.10 and the development environment's version.
-- [ ] Record validation and any deviations in the same PR; finish the plan before
-  requesting Gate 2 review.
+- [ ] Include the local validation and scope in the PR description, use the
+  Trivial PR checklist, and request implementation review.
 
-## Deviations log
+## Scope notes
 
-- (empty — declare deviations from the green-lit plan in the PR and fold them
-  back here before merge)
+- On 2026-11-17 the author narrowed this contribution to PySCF integral handling
+  and direct active-space extraction. The experimental ADAPT diagnostics,
+  optimizer-result handling, pool extension and associated tests/docs/example
+  were removed from this branch. Independent ADAPT findings are separate work;
+  the legacy factor-of-two pool normalization does not prove that every observed
+  energy discrepancy has the same cause.
+- Active reference ONVs retain alpha/beta counts after freezing doubly occupied
+  cores. This fixes high-spin ROHF references that previously split the active
+  electron total into a low-spin ONV. Added Li/C ROHF oracles.
+
+## Local validation
+
+Integral-only scope validated after removing the broader experimental changes:
+
+- PySCF 2.14.0 chemistry, unchanged ADAPT regressions and documentation checks:
+  104 passed.
+- PySCF 2.10.0 chemistry compatibility: 62 passed, using an isolated wheel under
+  `/tmp`; the checkout's `.venv` retains PySCF 2.14.0.
+- The density-fitting notebook passes `pytest --nbmake` (1 passed). Jupyter
+  requires local sockets and was run outside the sandbox.
+- Ruff lint/format and mypy over all 528 source/test files pass.
+- Changed-line coverage meets the unchanged 80% gate. Coverage uses
+  `--cov=src/qarp`, because package-name-only coverage collected no data in this
+  environment. No dependency requirement or coverage gate was changed.
+- The editable installation was rebuilt against `src/qarpx` after the layout
+  move. The full default suite was exercised on the earlier, broader working
+  tree; the current reduced scope was checked with the targeted run above.
