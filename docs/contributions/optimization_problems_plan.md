@@ -1,4 +1,4 @@
-# Declarative optimization-problem builder (variables, objective, constraints) for QAOA/PCE
+# Declarative optimization-problem builder (variables, objective, equality constraints) for QAOA/PCE
 
 **Status:** Planned
 **Author:** Vicente P. Soloviev (+ Claude Sonnet 5)
@@ -91,35 +91,59 @@ gain one more producer of the inputs they already accept.
     was judged worse than forcing a deliberate choice. Auto-tuning is an
     explicit non-goal of this plan; it is a candidate future extension once
     there is real usage data on what penalty ranges work.
-  - Phase 1 ships equality constraints only; inequality constraints
-    (needing slack-variable binary expansion, extra qubits, and a bit-width
-    sizing rule) are Phase 2, so the variable/expression/problem core lands
-    and reviews independently of that added complexity.
-- **Test oracles named now (§18).** Both Phase 1 and Phase 2 oracle tests
-  check compiled Hamiltonian coefficients against Lucas, A. (2014), "Ising
-  formulations of many NP problems," *Frontiers in Physics* — §2.1 (Number
-  Partitioning) for Phase 1's equality constraint, §2.3 (0/1 Knapsack) for
-  Phase 2's inequality/slack-variable path. Both are published closed-form
-  Ising Hamiltonians, independent of this implementation.
-- **Example ships with Phase 1** (standard-tier rule, CLAUDE.md /
+  - **Inequality constraints are out of scope entirely**, not deferred to a
+    later phase of this plan. A slack-variable binary-expansion compile path
+    was considered and rejected: `PCE` is expected to consume inequality
+    constraints a different way (its existing `classical_function`/
+    `quantum_function` callback pair can evaluate — and penalize — constraint
+    violation directly on the classical/continuous assignment, with no need
+    to encode a slack range into extra qubits). Designing that path, and
+    whatever `QAOA`-side equivalent it needs, is explicit future work — see
+    below. `Constraint` here only ever has `sense: Literal["eq"]`.
+- **Reusing an existing `Graph`/`QubitOperator` is in scope.**
+  `OptimizationProblem.from_graph(graph)` and `.from_qubit_operator(qubit_op)`
+  build a `Problem` whose objective is exactly that graph's/operator's
+  quadratic form (via `graph_to_cost_hamiltonian`/`qubit_operator_to_graph`,
+  same reuse principle as above), with no constraints. This lets an existing
+  graph-based workflow be lifted into the new representation incrementally,
+  and is the natural first step toward (not part of) the future work below.
+- **Test oracle named now (§18).** The oracle test checks compiled
+  Hamiltonian coefficients against Lucas, A. (2014), "Ising formulations of
+  many NP problems," *Frontiers in Physics*, §2.1 (Number Partitioning) — a
+  published closed-form Ising Hamiltonian, independent of this
+  implementation.
+- **Example ships with this plan** (standard-tier rule, CLAUDE.md /
   `qarp_conventions.md` §15): `examples/problems/mwe_qubo_problem.ipynb`
-  builds a small constrained `OptimizationProblem` and hands its compiled
-  form to both `QAOA` and `PCE`, and runs under nightly `pytest --nbmake`.
+  builds a small equality-constrained `OptimizationProblem` and hands its
+  compiled form to both `QAOA` and `PCE` (via their existing
+  `Graph`/`QubitOperator` inputs, unchanged), and runs under nightly
+  `pytest --nbmake`.
 - **No edit to `qarp_conventions.md`.** This is additive within the existing
   §15 package rules (flat depth, `__all__`, lazy namespace listing), not a
   change to them.
-- **Real-valued variables are an explicit non-goal of this plan.** Only
-  `BinaryVariable` is in scope. `PCE`'s continuous variant (`cPCE`) already
-  has a notion of a bounded real-valued decision variable — it rescales
-  each qubit's `[-1, 1]` Pauli expectation value onto the variable's actual
-  range via the `coefficients` argument of `classical_function`
-  (`src/qarp/algorithms/_composite/pce.py`) — so a future `ContinuousVariable(lo, hi)`
-  is plausible, but it has no `QAOA` analogue and would not compile to the
-  single `QubitOperator`/`Graph` target this plan standardizes on; it would
-  need its own PCE-specific compile path (e.g. a `to_pce_functions()`
-  producing the `classical_function`/`quantum_function` pair) rather than
-  `to_cost_hamiltonian()`/`to_graph()`. Left for a follow-up plan once the
-  binary core here has landed and seen real usage.
+- **Explicit non-goals, each a candidate follow-up plan once this one has
+  landed and seen real usage:**
+  - *Inequality constraints.* How `PCE` (and, if needed, `QAOA`) actually
+    consume a `Constraint` with a `le`/`ge` sense is undesigned — this plan
+    does not add the sense, the operators, or any compile path for it.
+  - *`QAOA`/`PCE` accepting `OptimizationProblem` directly.* Changing
+    `QAOA.__init__`/`PCE.__init__` to take a `Problem` instead of
+    `Graph`/`QubitOperator` is a breaking change to an existing public
+    constructor, reviewed as its own contribution rather than folded in
+    here. This plan only adds a new producer of the inputs those
+    constructors already accept — it does not touch `qaoa.py`/`pce.py`.
+  - *Real-valued variables.* Only `BinaryVariable` is in scope. `PCE`'s
+    continuous variant (`cPCE`) already has a notion of a bounded
+    real-valued decision variable — it rescales each qubit's `[-1, 1]`
+    Pauli expectation value onto the variable's actual range via the
+    `coefficients` argument of `classical_function`
+    (`src/qarp/algorithms/_composite/pce.py`) — so a future
+    `ContinuousVariable(lo, hi)` is plausible, but it has no `QAOA`
+    analogue and would not compile to the `QubitOperator`/`Graph` target
+    this plan standardizes on; it would need its own PCE-specific compile
+    path (e.g. a `to_pce_functions()` producing the
+    `classical_function`/`quantum_function` pair) rather than
+    `to_cost_hamiltonian()`/`to_graph()`.
 
 ## API sketch
 
@@ -134,8 +158,6 @@ class BinaryVariable:
     def __mul__(self, other: Union["BinaryVariable", "Expression", float]) -> "Expression": ...
     def __rmul__(self, other: float) -> "Expression": ...
     def __neg__(self) -> "Expression": ...
-    def __le__(self, rhs: float) -> "Constraint": ...
-    def __ge__(self, rhs: float) -> "Constraint": ...
     def __eq__(self, rhs: float) -> "Constraint": ...  # type: ignore[override]
     def __hash__(self) -> int: ...  # identity-based; __eq__ no longer does value equality
 
@@ -146,15 +168,13 @@ class Expression:
     def __sub__(self, other) -> "Expression": ...
     def __mul__(self, other: float) -> "Expression": ...  # scalar only — degree cap
     def __neg__(self) -> "Expression": ...
-    def __le__(self, rhs: float) -> "Constraint": ...
-    def __ge__(self, rhs: float) -> "Constraint": ...
     def __eq__(self, rhs: float) -> "Constraint": ...  # type: ignore[override]
     def evaluate(self, assignment: Sequence[int]) -> float: ...
 
 # src/qarp/problems/_constraint.py
 class Constraint:
     def __init__(self, expression: Expression, sense: Literal["eq"], rhs: float, *, penalty: float): ...
-    # sense gains "le" | "ge" in Phase 2
+    # no "le"/"ge" — inequality constraints are explicit future work, undesigned
 
 # src/qarp/problems/_problem.py
 class OptimizationProblem:
@@ -168,7 +188,12 @@ class OptimizationProblem:
     def evaluate(self, assignment: Sequence[int]) -> float: ...  # objective only
     def is_feasible(self, assignment: Sequence[int]) -> bool: ...
     @property
-    def n_qubits(self) -> int: ...  # n_variables (+ slack qubits from Phase 2)
+    def n_qubits(self) -> int: ...  # == n_variables
+
+    @classmethod
+    def from_graph(cls, graph: Graph) -> "OptimizationProblem": ...
+    @classmethod
+    def from_qubit_operator(cls, qubit_op: QubitOperator) -> "OptimizationProblem": ...
 ```
 
 ## Test plan
@@ -178,20 +203,18 @@ class OptimizationProblem:
 | `Expression` arithmetic (`+`, `-`, `*` scalar, unary `-`) produces the hand-derived coefficient dict for a fixed small expression | Hand-expanded polynomial coefficients | `tests/test_problems/test_expression.py` |
 | `Expression.evaluate(assignment)` matches direct polynomial evaluation for a fixed assignment | Hand-computed value | `tests/test_problems/test_expression.py` |
 | Triple product (`x*y*z`) raises `TypeError` | N/A — negative/validation test | `tests/test_problems/test_expression.py` |
-| `BinaryVariable`/`Expression` `<=`/`>=`/`==` build the expected `Constraint` | Hand-derived expected `Constraint` fields | `tests/test_problems/test_constraint.py` |
+| `BinaryVariable`/`Expression` `==` builds the expected `Constraint` | Hand-derived expected `Constraint` fields | `tests/test_problems/test_constraint.py` |
 | `Constraint(...)` without `penalty=` raises `TypeError` | N/A — validation test | `tests/test_problems/test_constraint.py` |
 | `OptimizationProblem.to_cost_hamiltonian()` for an unconstrained quadratic objective matches `qarp.graphs.graph_to_cost_hamiltonian` on the equivalent hand-built `Graph` | `qarp.graphs.graph_to_cost_hamiltonian` (existing, independently tested conversion) | `tests/test_problems/test_problem.py` |
+| `OptimizationProblem.from_graph(g).to_cost_hamiltonian()` equals `g.to_cost_hamiltonian()` for a hand-built weighted graph; `.from_qubit_operator(h).to_cost_hamiltonian()` equals `h` for a hand-built Z/ZZ operator | `Graph.to_cost_hamiltonian()` / the input `QubitOperator` itself (existing, independent of the new code path) | `tests/test_problems/test_problem.py` |
 | `to_graph()` round-trips through `qubit_operator_to_graph` for a quadratic-only problem | round-trip (additional, not the oracle) | `tests/test_problems/test_problem.py` |
 | `.is_feasible`/`.evaluate` agree with brute-force enumeration's feasible optimum on a 4–6 variable instance | Brute-force enumeration over all `2**n` assignments, independent of the compiled-Hamiltonian path | `tests/test_problems/test_problem.py` |
 | Equality-constrained Number Partitioning compiles to the closed-form Ising Hamiltonian | Lucas (2014), §2.1, eq. 2.1, evaluated symbolically for a fixed instance (e.g. `n = [3, 1, 1, 2, 2, 1]`) | `tests/test_problems/test_qubo_oracles.py` |
-| *(Phase 2)* `Expression`/`BinaryVariable` `<=`/`>=` with slack-variable expansion produce the documented bit-width | Hand-derived bit width from the constraint's coefficient bounds | `tests/test_problems/test_constraint.py` |
-| *(Phase 2)* 0/1 Knapsack with an inequality (capacity) constraint compiles to the Lucas (2014) §2.3 closed form | Lucas (2014), §2.3, published coefficients for a fixed small instance | `tests/test_problems/test_qubo_oracles.py` |
-| *(Phase 2)* Dense diagonalization of the compiled Knapsack Hamiltonian recovers the textbook-optimal selection/value | Exact diagonalization (numpy/scipy) of the `QubitOperator`'s matrix, independent of the symbolic compiler, against a known-optimal textbook instance | `tests/test_problems/test_qubo_oracles.py` |
-| QAOA and PCE each accept a compiled `OptimizationProblem`'s output end-to-end | QAOA's/PCE's own oracle-backed tests cover algorithmic correctness; this is a hand-off/type-compatibility check | `examples/problems/mwe_qubo_problem.ipynb` (nightly `pytest --nbmake`) |
+| QAOA and PCE each accept a compiled `OptimizationProblem`'s output end-to-end, via their existing `Graph`/`QubitOperator` inputs | QAOA's/PCE's own oracle-backed tests cover algorithmic correctness; this is a hand-off/type-compatibility check | `examples/problems/mwe_qubo_problem.ipynb` (nightly `pytest --nbmake`) |
 
 ## Phases
 
-### Phase 1 — Variables, expressions, equality constraints, QAOA/PCE hand-off
+### Phase 1 — Variables, expressions, equality constraints, graph/operator lift
 
 - [ ] `BinaryVariable` (`_variable.py`): arithmetic/comparison operators per
   the API sketch, identity-based `__hash__`.
@@ -201,22 +224,12 @@ class OptimizationProblem:
   `penalty`.
 - [ ] `OptimizationProblem` (`_problem.py`): `.minimize`, `.subject_to`,
   `.to_cost_hamiltonian`, `.to_graph`, `.evaluate`, `.is_feasible`,
-  `.n_qubits`.
+  `.n_qubits`, `.from_graph`, `.from_qubit_operator`.
 - [ ] `src/qarp/problems/__init__.py` with `__all__`; `"problems"` added to
   `src/qarp/__init__.py`'s namespace `__all__`.
 - [ ] `docs/source/problems.rst` + `docs/source/api.rst` toctree entry.
 - [ ] `examples/problems/mwe_qubo_problem.ipynb`.
-- [ ] Tests: all non-Phase-2 rows of the table above.
-
-### Phase 2 — Inequality constraints via slack variables
-
-- [ ] `Constraint.sense` gains `"le"`/`"ge"`; `<=`/`>=` wired through.
-- [ ] Slack-variable allocation: binary expansion of the slack range sized
-  from the constraint's coefficient bounds, appended as extra problem
-  variables; `OptimizationProblem.n_qubits` accounts for them.
-- [ ] Extend `examples/problems/mwe_qubo_problem.ipynb` with an inequality
-  (capacity-style) constraint.
-- [ ] Tests: the three Phase-2 rows of the table above.
+- [ ] Tests: all rows of the table above.
 
 ## Deviations log
 
