@@ -329,3 +329,241 @@ def test_missing_pyscf_is_a_clear_import_error(monkeypatch):
         helpers.unrestricted_integrals_from_mf(object())
     with pytest.raises(ImportError, match="pip install pyscf"):
         helpers.onv_coefficients_from_civec(np.zeros((1, 1)), 1, (1, 1))
+
+
+@pytest.fixture(scope="module")
+def df_lih():
+    from pyscf import gto, scf
+
+    mol = gto.M(atom="Li 0 0 0; H 0 0 1.6", basis="cc-pvdz", verbose=0)
+    mf = scf.RHF(mol).density_fit(auxbasis="weigend")
+    mf.conv_tol = 1e-12
+    mf.kernel()
+    assert mf.converged
+    return mf
+
+
+def _df_tensor_oracle(mf, ca, cb):
+    from pyscf import lib
+
+    tensor = np.zeros((ca.shape[1], ca.shape[1], cb.shape[1], cb.shape[1]))
+    for packed in mf.with_df.loop():
+        factors = lib.unpack_tril(packed)
+        a = np.einsum("Luv,up,vq->Lpq", factors, ca, ca)
+        b = np.einsum("Luv,ur,vs->Lrs", factors, cb, cb)
+        tensor += np.einsum("Lpq,Lrs->pqrs", a, b)
+    return tensor
+
+
+@requires_pyscf
+def test_df_integrals_use_existing_factors_over_cached_eri(df_lih):
+    mf = df_lih.copy()
+    mf._eri = mf.mol.intor("int2e", aosym="s8")
+    constant, h1, h2 = integrals_from_mf(mf)
+    np.testing.assert_allclose(
+        h2, _df_tensor_oracle(mf, mf.mo_coeff, mf.mo_coeff), rtol=0, atol=1e-10
+    )
+    nocc = mf.mol.nelectron // 2
+    energy = constant + 2 * np.trace(h1[:nocc, :nocc])
+    energy += 2 * np.einsum("iijj->", h2[:nocc, :nocc, :nocc, :nocc])
+    energy -= np.einsum("ijji->", h2[:nocc, :nocc, :nocc, :nocc])
+    np.testing.assert_allclose(energy, mf.e_tot, rtol=0, atol=1e-9)
+
+
+@requires_pyscf
+@pytest.mark.parametrize("auxbasis", ["weigend", "def2-svp-jkfit"])
+def test_lih_ccpvdz_df_cas23_incident(auxbasis):
+    from pyscf import ao2mo, fci, gto, mcscf, scf
+
+    mf = scf.RHF(gto.M(atom="Li 0 0 0; H 0 0 1.6", basis="cc-pvdz", verbose=0))
+    mf = mf.density_fit(auxbasis=auxbasis).run(conv_tol=1e-12)
+    assert mf.converged
+    cas = mcscf.CASCI(mf, 3, 2)
+    cas.canonicalization = False
+    cas.fcisolver.conv_tol = 1e-12
+    cas.kernel()
+    (constant, h1, h2), onv = active_space_from_mf(mf, 2, 3)
+    assert onv == [1, 1, 0, 0, 0, 0]
+    ref_h1, ref_constant = cas.get_h1eff()
+    np.testing.assert_allclose(constant, ref_constant, rtol=0, atol=1e-10)
+    np.testing.assert_allclose(h1, ref_h1, rtol=0, atol=1e-10)
+    fop = restricted_integrals_to_fermion_operator(constant, h1, h2)
+    matrix = fop.sparse_matrix(6).toarray()
+    labels = [
+        i for i in range(64) if (i & 0b010101).bit_count() == 1 and (i & 0b101010).bit_count() == 1
+    ]
+    energy = np.linalg.eigvalsh(matrix[np.ix_(labels, labels)])[0]
+    np.testing.assert_allclose(energy, cas.e_tot, rtol=0, atol=1e-9)
+    # The original conventional-integral path must fail this DF energy oracle.
+    from qarp.operators.integrals import active_space_integrals
+
+    c = mf.mo_coeff
+    exact = ao2mo.full(mf.mol, c, compact=False).reshape((c.shape[1],) * 4)
+    old = active_space_integrals(mf.energy_nuc(), c.T @ mf.get_hcore() @ c, exact, 4, 2, 3)
+    wrong = fci.direct_spin1.kernel(old[1], old[2], 3, (1, 1), ecore=old[0], tol=1e-12)[0]
+    assert abs(wrong - cas.e_tot) > 1e-7
+
+
+@requires_pyscf
+@pytest.mark.parametrize("fitted", [False, True])
+def test_active_transform_only_active_columns_and_never_runs_solver(df_lih, monkeypatch, fitted):
+    from pyscf import ao2mo, mcscf
+
+    import qarp.operators.pyscf as helpers
+
+    mf = df_lih.copy()
+    if not fitted:
+        mf = mf.undo_df()
+    original = mf.mo_coeff.copy()
+    mf.mo_coeff = original[:, [0, 1, 2, 5, 4, 3, *range(6, original.shape[1])]]
+    requested = mf.mo_coeff.copy()
+    ref = mcscf.CASCI(mf, 3, 2)
+    h1ref, cref = ref.get_h1eff()
+    h2ref = ao2mo.restore(1, ref.get_h2eff(), 3)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Full extraction or a solver was called")
+
+    monkeypatch.setattr(helpers, "integrals_from_mf", forbidden)
+    monkeypatch.setattr(mcscf.casci.CASCI, "kernel", forbidden)
+    monkeypatch.setattr(mf, "kernel", forbidden)
+    if fitted:
+        transform = mf.with_df.ao2mo
+
+        def active_transform(coefficients, *args, **kwargs):
+            assert coefficients.shape[1] == 3
+            return transform(coefficients, *args, **kwargs)
+
+        monkeypatch.setattr(mf.with_df, "ao2mo", active_transform)
+    else:
+        transform = ao2mo.full
+
+        def active_conventional_transform(source, coefficients, *args, **kwargs):
+            assert coefficients.shape[1] == 3
+            return transform(source, coefficients, *args, **kwargs)
+
+        monkeypatch.setattr(ao2mo, "full", active_conventional_transform)
+    (constant, h1, h2), _ = active_space_from_mf(mf, 2, 3)
+    for actual, expected in zip((constant, h1, h2), (cref, h1ref, h2ref), strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-10)
+    np.testing.assert_array_equal(mf.mo_coeff, requested)
+
+
+@requires_pyscf
+@pytest.mark.parametrize("cached", [False, True])
+def test_conventional_integral_source_oracle(lih_mf, cached):
+    from pyscf import ao2mo
+
+    mf = lih_mf.copy()
+    ao = mf.mol.intor("int2e")
+    if cached:
+        ao = 0.9 * ao
+        mf._eri = ao2mo.restore(8, ao, mf.mol.nao_nr())
+    else:
+        mf._eri = None
+    mf.with_df = None
+    c = mf.mo_coeff
+    expected = np.einsum("uvwx,up,vq,wr,xs->pqrs", ao, c, c, c, c, optimize=True)
+    np.testing.assert_allclose(integrals_from_mf(mf)[2], expected, rtol=0, atol=1e-10)
+    if cached:
+        (constant, h1, h2), _ = active_space_from_mf(mf, 2, 3)
+        h = c.T @ mf.get_hcore() @ c
+        core = mf.energy_nuc() + 2 * h[0, 0] + expected[0, 0, 0, 0]
+        effective = h[1:4, 1:4] + 2 * expected[1:4, 1:4, 0, 0] - expected[1:4, 0, 0, 1:4]
+        np.testing.assert_allclose(constant, core, rtol=0, atol=1e-10)
+        np.testing.assert_allclose(h1, effective, rtol=0, atol=1e-10)
+        np.testing.assert_allclose(h2, expected[1:4, 1:4, 1:4, 1:4], rtol=0, atol=1e-10)
+
+
+@requires_pyscf
+def test_unrestricted_df_factor_oracle():
+    from pyscf import gto, scf
+
+    mf = scf.UHF(gto.M(atom=H3, basis="sto3g", spin=1, verbose=0)).density_fit(auxbasis="weigend")
+    mf.run(conv_tol=1e-12)
+    assert mf.converged
+    constant, (ha, hb), (gaa, gab, gbb) = unrestricted_integrals_from_mf(mf)
+    ca, cb = mf.mo_coeff
+    for actual, a, b in [(gaa, ca, ca), (gab, ca, cb), (gbb, cb, cb)]:
+        np.testing.assert_allclose(actual, _df_tensor_oracle(mf, a, b), rtol=0, atol=1e-10)
+    na, nb = mf.mol.nelec
+    energy = constant + np.trace(ha[:na, :na]) + np.trace(hb[:nb, :nb])
+    for g, n in [(gaa, na), (gbb, nb)]:
+        core = g[:n, :n, :n, :n]
+        energy += 0.5 * (np.einsum("iijj->", core) - np.einsum("ijji->", core))
+    energy += np.einsum("iijj->", gab[:na, :na, :nb, :nb])
+    np.testing.assert_allclose(energy, mf.e_tot, rtol=0, atol=1e-9)
+
+
+@requires_pyscf
+@pytest.mark.parametrize("electrons,orbitals", [(-2, 2), (6, 3), (1, 2), (2, 6), (4, 1), (2, 0)])
+def test_active_space_validation_before_transform(lih_mf, monkeypatch, electrons, orbitals):
+    from pyscf import mcscf
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("CASCI must not be constructed for invalid counts")
+
+    monkeypatch.setattr(mcscf, "CASCI", forbidden)
+    with pytest.raises(ValueError):
+        active_space_from_mf(lih_mf, electrons, orbitals)
+
+
+@requires_pyscf
+@pytest.mark.parametrize(
+    "atom,spin,electrons,orbitals,onv_expected",
+    [
+        ("Li 0 0 0", 1, 1, 2, [1, 0, 0, 0]),
+        ("C 0 0 0", 2, 2, 2, [1, 0, 1, 0]),
+    ],
+)
+def test_rohf_active_space_retains_reference_spin(atom, spin, electrons, orbitals, onv_expected):
+    from pyscf import ao2mo, mcscf
+
+    from tests.pyscf_recipes import rhf
+
+    mf = rhf(atom, "sto3g", spin=spin)
+    (constant, h1, h2), onv = active_space_from_mf(mf, electrons, orbitals)
+    assert onv == onv_expected
+    reference = mcscf.CASCI(mf, orbitals, electrons)
+    href, cref = reference.get_h1eff()
+    gref = ao2mo.restore(1, reference.get_h2eff(), orbitals)
+    for actual, expected in zip((constant, h1, h2), (cref, href, gref), strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-10)
+
+
+@requires_pyscf
+def test_df_errors_are_not_silently_replaced_by_exact_integrals(lih_mf):
+    from types import SimpleNamespace
+
+    mf = lih_mf.copy()
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("Configured DF data unavailable")
+
+    mf.with_df = SimpleNamespace(ao2mo=broken)
+    with pytest.raises(RuntimeError, match="Configured DF data unavailable"):
+        integrals_from_mf(mf)
+
+
+@requires_pyscf
+def test_df_no_core_active_extraction(df_lih):
+    from pyscf import ao2mo, mcscf
+
+    (constant, h1, h2), onv = active_space_from_mf(df_lih, 4, 3)
+    cas = mcscf.CASCI(df_lih, 3, 4)
+    href, cref = cas.get_h1eff()
+    assert sum(onv) == 4
+    for actual, expected in zip(
+        (constant, h1, h2), (cref, href, ao2mo.restore(1, cas.get_h2eff(), 3)), strict=True
+    ):
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-10)
+
+
+@requires_pyscf
+def test_active_space_cannot_freeze_unpaired_electrons():
+    from pyscf import gto, scf
+
+    mf = scf.ROHF(gto.M(atom="C 0 0 0", basis="sto3g", spin=4, verbose=0))
+    mf.mo_coeff = np.eye(mf.mol.nao_nr())
+    with pytest.raises(ValueError, match="unpaired reference electrons"):
+        active_space_from_mf(mf, 2, 2)

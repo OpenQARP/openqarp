@@ -197,3 +197,32 @@ def test_unrestricted_guards(n_electrons, active_electrons, match):
         unrestricted_active_space_integrals(
             0.0, (h, h), (g, g, g), n_electrons, active_electrons, 4
         )
+
+
+@pytest.mark.parametrize("unrestricted", [False, True])
+def test_generic_reduction_of_density_fitted_tensors(unrestricted):
+    pytest.importorskip("pyscf")
+    from pyscf import ao2mo, gto, mcscf, scf
+
+    from qarp.operators.integrals import unrestricted_active_space_integrals
+    from qarp.operators.pyscf import integrals_from_mf, unrestricted_integrals_from_mf
+
+    mf = scf.RHF(gto.M(atom="Li 0 0 0; H 0 0 1.6", basis="sto3g", verbose=0))
+    mf = mf.density_fit(auxbasis="weigend").run(conv_tol=1e-12)
+    assert mf.converged
+    reference = mcscf.CASCI(mf, 3, 2)
+    href, cref = reference.get_h1eff()
+    gref = ao2mo.restore(1, reference.get_h2eff(), 3)
+    if unrestricted:
+        constant, hs, gs = unrestricted_integrals_from_mf(mf.to_uhf())
+        result = unrestricted_active_space_integrals(constant, hs, gs, (2, 2), (1, 1), 3)
+        c, h, g = result
+        for block in h:
+            np.testing.assert_allclose(block, href, rtol=0, atol=1e-10)
+        for block in g:
+            np.testing.assert_allclose(block, gref, rtol=0, atol=1e-10)
+    else:
+        c, h, g = active_space_integrals(*integrals_from_mf(mf), 4, 2, 3)
+        np.testing.assert_allclose(h, href, rtol=0, atol=1e-10)
+        np.testing.assert_allclose(g, gref, rtol=0, atol=1e-10)
+    np.testing.assert_allclose(c, cref, rtol=0, atol=1e-10)

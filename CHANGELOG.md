@@ -7,6 +7,13 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- PySCF integral extraction honors configured density fitting and supplied AO
+  integrals. Restricted active spaces transform only active MOs and obtain
+  consistent frozen-core terms from PySCF without running a solver; reference
+  occupations retain the active alpha/beta electron counts for ROHF inputs.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added

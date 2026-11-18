@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._fermion_operator import FermionOperator
-from .integrals import active_space_integrals, restricted_integrals_to_fermion_operator
+from .integrals import restricted_integrals_to_fermion_operator
 from .onv import Onv, active_space, onv_from_spatial_occupations
 
 
@@ -32,13 +32,29 @@ def _n_orbitals(mf: Any) -> int:
     return int(coefficients[0].shape[1] if coefficients.ndim == 3 else coefficients.shape[1])
 
 
+def _mo_integrals(mf: Any, coefficients: tuple[NDArray, ...]) -> NDArray:
+    """Honor the configured DF object, then supplied AO integrals, then the molecule."""
+    fitting = getattr(mf, "with_df", None)
+    if fitting:
+        values = fitting.ao2mo(coefficients, compact=False)
+    else:
+        ao_integrals = getattr(mf, "_eri", None)
+        source = mf.mol if ao_integrals is None else ao_integrals
+        values = _pyscf("ao2mo").general(source, coefficients, compact=False)
+    return np.asarray(values).reshape(tuple(c.shape[1] for c in coefficients))
+
+
 def integrals_from_mf(mf: Any) -> tuple[float, NDArray, NDArray]:
-    """(constant, one-electron, two-electron) in the MO spatial basis, chemists' notation."""
-    ao2mo = _pyscf("ao2mo")
+    """MO spatial integrals in chemists' notation, honoring DF and supplied AO integrals.
+
+    Uses the existing ``mf.with_df`` when enabled, otherwise ``mf._eri`` or
+    molecular integrals. The dense full-space two-electron tensor is quartic
+    in the MO count; use :func:`active_space_from_mf` for a restricted active space.
+    """
+    _pyscf("ao2mo")
     constant = float(mf.energy_nuc())
     one_electron = mf.mo_coeff.T @ mf.get_hcore() @ mf.mo_coeff
-    n = one_electron.shape[0]
-    two_electron = ao2mo.full(mf.mol, mf.mo_coeff, aosym="s1").reshape([n] * 4)
+    two_electron = _mo_integrals(mf, (mf.mo_coeff,) * 4)
     return constant, one_electron, two_electron
 
 
@@ -60,14 +76,30 @@ def active_space_from_mf(
 ) -> tuple[tuple[float, NDArray, NDArray], Onv]:
     """Frozen-core active-space integrals and the matching reference ONV (restricted).
 
-    The two calls every active-space example makes together:
-    ``active_space_integrals(*integrals_from_mf(mf), n_electrons, e, o)`` and
-    ``active_space(onv_from_mf(mf), e, o)``.
+    Uses PySCF CASCI effective-Hamiltonian getters without running a solver.
+    Only active MOs are transformed for the two-electron tensor; the constant
+    includes nuclear and frozen-core energies. The supplied DF configuration
+    and orbital order are retained. Output storage is quartic in active MOs.
     """
-    integrals = active_space_integrals(
-        *integrals_from_mf(mf), mf.mol.nelectron, active_electrons, active_orbitals
-    )
-    return integrals, active_space(onv_from_mf(mf), active_electrons, active_orbitals)
+    mcscf = _pyscf("mcscf")
+    n_core, remainder = divmod(mf.mol.nelectron - active_electrons, 2)
+    if active_electrons < 0 or active_orbitals < 1:
+        raise ValueError("Active electrons must be non-negative and active orbitals positive.")
+    if n_core < 0:
+        raise ValueError("Cannot have more active electrons than electrons.")
+    if remainder:
+        raise ValueError("n_electrons - active_electrons must be even (doubly occupied core).")
+    if n_core + active_orbitals > _n_orbitals(mf):
+        raise ValueError("Active window exceeds the number of orbitals.")
+    n_alpha, n_beta = mf.mol.nelec
+    active_counts = (n_alpha - n_core, n_beta - n_core)
+    if active_counts[1] < 0:
+        raise ValueError("Active electrons cannot remove unpaired reference electrons.")
+    onv = active_space(onv_from_mf(mf), active_counts, active_orbitals)
+    cas = mcscf.CASCI(mf, active_orbitals, active_electrons)
+    h1, constant = cas.get_h1eff(mf.mo_coeff)
+    h2 = _pyscf("ao2mo").restore(1, cas.get_h2eff(mf.mo_coeff), active_orbitals)
+    return (float(constant), np.asarray(h1), np.asarray(h2)), onv
 
 
 def onv_coefficients_from_civec(
@@ -146,16 +178,15 @@ def unrestricted_integrals_from_mf(
     interleave happens once, in ``spin_blocks_to_spin_orbital`` (via
     ``unrestricted_integrals_to_fermion_operator``); never an aabb layout.
     """
-    ao2mo = _pyscf("ao2mo")
+    _pyscf("ao2mo")
     constant = float(mf.energy_nuc())
     c_alpha, c_beta = mf.mo_coeff
     hcore = mf.get_hcore()
     h_alpha = c_alpha.T @ hcore @ c_alpha
     h_beta = c_beta.T @ hcore @ c_beta
-    n = h_alpha.shape[0]
 
     def block(c1: NDArray, c2: NDArray) -> NDArray:
-        return ao2mo.general(mf.mol, (c1, c1, c2, c2), compact=False).reshape([n] * 4)
+        return _mo_integrals(mf, (c1, c1, c2, c2))
 
     return (
         constant,

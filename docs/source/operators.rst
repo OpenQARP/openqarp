@@ -636,8 +636,8 @@ The :code:`qarp.operators.integrals` module is the restricted-chemistry layer on
     The :code:`integrals` functions assume chemists' notation, that is, that the two-electron integrals are of the form :math:`(11|22)`, and integrals obtained under a restricted formalism. Spin-orbital tensors in any other convention can go through :code:`fermion_operator_from_tensor` directly.
 
 OpenQARP does not wrap any classical chemistry driver: the contract is plain numpy integral arrays,
-obtained from whichever package you prefer. With pyscf, the arrays are three lines from a converged
-mean-field object —
+obtained from whichever package you prefer. With pyscf, conventional molecular integrals
+are three lines from a converged mean-field object —
 
 .. code-block:: python
 
@@ -650,8 +650,8 @@ mean-field object —
     h2 = ao2mo.full(mf.mol, mf.mo_coeff, aosym="s1").reshape([h1.shape[0]] * 4)
     fop = restricted_integrals_to_fermion_operator(constant, h1, h2)
 
-— and that recipe ships as :mod:`qarp.operators.pyscf`, so the same thing, plus the reference
-determinant, is
+The adapters in :mod:`qarp.operators.pyscf` also honor density fitting and supplied AO
+integrals. The Hamiltonian and reference determinant are
 
 .. code-block:: python
 
@@ -674,6 +674,43 @@ reference ONV — :func:`~qarp.operators.pyscf.active_space_from_mf` does both:
 
     integrals, onv_cas = active_space_from_mf(mf, active_electrons=2, active_orbitals=2)
     fop_cas = restricted_integrals_to_fermion_operator(*integrals)
+
+Both full-space adapters use the existing :code:`mf.with_df` object when enabled,
+including its auxiliary basis and stored factors. Otherwise they transform supplied
+:code:`mf._eri` AO integrals, or conventional molecular integrals if these are absent.
+Errors from a configured DF backend propagate rather than switching approximations.
+This corrects earlier behavior that always recomputed conventional integrals from
+:code:`mf.mol`, even for density-fitted HF orbitals. With J-only fitting
+(:code:`only_dfj=True`), HF mixes fitted Coulomb with exact exchange; its energy need
+not equal a determinant expectation of a fully fitted Hamiltonian. These molecular
+integral adapters do not promise to reproduce DFT functional or embedding corrections.
+
+:code:`active_space_from_mf` obtains the frozen-core constant and effective one-electron
+matrix from PySCF CASCI getters and transforms only active MOs for the two-electron
+tensor. It runs neither SCF nor CI. The returned constant includes nuclear repulsion
+and frozen-core energy exactly once. The generic :code:`active_space_integrals`
+function only reduces full-space arrays supplied by its caller; it computes no
+integrals. Dense output still requires quartic storage: in all MOs for full-space
+extraction and in active MOs for direct active-space extraction. AO/DF work remains.
+
+When a reference CASCI/CASSCF object uses different orbitals, active indices or fitting
+settings, extract from that reference object directly:
+
+.. code-block:: python
+
+    from pyscf import ao2mo, mcscf
+
+    mc = mcscf.CASCI(mf, 2, 2)
+    h1_ref, core_constant = mc.get_h1eff(mc.mo_coeff)
+    h2_ref = ao2mo.restore(1, mc.get_h2eff(mc.mo_coeff), mc.ncas)
+    reference_hamiltonian = restricted_integrals_to_fermion_operator(
+        float(core_constant), h1_ref, h2_ref
+    )
+
+Permute the MO coefficients once before building integrals, reference states and
+properties, and retain that same basis for every comparison. No SCF rerun is needed
+to register an orbital permutation. See
+``examples/operators/mwe_density_fitted_active_space.ipynb``.
 
 A correlated reference — a pyscf FCI or CASCI vector rather than the single determinant — goes
 through :func:`~qarp.operators.pyscf.onv_coefficients_from_civec` ``(civec, n_orbitals, nelec,

@@ -210,6 +210,10 @@ def active_space_integrals(
     ``mcscf.CASCI.get_h1eff`` convention).  Inputs and outputs are in the
     spatial-orbital basis, chemists' notation ``two_electron[p,q,r,s]`` = (pq|rs).
 
+    This only reduces supplied arrays (conventional or density-fitted); it
+    computes no integrals. For PySCF extraction without a full MO tensor,
+    use ``qarp.operators.pyscf.active_space_from_mf``.
+
     Args:
         constant: The scalar term (e.g. nuclear repulsion).
         one_electron: Full-space one-electron integral matrix.
