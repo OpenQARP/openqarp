@@ -1,8 +1,16 @@
+from .. import _geometry as geometry
 from .base import GateRenderer, LabelInfo
 
 
 class MultiGateRenderer(GateRenderer):
     """Renderer for multi-qubit gates."""
+
+    def footprint(self, cmd) -> float:
+        label = self._format_label(str(cmd.op))
+        if label.lower() in ("swap", "cswap"):
+            return geometry.pt_to_x(self.config.gate_size)
+        text = geometry.text_width_pt(label, self.config.text_size)
+        return geometry.pt_to_x(max(self.config.gate_size, text))
 
     def render(self, ax, cmd, x: float, y_positions: dict, prev_label_y: LabelInfo) -> LabelInfo:
         original_label = str(cmd.op)

@@ -245,6 +245,16 @@ class TestBreakLongLabel:
         out = _lm()._break_long_label("BlockEncoding")
         assert out == "Block\nEncoding"
 
+    def test_name_too_long_for_two_lines_breaks_between_words(self):
+        """ "Entangler(CX)" is 13 characters, one over the width: the name still
+        breaks at the word start, never inside "Entangler"."""
+        out = _lm()._break_long_label("LinearEntangler(CX)")
+        assert out == "Linear\nEntangler(CX)"
+
+    def test_snake_case_name_breaks_after_an_underscore(self):
+        assert _lm()._break_long_label("prepare_initial_state") == "prepare_\ninitial_state"
+        assert _lm()._break_long_label("inner_unitary") == "inner_\nunitary"
+
     def test_last_resort_break_without_separators(self):
         out = _lm()._break_long_label("abcdefghijklmnop")
         assert out == "abcdefghijkl\nmnop"

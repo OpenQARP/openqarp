@@ -56,7 +56,7 @@ The ``plot`` function accepts the following parameters:
 **Basic Parameters:**
 
 * ``circ``: The circuit or Block to be plotted.
-* ``figsize``: The size of the figure in inches (width, height). If ``None``, the size is auto-calculated.
+* ``figsize``: The size of the figure in inches (width, height). If ``None``, the size is auto-calculated so that every label fits its box and every box its column. Labels keep their size in a figure of another size, so in a narrower one neighbouring boxes can overlap.
 * ``save_fig``: The path to save the figure. If ``None``, the figure is not saved.
 * ``color_scheme``: Color scheme for gates. See :ref:`color-schemes` section.
 * ``spacing``: Horizontal spacing between gates. If ``None``, uses default from config.
@@ -228,6 +228,57 @@ composes a sub-block first.
     :align: center
 
     Box gates decomposed (``decompose_boxes=True``).
+
+
+Hybrid Programs
+---------------
+
+A program that measures mid-circuit, resets qubits or guards gates with a classical
+condition is drawn in time order.
+
+.. code-block:: python
+
+   from qarp.blocks import CompositeBlock, ConditionalBlock, SimpleBlock
+
+   measure = SimpleBlock(2)
+   measure.h(0).measure(0, 0)
+   measure.build()
+   flip = SimpleBlock(2)
+   flip.x(1)
+   flip.build()
+   cond = ConditionalBlock(cbits=[0], values=[True], then_body=flip)
+   cond.target_cbits = [0]
+   tail = SimpleBlock(2)
+   tail.reset(0).h(0)
+   tail.build()
+   hybrid = CompositeBlock([measure, cond, tail], 2).build()
+
+   plot(hybrid, decompose_boxes=True)
+
+.. figure:: ./images/plot_hybrid.svg
+    :width: 60%
+    :align: center
+
+    A measurement, a gate conditioned on its outcome, and a reset.
+
+* A measurement followed by anything else on its qubit, or whose bit a condition reads,
+  is drawn where it happens. Measurements that close their wire share the last column.
+* A reset is the box ``|0>``.
+* A barrier is a dashed line across the wires it fences.
+* When the program has a classical condition, one double line ``c`` below the qubits
+  stands for all classical bits. A measurement whose bit is read later points down to
+  it, with the bit named under the line (``c0``). A conditional gate is joined to it by
+  a dot, with its condition under the line: ``c0=1``, or ``c0=1, c1=0`` for a condition
+  on several bits. Gates of an else arm carry the negated condition, ``c0=0`` or
+  ``not(c0=1, c1=0)``.
+* With boxes kept (``decompose_boxes=False``), a boxed sub-block names the bits its
+  measurements write, and a boxed ``ConditionalBlock`` its condition: ``c0=1``,
+  ``c0=1 / else`` when it has both arms, and the negated ``c0=0`` when it has only an
+  else arm.
+* A measurement drawn where it happens takes a gate index and can be queried like a gate
+  (see `Gate Indexing and Inspection`_); the closing measurements do not.
+
+The ``GateInfo`` of a gate carries the same information in ``cbits`` and ``condition``.
 
 
 .. _label-modes:
@@ -578,7 +629,7 @@ Print additional information about the circuit:
    # Output:
    # Circuit information:
    #   Qubits: 4
-   #   Operations (measurements excluded): 7
+   #   Operations (closing measurements excluded): 7
    #   Global phase: 0.0
 
 

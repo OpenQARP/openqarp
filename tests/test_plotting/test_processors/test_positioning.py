@@ -55,9 +55,22 @@ def test_a_two_qubit_gate_blocks_every_wire_it_spans():
     assert get_x_positions_list(cmds, [0, 1, 2]) == [0.25, 1.25]
 
 
-def test_measure_commands_take_no_column():
+def test_a_measurement_takes_a_column_like_any_gate():
     cmds = [_Cmd("Measure", [0]), _Cmd("h", [0])]
-    assert get_x_positions_list(cmds, [0]) == [0.25]
+    assert get_x_positions_list(cmds, [0]) == [0.25, 1.25]
+
+
+def test_a_command_reaching_another_wire_blocks_the_wires_in_between():
+    """x(0) links down past q1, so h(1) cannot share its column; without the
+    link the two are disjoint and do."""
+    cmds = [_Cmd("x", [0]), _Cmd("h", [1])]
+    assert get_x_positions_list(cmds, [0, 1], [1, None]) == [0.25, 1.25]
+    assert get_x_positions_list(cmds, [0, 1], [None, None]) == [0.25, 0.25]
+
+
+def test_a_reach_towards_the_first_wire_blocks_the_wires_above():
+    cmds = [_Cmd("x", [1]), _Cmd("h", [0])]
+    assert get_x_positions_list(cmds, [0, 1], [0, None]) == [0.25, 1.25]
 
 
 def test_qubitless_commands_are_skipped():

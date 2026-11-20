@@ -1,11 +1,16 @@
 from matplotlib.patches import Rectangle
 
+from .. import _geometry as geometry
 from ..styles import get_text_color
 from .base import GateRenderer, LabelInfo
 
 
 class BoxedGateRenderer(GateRenderer):
     """Renderer for boxed gates."""
+
+    def footprint(self, cmd) -> float:
+        label = self._format_label(getattr(cmd.op, "circuit_name", None) or "_no_name_")
+        return self._block_box_width(label, cmd.qubits)
 
     def render(self, ax, cmd, x: float, y_positions: dict, prev_label_y: LabelInfo) -> LabelInfo:
         original_label = getattr(cmd.op, "circuit_name", "_no_name_")
@@ -35,6 +40,7 @@ class BoxedGateRenderer(GateRenderer):
         # Use new label positioning system
         y_text, x_offset, label = self._get_label_position(x, base_y, original_label, prev_label_y)
         is_short_text = len(label) < self.config.max_chars
+        box_width = self._block_box_width(label, cmd.qubits, ax)
 
         # Draw identity box or empty block box as transparent with dashed outline
         # the rest as white with solid outline
@@ -47,8 +53,8 @@ class BoxedGateRenderer(GateRenderer):
 
         ax.add_patch(
             Rectangle(
-                (x - self.config.spacing / 3, y_box_min),
-                self.config.spacing * 2 / 3,
+                (x - box_width / 2, y_box_min),
+                box_width,
                 box_height,
                 facecolor=facecolor,
                 edgecolor=self.config.structure_color,
@@ -82,7 +88,7 @@ class BoxedGateRenderer(GateRenderer):
         # Add qubit numbers at the corresponding y positions
         for qubit in cmd.qubits:
             qubit_y = y_positions[qubit]
-            number_x = x - (self.config.spacing / 3) * 0.9
+            number_x = x - box_width / 2 + geometry.pt_to_x(2.5, ax)
 
             ax.text(
                 number_x,

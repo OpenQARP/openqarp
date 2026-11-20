@@ -1,16 +1,31 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 from IPython.display import HTML, display
 
+from . import _geometry as geometry
 from ._config import LabelMode, PlotConfig
 from ._processors.circuit_processor import CircuitProcessor, CircuitValidationError
 from ._renderers import LabelInfo, RendererFactory
-from .styles._colors import get_text_color
+from ._renderers.hybrid import draw_meter
 from .styles._theme import qarp_rc
+
+# The classical wire sits one wire pitch below the last qubit.
+_CLASSICAL_Y = -1.0
+
+
+def _link_label(cmd, reads: bool, writes: bool) -> str:
+    """Text under a command's link to the classical wire: the bits it writes,
+    then the condition it reads."""
+    parts = []
+    if writes:
+        parts.append(", ".join(f"c{b}" for b in cmd.cbits))
+    if reads:
+        parts.append(cmd.condition or ", ".join(f"c{b}" for b in cmd.condition_bits))
+    return "; ".join(parts)
 
 
 def _in_notebook() -> bool:
@@ -52,6 +67,18 @@ class GateInfo:
     x_position: float  # X position in the plot
     y_position: float  # Y position (center) in the plot
     command: Any  # The original qx.Command object
+    cbits: List[int] = field(default_factory=list)  # Classical bits the gate writes
+    condition: Optional[str] = None  # Classical condition guarding the gate, e.g. "c0=1"
+
+    @property
+    def classical(self) -> str:
+        """The gate's classical side as text: ``-> c0`` and/or ``if c0=1``."""
+        parts = []
+        if self.cbits:
+            parts.append("-> " + ", ".join(f"c{b}" for b in self.cbits))
+        if self.condition:
+            parts.append(f"if {self.condition}")
+        return " ".join(parts)
 
     def __repr__(self) -> str:
         qubits_str = ", ".join(self.qubits)
@@ -259,66 +286,78 @@ class CircuitPlotter:
         self._measure_payload = []
         self._plot_uid = uuid.uuid4().hex[:8]
 
-        # Process circuit data
-        try:
-            circuit_data = self.processor.process_circuit(
-                circ, decompose_boxes, flatten_layers, invert_order
-            )
-        except CircuitValidationError as e:
-            raise ValueError(str(e)) from e  # Surface validation failures as ValueError to callers
-
-        if verbose:
-            self._print_circuit_info(circuit_data)
-
-        # Create figure
-        if figsize is None:
-            # Height tracks the full y-axis span — ``set_ylim(-1, n_qubits)`` adds
-            # one unit of padding above and below — so the per-wire spacing stays
-            # constant (0.5 in/wire) regardless of qubit count.  Scaling by
-            # ``n_qubits`` alone squashes the wires of small circuits.
-            figsize = (
-                (circuit_data.n_layers + 1) * self.config.spacing * 4,
-                (circuit_data.n_qubits + 1) / 2 * 0.9,  # 0.9 to adjust for less vertical spacing
-            )
-
         # Theme rc params scoped to this figure only — never mutate the user's
-        # global rcParams.  Rendering (show/savefig) must also happen inside
-        # the context: fonts resolve at draw time.
+        # global rcParams.  Layout measures labels in the theme's font and
+        # rendering resolves fonts at draw time, so both run inside the context.
         with plt.rc_context(qarp_rc(use_latex)):
+            try:
+                circuit_data = self.processor.process_circuit(
+                    circ, decompose_boxes, flatten_layers, invert_order, width_of=self._width_of
+                )
+            except CircuitValidationError as e:
+                # Surface validation failures as ValueError to callers
+                raise ValueError(str(e)) from e
+
+            if verbose:
+                self._print_circuit_info(circuit_data)
+
+            spacing = self.config.spacing
+            label_pt = 6 + max(
+                geometry.text_width_pt(str(q), self.config.text_size) for q in circuit_data.qubits
+            )
+            x_low, x_high = -spacing, circuit_data.wire_end + spacing / 2
+            y_limits = (
+                _CLASSICAL_Y - 0.75 if circuit_data.has_classical_wire else -0.75,
+                circuit_data.n_qubits - 0.25,
+            )
+
+            # The axes fill the figure and the default figure is sized from the
+            # natural scale, so a label measured in points fits the box drawn
+            # for it in data units.  The margins hold the qubit labels: in a
+            # figure of a given width they take the same points of it.
+            if figsize is None:
+                margin = geometry.pt_to_x(label_pt)
+                figsize = (
+                    (x_high - x_low + 2 * margin) * geometry.X_INCH,
+                    (y_limits[1] - y_limits[0]) * geometry.Y_INCH,
+                )
+            else:
+                room_pt = max(figsize[0] * 72 - 2 * label_pt, label_pt)
+                margin = label_pt * (x_high - x_low) / room_pt
+            x_limits = (x_low - margin, x_high + margin)
             fig, ax = plt.subplots(figsize=figsize)
+            fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+            ax.set_xlim(*x_limits)
+            ax.set_ylim(*y_limits)
+            ax.axis("off")
 
             # Draw circuit elements
             self._draw_qubit_lines(
-                ax,
-                circuit_data.qubits,
-                circuit_data.y_positions,
-                circuit_data.n_layers * self.config.spacing,
+                ax, circuit_data.qubits, circuit_data.y_positions, circuit_data.wire_end
             )
+            if circuit_data.has_classical_wire:
+                self._draw_classical_wire(ax, circuit_data.wire_end)
 
             prev_label_y: LabelInfo = (None, None)
             for idx, cmd in enumerate(circuit_data.non_measure_cmds):
-                x = circuit_data.x_positions[idx] * self.config.spacing
                 prev_label_y = self._draw_gate(
-                    ax, cmd, x, circuit_data.y_positions, prev_label_y, gate_index=idx
+                    ax,
+                    cmd,
+                    circuit_data.x_coords[idx],
+                    circuit_data.y_positions,
+                    prev_label_y,
+                    gate_index=idx,
+                    reads=circuit_data.reads_classical[idx],
+                    writes=circuit_data.writes_classical[idx],
                 )
 
             if circuit_data.n_measures > 0:
                 self._draw_measurements(
                     ax,
-                    circuit_data.commands,
-                    (circuit_data.n_layers + 1) * self.config.spacing,
+                    circuit_data.terminal_measures,
+                    circuit_data.measure_x,
                     circuit_data.y_positions,
                 )
-
-            # Set axis properties
-            ax.set_ylim(-1, circuit_data.n_qubits)
-            last_x = (
-                circuit_data.x_positions[-1] * self.config.spacing
-                if circuit_data.x_positions
-                else 0
-            )
-            ax.set_xlim(-self.config.spacing / 2, last_x + 2 * self.config.spacing)
-            ax.axis("off")
 
             # Handle output
             if scrollable is None:
@@ -349,12 +388,20 @@ class CircuitPlotter:
         y_positions: dict,
         prev_label_y: LabelInfo,
         gate_index: Optional[int] = None,
+        reads: bool = False,
+        writes: bool = False,
     ) -> LabelInfo:
-        """Draw a gate using appropriate renderer and optionally record gate info."""
+        """Draw a gate using appropriate renderer and optionally record gate info.
+
+        ``reads`` / ``writes`` add the gate's link to the classical wire: it is
+        guarded by a classical condition, or it writes a bit a later one reads.
+        """
         gate_type = self.renderer_factory.classify_gate(cmd)
         renderer = self.renderer_factory.get_renderer(gate_type)
         before = list(ax.get_children())
         result = renderer.render(ax, cmd, x, y_positions, prev_label_y)
+        if reads or writes:
+            self._draw_classical_link(ax, cmd, x, y_positions, reads, writes)
 
         # Record gate info for querying
         if gate_index is not None:
@@ -385,6 +432,8 @@ class CircuitPlotter:
                 x_position=x,
                 y_position=y_center,
                 command=cmd,
+                cbits=list(getattr(cmd, "cbits", ())),
+                condition=getattr(cmd, "condition", None),
             )
             self._gate_registry.append(gate_info)
 
@@ -413,14 +462,25 @@ class CircuitPlotter:
 
         return result
 
-    def _draw_qubit_lines(self, ax, qubits, y_positions, x_end):
+    def _width_of(self, cmd, reads: bool = False, writes: bool = False) -> float:
+        """Width a drawn command needs in its column, in data units: its box,
+        or the label under its link to the classical wire if that is wider."""
+        renderer = self.renderer_factory.get_renderer(self.renderer_factory.classify_gate(cmd))
+        width = renderer.footprint(cmd)
+        label = _link_label(cmd, reads, writes)
+        if label:
+            link = geometry.text_width_pt(label, self.config.text_size * 0.8)
+            width = max(width, geometry.pt_to_x(link))
+        return width
+
+    def _draw_qubit_lines(self, ax, qubits, y_positions, wire_end):
         """Draw horizontal lines for qubits."""
         for q in qubits:
             y = y_positions[q]
             ax.hlines(
                 y,
                 -self.config.spacing / 2,
-                x_end + self.config.spacing,
+                wire_end,
                 color=self.config.wire_color,
                 linewidth=1.4,
                 zorder=0,
@@ -429,67 +489,58 @@ class CircuitPlotter:
                 va="center", fontsize=self.config.text_size, color=self.config.muted_color
             )
             ax.text(-self.config.spacing, y, str(q), ha="right", **label_kwargs)
-            ax.text(x_end + 1.5 * self.config.spacing, y, str(q), ha="left", **label_kwargs)
+            ax.text(wire_end + self.config.spacing / 2, y, str(q), ha="left", **label_kwargs)
+
+    def _draw_classical_wire(self, ax, wire_end):
+        """Draw the classical wire: one double line for all classical bits."""
+        color = self.config.gate_color("measure")
+        offset = geometry.pt_to_y(1.3, ax)
+        for y in (_CLASSICAL_Y - offset, _CLASSICAL_Y + offset):
+            ax.hlines(y, -self.config.spacing / 2, wire_end, color=color, linewidth=1.0, zorder=0)
+        label_kwargs = dict(va="center", fontsize=self.config.text_size, color=color)
+        ax.text(-self.config.spacing, _CLASSICAL_Y, "c", ha="right", **label_kwargs)
+        ax.text(wire_end + self.config.spacing / 2, _CLASSICAL_Y, "c", ha="left", **label_kwargs)
+
+    def _draw_classical_link(self, ax, cmd, x, y_positions, reads, writes):
+        """Join a command to the classical wire with a double line.
+
+        A dot on the wire marks a condition being read, an arrowhead a bit
+        being written; the bits or the condition are named under the wire.
+        """
+        color = self.config.gate_color("measure")
+        y_gate = min(y_positions[q] for q in cmd.qubits)
+        offset = geometry.pt_to_x(1.3, ax)
+        for dx in (-offset, offset):
+            ax.vlines(x + dx, _CLASSICAL_Y, y_gate, color=color, linewidth=1.0, zorder=0.5)
+        if writes:
+            ax.plot(x, _CLASSICAL_Y + geometry.pt_to_y(3.5, ax), "v", color=color, markersize=5)
+        if reads:
+            ax.plot(x, _CLASSICAL_Y, "o", color=color, markersize=self.config.control_size)
+        ax.text(
+            x,
+            _CLASSICAL_Y - geometry.pt_to_y(5, ax),
+            _link_label(cmd, reads, writes),
+            ha="center",
+            va="top",
+            fontsize=self.config.text_size * 0.8,
+            color=color,
+            zorder=3,
+        )
 
     def _draw_measurements(self, ax, commands, x, y_positions):
-        """Draw measurement operations."""
-        k = 0
-        for cmd in commands:
-            if str(cmd.op).lower() == "measure":
-                before_ids = {id(a) for a in ax.get_children()}
-                y = y_positions[cmd.qubits[0]]
-                assert self.config.gate_colors is not None  # __post_init__ fills it
-                measure_color = self.config.gate_colors["measure"]
-                if self.config.gate_style == "outline":
-                    # Meter box: amber outline on a tinted face, ink glyph.
-                    face, edge = self.config.gate_face_edge(measure_color)
-                    ax.plot(
-                        x,
-                        y,
-                        "s",
-                        mfc=face,
-                        mec=edge,
-                        mew=self.config.gate_edge_width,
-                        markersize=self.config.gate_size,
-                    )
-                    ax.text(
-                        x,
-                        y,
-                        "M",
-                        ha="center",
-                        va="center",
-                        fontsize=self.config.text_size,
-                        color=self.config.text_color,
-                    )
-                else:
-                    ax.plot(
-                        x,
-                        y,
-                        ">",
-                        color=measure_color,
-                        markersize=self.config.gate_size,
-                    )
-                    ax.text(
-                        x,
-                        y,
-                        "M",
-                        ha="right",
-                        va="center",
-                        fontsize=self.config.text_size,
-                        color=get_text_color(measure_color),
-                    )
-                for j, artist in enumerate(a for a in ax.get_children() if id(a) not in before_ids):
-                    artist.set_gid(f"qarp-{self._plot_uid}-m{k}-a{j}")
-                self._measure_payload.append(
-                    {"key": f"m{k}", "qubits": [str(q) for q in cmd.qubits]}
-                )
-                k += 1
+        """Draw the closing measurements in one column."""
+        for k, cmd in enumerate(commands):
+            before_ids = {id(a) for a in ax.get_children()}
+            draw_meter(ax, self.config, x, y_positions[cmd.qubits[0]])
+            for j, artist in enumerate(a for a in ax.get_children() if id(a) not in before_ids):
+                artist.set_gid(f"qarp-{self._plot_uid}-m{k}-a{j}")
+            self._measure_payload.append({"key": f"m{k}", "qubits": [str(q) for q in cmd.qubits]})
 
     def _print_circuit_info(self, circuit_data):
         """Print circuit information."""
         print("Circuit information:")
         print(f"  Qubits: {circuit_data.n_qubits}")
-        print(f"  Operations (measurements excluded): {len(circuit_data.non_measure_cmds)}")
+        print(f"  Operations (closing measurements excluded): {len(circuit_data.non_measure_cmds)}")
         print(f"  Global phase: {circuit_data.global_phase}")
 
     def _create_scrollable_output(self, fig, interactive: bool = False):

@@ -3,6 +3,7 @@ from .boxed import BoxedGateRenderer
 from .controlled import ControlledGateRenderer
 from .controlled_block import ControlledBlockRenderer
 from .global_phase import GlobalPhaseRenderer
+from .hybrid import BarrierRenderer, MeasureRenderer, ResetRenderer
 from .label_manager import LabelManager
 from .multi import MultiGateRenderer
 from .single import SingleGateRenderer
@@ -21,6 +22,9 @@ class RendererFactory:
             "controlled_block": ControlledBlockRenderer(config, self.label_manager),
             "multi": MultiGateRenderer(config, self.label_manager),
             "global_phase": GlobalPhaseRenderer(config, self.label_manager),
+            "measure": MeasureRenderer(config, self.label_manager),
+            "reset": ResetRenderer(config, self.label_manager),
+            "barrier": BarrierRenderer(config, self.label_manager),
         }
 
     def reset_label_manager(self) -> None:
@@ -60,6 +64,8 @@ class RendererFactory:
         # Handle global phase gates (no qubits)
         if len(cmd.qubits) == 0:
             return "global_phase"
+        elif name in ("measure", "reset", "barrier"):
+            return name
         elif name in self._CONTROLLED:
             return "controlled"
         elif name == "controlledblock":

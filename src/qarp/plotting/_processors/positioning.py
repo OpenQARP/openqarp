@@ -19,18 +19,20 @@ def get_y_positions(qubits, invert_order: bool = False) -> Dict:
     return {q: (i if invert_order else n - 1 - i) for i, q in enumerate(qubits)}
 
 
-def get_x_positions_list(commands, qubits):
-    """Calculate x positions for gates with layer flattening."""
+def get_x_positions_list(commands, qubits, reach=None):
+    """Calculate x positions for gates with layer flattening.
+
+    ``reach[i]`` is the index of a wire the drawing of command ``i`` extends
+    to beyond its own qubits (a link to the classical wire), or None; every
+    wire up to it is kept free in the command's column.
+    """
     qubit_x = {q: 0 for q in qubits}
     x_positions = []
 
     # mapping for all qubits, named or unnamed
     qubit_to_index = {q: i for i, q in enumerate(qubits)}
 
-    for cmd in commands:
-        if str(cmd.op).lower() == "measure":
-            continue
-
+    for i, cmd in enumerate(commands):
         involved_qubits = sorted(set(flatten_qubits(cmd.qubits)), key=lambda q: qubit_to_index[q])
 
         # Skip gates with no qubits (e.g., global Phase gate)
@@ -40,6 +42,8 @@ def get_x_positions_list(commands, qubits):
 
         min_idx = min(qubit_to_index[q] for q in involved_qubits)
         max_idx = max(qubit_to_index[q] for q in involved_qubits)
+        if reach is not None and reach[i] is not None:
+            min_idx, max_idx = min(min_idx, reach[i]), max(max_idx, reach[i])
         q_span = [q for q in qubits if min_idx <= qubit_to_index[q] <= max_idx]
 
         x = max(qubit_x[q] for q in q_span)

@@ -155,6 +155,18 @@ class LabelManager:
                 if len(line1) <= max_width and len(line2) <= max_width:
                     return f"{line1}\n{line2}"
 
+        # A name too long for that still breaks between two words rather than
+        # inside one: at the most even word start, if neither line runs far over.
+        word_starts = [
+            i
+            for i in range(1, len(label))
+            if (label[i].isupper() and label[i - 1].islower()) or label[i - 1] == "_"
+        ]
+        if word_starts:
+            i = min(word_starts, key=lambda i: max(i, len(label) - i))
+            if max(i, len(label) - i) <= max_width * 3 // 2:
+                return f"{label[:i]}\n{label[i:]}"
+
         # Last resort: break into 2 lines with ellipsis on second line
         if len(label) > max_width:
             line1 = label[:max_width]

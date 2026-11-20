@@ -7,6 +7,22 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Circuit plots of hybrid programs.  `plot()` raised `ValueError` for a block
+  with a gate or a reset after a measurement, or with a qubit measured
+  twice, and drew every measurement in the last column.  Measurements are
+  now drawn in time order, a reset as the box `|0>` and a barrier as a
+  dashed line.  Gates under a classical condition were drawn as
+  unconditional gates; they are now joined to a classical wire that names
+  the condition (`c0=1`), and the measurement that writes the bit points to
+  the same wire.
+- Circuit plots with long labels.  Gate boxes and block boxes had a fixed
+  size, so a label such as `Ry(0.8)` or a block name ran over its box and
+  over the neighbouring gates.  Boxes and their columns now grow to fit the
+  label at the default figure size; a narrower `figsize` still squeezes
+  them.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added
