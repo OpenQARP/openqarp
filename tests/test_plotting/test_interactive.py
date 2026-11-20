@@ -13,6 +13,7 @@ def _gate(index, gate_type="Ry", label="Ry(0.5)", displayed="Ry", qubits=("q[0]"
         full_label=label,
         displayed_label=displayed,
         qubits=list(qubits),
+        classical="",
     )
 
 

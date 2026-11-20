@@ -102,7 +102,7 @@ def build_payload(gate_registry: List, measure_payload: List[Dict]) -> Dict[str,
     for g in gate_registry:
         payload[f"g{g.index}"] = {
             "type": g.gate_type,
-            "label": g.full_label,
+            "label": f"{g.full_label} {g.classical}".strip(),
             "displayed": g.displayed_label,
             "qubits": g.qubits,
             "index": g.index,

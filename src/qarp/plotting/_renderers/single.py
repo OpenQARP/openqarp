@@ -1,9 +1,13 @@
+from .. import _geometry as geometry
 from ..styles import get_text_color
 from .base import GateRenderer, LabelInfo
 
 
 class SingleGateRenderer(GateRenderer):
     """Renderer for single-qubit gates."""
+
+    def footprint(self, cmd) -> float:
+        return geometry.pt_to_x(self._gate_box_size(self._format_label(str(cmd.op)))[0])
 
     def render(self, ax, cmd, x: float, y_positions: dict, prev_label_y: LabelInfo) -> LabelInfo:
         original_label = str(cmd.op)
@@ -17,15 +21,7 @@ class SingleGateRenderer(GateRenderer):
 
         color = self.config.gate_color(name)
         face, edge = self.config.gate_face_edge(color)
-        ax.plot(
-            x,
-            y,
-            "s",
-            mfc=face,
-            mec=edge,
-            mew=self.config.gate_edge_width,
-            markersize=self.config.gate_size,
-        )
+        self._draw_gate_box(ax, x, y, label, face, edge)
 
         # Draw connector line if label is significantly displaced
         self._draw_label_connector(ax, x, y, y_text)

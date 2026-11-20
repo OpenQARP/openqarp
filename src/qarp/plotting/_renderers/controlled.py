@@ -1,3 +1,4 @@
+from .. import _geometry as geometry
 from ..styles import get_text_color
 from .base import GateRenderer, LabelInfo
 
@@ -9,6 +10,15 @@ class ControlledGateRenderer(GateRenderer):
     # target: the standard notation is a control dot on every wire joined by a
     # single vertical line.
     _SYMMETRIC_CONTROL = {"cz", "mcz"}
+
+    def footprint(self, cmd) -> float:
+        original_label = str(cmd.op)
+        stem = original_label.lower().split("(")[0]
+        if stem in self._SYMMETRIC_CONTROL:
+            return geometry.pt_to_x(self.config.control_size)
+        n_prefix = 2 if stem.startswith("cc") else 1
+        label = self._format_label(original_label[n_prefix:].upper())
+        return geometry.pt_to_x(self._gate_box_size(label)[0])
 
     def render(self, ax, cmd, x: float, y_positions: dict, prev_label_y: LabelInfo) -> LabelInfo:
         original_label = str(cmd.op)
@@ -47,15 +57,7 @@ class ControlledGateRenderer(GateRenderer):
         # Draw target
         color = self.config.gate_color(base)
         face, edge = self.config.gate_face_edge(color)
-        ax.plot(
-            x,
-            tgt_y,
-            "s",
-            mfc=face,
-            mec=edge,
-            mew=self.config.gate_edge_width,
-            markersize=self.config.gate_size,
-        )
+        self._draw_gate_box(ax, x, tgt_y, label, face, edge)
 
         # Draw connector line if label is significantly displaced
         self._draw_label_connector(ax, x, tgt_y, y_text)

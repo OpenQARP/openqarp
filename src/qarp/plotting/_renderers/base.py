@@ -2,6 +2,9 @@ import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
+from matplotlib.patches import Rectangle
+
+from .. import _geometry as geometry
 from .._config import PlotConfig
 
 if TYPE_CHECKING:
@@ -31,6 +34,55 @@ class GateRenderer(ABC):
     def render(self, ax, cmd, x: float, y_positions: Dict, prev_label_y: LabelInfo) -> LabelInfo:
         """Render a gate and return label position info."""
         pass
+
+    def footprint(self, cmd) -> float:
+        """Width the drawn command needs along the circuit, in data units."""
+        return geometry.pt_to_x(self.config.gate_size)
+
+    def _gate_box_size(self, label: str) -> Tuple[float, float, bool]:
+        """(width, height) in points of the box holding ``label`` inside it, and
+        whether that is the plain square marker."""
+        side = float(self.config.gate_size)
+        width = geometry.text_width_pt(label, self.config.text_size)
+        if "\n" not in label and width + geometry.BOX_PAD_PT <= side:
+            return side, side, True
+        height = geometry.text_height_pt(label, self.config.text_size) + geometry.BOX_PAD_PT
+        return width + 2 * geometry.BOX_PAD_PT, max(side, height), False
+
+    def _draw_gate_box(self, ax, x: float, y: float, label: str, face: str, edge: str) -> None:
+        """Draw the box of a gate: the square marker, or a box widened to its label."""
+        width, height, square = self._gate_box_size(label)
+        if square:
+            ax.plot(
+                x,
+                y,
+                "s",
+                mfc=face,
+                mec=edge,
+                mew=self.config.gate_edge_width,
+                markersize=self.config.gate_size,
+            )
+            return
+        w, h = geometry.pt_to_x(width, ax), geometry.pt_to_y(height, ax)
+        ax.add_patch(
+            Rectangle(
+                (x - w / 2, y - h / 2),
+                w,
+                h,
+                facecolor=face,
+                edgecolor=edge,
+                linewidth=self.config.gate_edge_width,
+                zorder=2,
+            )
+        )
+
+    def _block_box_width(self, label: str, qubits, ax=None) -> float:
+        """Width in data units of a block box: its label between two gutters,
+        the left one holding the qubit numbers."""
+        digits = max((len(str(q.index[0])) for q in qubits), default=1)
+        gutter = geometry.text_width_pt("0" * digits, self.config.text_size * 0.7) + 8
+        width = geometry.text_width_pt(label, self.config.text_size) + 2 * gutter
+        return max(self.config.spacing * 2 / 3, geometry.pt_to_x(width, ax))
 
     def _get_label_position(
         self, x: float, base_y: float, label: str, prev_label_y: LabelInfo

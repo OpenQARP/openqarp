@@ -8,6 +8,12 @@ the small protocol the OpenQARP plotting renderers consume:
   - ``circ.get_commands()`` : list of command objects
   - ``circ.phase``     : global phase (float)
 
+Commands also carry the classical side of a hybrid program: ``cmd.cbits`` (the
+bits a measurement writes), ``cmd.condition`` (the classical condition guarding
+the command, as text such as ``"c0=1"``) and ``cmd.condition_bits`` (the bits
+that condition reads).  Branch markers are folded into those attributes, so
+they never reach the renderers as commands.
+
 Block structure is preserved by default: a built ``CompositeBlock`` is
 rendered as one *box* per child sub-block (so the plot mirrors how the circuit
 was composed) rather than dissolved into primitive gates.  Pass
@@ -31,7 +37,7 @@ and are not exported.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import qarpx as qx
 
@@ -87,13 +93,117 @@ class _GateOp:
 class _Command:
     """Wraps a C++ ``Command`` into the renderer-facing shape."""
 
-    def __init__(self, cpp_cmd: qx.Command):
+    def __init__(
+        self,
+        cpp_cmd: qx.Command,
+        condition: Optional[str] = None,
+        condition_bits: Sequence[int] = (),
+        n_qubits: Optional[int] = None,
+        cbit_shift: int = 0,
+    ):
         self.op = _GateOp(cpp_cmd.gate, cpp_cmd.params)
-        self.qubits = [_Qubit(q) for q in cpp_cmd.qubits]
+        qubits = list(cpp_cmd.qubits)
+        # A barrier without qubits fences the whole register.
+        if not qubits and cpp_cmd.gate == qx.GateType.Barrier and n_qubits:
+            qubits = list(range(n_qubits))
+        self.qubits = [_Qubit(q) for q in qubits]
+        self.cbits = [b + cbit_shift for b in cpp_cmd.cbits]
+        self.condition = condition
+        self.condition_bits = list(condition_bits)
 
     def __repr__(self):
         qs = ", ".join(str(q) for q in self.qubits)
         return f"{self.op} [{qs}]"
+
+
+# ── Classical conditions ─────────────────────────────────────────────────────
+
+
+def _condition_text(bits: Sequence[int], values: Sequence[bool], negated: bool = False) -> str:
+    """A condition as text: ``c0=1, c1=0`` is the AND of its bit tests."""
+    if negated and len(bits) == 1:
+        return f"c{bits[0]}={int(not values[0])}"
+    text = ", ".join(f"c{b}={int(v)}" for b, v in zip(bits, values, strict=True))
+    return f"not({text})" if negated else text
+
+
+def _wrap_commands(
+    cmds: Sequence[qx.Command], n_qubits: Optional[int] = None, cbit_shift: int = 0
+) -> List[_Command]:
+    """Wrap a flat command stream, folding its branch markers into conditions.
+
+    Every command inside a branch gets the condition of all the branches open
+    around it; a command in an else arm gets the negated one.  ``cbit_shift``
+    is added to every classical bit the stream names.
+    """
+    frames: List[Tuple[List[int], List[bool], bool]] = []
+    wrapped: List[_Command] = []
+    for cmd in cmds:
+        if cmd.gate == qx.GateType.BranchBegin:
+            bits = [b + cbit_shift for b in cmd.condition_bits]
+            frames.append((bits, list(cmd.condition_values), False))
+        elif cmd.gate == qx.GateType.BranchElse:
+            if frames:
+                bits, values, _ = frames[-1]
+                frames[-1] = (bits, values, True)
+        elif cmd.gate == qx.GateType.BranchEnd:
+            if frames:
+                frames.pop()
+        else:
+            guards = list(frames)
+            if cmd.condition_bits:
+                bits = [b + cbit_shift for b in cmd.condition_bits]
+                guards.append((bits, list(cmd.condition_values), False))
+            condition = ", ".join(_condition_text(*guard) for guard in guards) or None
+            read = [b for bits, _, _ in guards for b in bits]
+            wrapped.append(
+                _Command(cmd, condition, list(dict.fromkeys(read)), n_qubits, cbit_shift)
+            )
+    return wrapped
+
+
+def _box_classical(
+    cmds: Sequence[qx.Command], cbit_shift: int = 0
+) -> Tuple[List[int], Optional[str], List[int]]:
+    """Classical bits a boxed child writes, its condition, and the bits it reads.
+
+    A child that is one branch from first command to last (a conditional block)
+    carries that branch's condition: negated if only its else arm holds
+    commands, marked ``/ else`` if both arms do.  Any other child reports only
+    the bits its inner conditions read from outside: bits it measured itself
+    are its own.  ``cbit_shift`` is added to every bit.
+    """
+    written: List[int] = []
+    read: List[int] = []
+    depth = 0
+    one_branch = bool(cmds) and cmds[0].gate == qx.GateType.BranchBegin
+    in_else = False
+    arm_sizes = [0, 0]  # commands in the then arm and in the else arm
+    for i, cmd in enumerate(cmds):
+        if cmd.gate == qx.GateType.BranchElse:
+            in_else = in_else or depth == 1
+            continue
+        if cmd.gate == qx.GateType.BranchEnd:
+            depth -= 1
+            one_branch = one_branch and (depth > 0 or i == len(cmds) - 1)
+            continue
+        read.extend(b + cbit_shift for b in cmd.condition_bits if b + cbit_shift not in written)
+        if cmd.gate == qx.GateType.BranchBegin:
+            depth += 1
+            continue
+        one_branch = one_branch and depth > 0
+        arm_sizes[in_else] += 1
+        if cmd.gate == qx.GateType.Measure:
+            written.extend(b + cbit_shift for b in cmd.cbits)
+    condition = None
+    if one_branch:
+        bits = [b + cbit_shift for b in cmds[0].condition_bits]
+        values = cmds[0].condition_values
+        if arm_sizes[1] and not arm_sizes[0]:
+            condition = _condition_text(bits, values, negated=True)
+        else:
+            condition = _condition_text(bits, values) + (" / else" if arm_sizes[1] else "")
+    return list(dict.fromkeys(written)), condition, list(dict.fromkeys(read))
 
 
 # ── Block-as-box ops ─────────────────────────────────────────────────────────
@@ -166,9 +276,19 @@ class _ControlledBlockOp:
 class _BoxCommand:
     """A synthetic command standing in for a whole child block (a box)."""
 
-    def __init__(self, op, qubit_indices: Sequence[int]):
+    def __init__(
+        self,
+        op,
+        qubit_indices: Sequence[int],
+        cbits: Sequence[int] = (),
+        condition: Optional[str] = None,
+        condition_bits: Sequence[int] = (),
+    ):
         self.op = op
         self.qubits = [_Qubit(int(i)) for i in qubit_indices]
+        self.cbits = list(cbits)
+        self.condition = condition
+        self.condition_bits = list(condition_bits)
 
     def __repr__(self):
         qs = ", ".join(str(q) for q in self.qubits)
@@ -247,7 +367,7 @@ class CircuitAdapter:
                 raise ValueError("n_qubits is required when source is a command list")
             self._name = "Circuit"
             self._n_qubits = n_qubits
-            self._wrapped_commands = [_Command(cmd) for cmd in source]
+            self._wrapped_commands = _wrap_commands(source, n_qubits)
         else:
             self._name = source.name
             self._n_qubits = source.n_qubits
@@ -288,7 +408,7 @@ class CircuitAdapter:
         # blocks (SimpleBlock accumulates commands pre-build; composites need
         # build() before ``commands()``/``flatten()`` carry their content).
         cmds = list(source.flatten()) if built else list(source.commands())
-        return [_Command(cmd) for cmd in cmds]
+        return _wrap_commands(cmds, source.n_qubits)
 
     def _box_children(self, composite):
         """One renderer command per child: a box, a controlled box, or — for
@@ -297,15 +417,27 @@ class CircuitAdapter:
         ``child.flatten()`` already emits commands in the parent frame (it
         applies the child's own ``target_qubits``), so pass-through children
         land on the right wires and ``_child_span`` reports each box's footprint.
+        Classical bits are different: a child without ``target_cbits`` counts
+        its own from 0 and the composite places it after the bits of the
+        children before it, so that offset is added here.
         """
         wrapped: List = []
+        cbit_offset = 0
         for child in composite.children():
+            stream = list(child.flatten())
+            shift = 0
+            if getattr(child, "target_cbits", None) is None and child.n_cbits > 0:
+                shift = cbit_offset
+                cbit_offset += child.n_cbits
             if _is_measure_only(child) or _is_single_qubit_leaf(child):
-                wrapped.extend(_Command(cmd) for cmd in child.flatten())
-            elif isinstance(child, qx.ControlledBlock):
-                wrapped.append(self._wrap_controlled_child(child, self._child_span(child)))
+                wrapped.extend(_wrap_commands(stream, composite.n_qubits, shift))
+                continue
+            if isinstance(child, qx.ControlledBlock):
+                box = self._wrap_controlled_child(child, self._child_span(child))
             else:
-                wrapped.append(_BoxCommand(_BoxOp(child), self._child_span(child)))
+                box = _BoxCommand(_BoxOp(child), self._child_span(child))
+            box.cbits, box.condition, box.condition_bits = _box_classical(stream, shift)
+            wrapped.append(box)
         return wrapped
 
     @staticmethod

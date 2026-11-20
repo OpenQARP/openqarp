@@ -301,6 +301,7 @@ class TestRendererLabelModeIntegration:
 # =============================================================================
 # MultiGateRenderer branches, ControlledBlockRenderer
 # =============================================================================
+from matplotlib.colors import to_rgba
 from matplotlib.patches import Rectangle
 
 from qarp.blocks import CompositeBlock, ControlledBlock, XnBlock
@@ -473,7 +474,9 @@ class TestControlledGateCoverage:
 
         counts = _marker_counts(ax)
         assert counts["o"] == 1  # control dot
-        assert counts["s"] == 1  # single target marker
+        # One target box, widened to hold "RZ(0.3)" in place of the square marker.
+        assert counts["s"] == 0
+        assert len([p for p in ax.patches if isinstance(p, Rectangle)]) == 1
         assert any("0.3" in t.get_text() for t in ax.texts), "rotation angle dropped from label"
         plt.close(fig)
 
@@ -493,8 +496,8 @@ class TestControlledGateCoverage:
             ax, cmd, 0.0, {q: i for i, q in enumerate(cmd.qubits)}, (None, None)
         )
 
-        target = next(line for line in ax.lines if line.get_marker() == "s")
-        assert target.get_markerfacecolor() == "#123456"
+        (target,) = [p for p in ax.patches if isinstance(p, Rectangle)]
+        assert target.get_facecolor() == to_rgba("#123456")
         plt.close(fig)
 
 
