@@ -279,6 +279,11 @@ prelude, each body phase-exact. ``from_qasm2`` deliberately accepts more than ``
 writes (multiple registers, whole-register ``measure q -> c;``, the qiskit-extended
 ``qelib1.inc`` names), so files OpenQARP did not produce parse too.
 
+``from_qasm3`` reads registers the same way: they may have any names, several registers
+take flat indices in declaration order, and ``c = measure q;``, ``reset q;`` and
+``barrier q;`` act on whole registers. A gate on a whole register (``h q;``) is not
+accepted by either reader.
+
 What ``==`` catches
 -----------------------
 

@@ -273,9 +273,107 @@ def test_header_only_program_is_still_valid_and_empty():
 
 
 def test_out_of_range_wire_is_rejected_at_absorb_not_later():
-    """QASM3 declares ``qubit[2] q`` and then uses ``q[5]``.  The parser does no
-    range check, so reconstruction used to return a block with symbols=() that
-    only failed at flatten(); the remap error now surfaces from absorb()."""
+    """QASM3 declares ``qubit[2] q`` and then uses ``q[5]``: the parser names
+    the register and its size, and absorb() raises before any block is built."""
     src = "OPENQASM 3.0;\nqubit[2] q;\nh q[0];\nx q[5];\n"
-    with pytest.raises(IndexError, match=r"X acts on qubit 5 .* only 2 entries"):
+    with pytest.raises(IndexError, match="index 5 out of range for register 'q' of size 2"):
         QASM3Absorber().absorb(src)
+
+
+# ── Registers ────────────────────────────────────────────────────────────────
+# Expected commands are written out from the OpenQASM 3 source: registers take
+# flat indices in declaration order, so with ``qubit[2] a; qubit[2] b;`` the
+# qubit ``b[1]`` is qubit 3.
+
+
+def _absorb(body: str):
+    commands, n_qubits, n_cbits, _ = qx.QASM3Absorber().absorb(
+        'OPENQASM 3.0;\ninclude "stdgates.inc";\n' + body
+    )
+    return [str(c) for c in commands], n_qubits, n_cbits
+
+
+def test_two_qubit_registers_do_not_share_indices():
+    """``a[0]`` and ``b[0]`` are different qubits: a CX between them is a CX of
+    qubits 0 and 2 on four qubits, never of qubit 0 with itself."""
+    assert _absorb("qubit[2] a; qubit[2] b;\ncx a[0], b[0];\ncx a[1], b[1];\n") == (
+        ["CX [q0, q2]", "CX [q1, q3]"],
+        4,
+        0,
+    )
+
+
+def test_two_bit_registers_do_not_share_indices():
+    assert _absorb("qubit[1] q; bit[1] m; bit[2] c;\nc[1] = measure q[0];\n") == (
+        ["Measure [q0] -> [c2]"],
+        1,
+        3,
+    )
+
+
+def test_registers_may_have_any_name():
+    body = (
+        "qubit[2] qr; bit[2] cr;\nh qr[0];\ncr[0] = measure qr[0];\nif (cr[0] == 1) { x qr[1]; }\n"
+    )
+    assert _absorb(body)[0] == [
+        "H [q0]",
+        "Measure [q0] -> [c0]",
+        "BranchBegin [] if c0==1",
+        "X [q1]",
+        "BranchEnd []",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("qubit[2] q;\nh foo[1];\n", "undeclared qubit register 'foo'"),
+        ("qubit[2] q;\nif (m[0] == 1) { x q[0]; }\n", "undeclared bit register 'm'"),
+        ("qubit[2] q; bit[2] q;\n", "register 'q' declared twice"),
+        ("qubit[2] q;\nh q;\n", "register 'q' used where a single qubit is required"),
+        ("qubit[3] q; bit[2] c;\nc = measure q;\n", r"measure operand sizes differ \(3 vs 2\)"),
+    ],
+)
+def test_register_misuse_is_named(body, message):
+    with pytest.raises(RuntimeError, match=message):
+        _absorb(body)
+
+
+def test_an_index_past_its_register_does_not_reach_the_next_one():
+    """``a[2]`` is flat qubit 2, which is ``b[0]``: without the check the gate
+    would land on the wrong register."""
+    with pytest.raises(IndexError, match="index 2 out of range for register 'a' of size 2"):
+        _absorb("qubit[2] a; qubit[2] b;\nx a[2];\n")
+
+
+def test_whole_register_measure_pairs_bits_in_order():
+    assert _absorb("qubit[3] q; bit[3] c;\nc = measure q;\n")[0] == [
+        "Measure [q0] -> [c0]",
+        "Measure [q1] -> [c1]",
+        "Measure [q2] -> [c2]",
+    ]
+
+
+def test_whole_register_reset_resets_every_qubit():
+    assert _absorb("qubit[2] q;\nreset q;\n")[0] == ["Reset [q0]", "Reset [q1]"]
+
+
+def test_barrier_takes_registers_and_single_qubits_as_one_barrier():
+    assert _absorb("qubit[2] a; qubit[2] b;\nbarrier a, b[1];\n")[0] == ["Barrier [q0, q1, q3]"]
+
+
+def test_whole_register_program_runs(absorber):
+    """The absorbed block samples like the program reads: a Bell pair measured
+    register to register gives 00 and 11 only."""
+    from qarp.algorithms import Sampler
+    from qarp.engines import QarpEngine
+
+    src = (
+        'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q; bit[2] c;\n'
+        "h q[0];\ncx q[0], q[1];\nbarrier q;\nc = measure q;\n"
+    )
+    block = absorber.absorb(src)
+    engine = QarpEngine(seed=1)
+    engine.build([Sampler(ket=block, n_shots=200)])
+    distribution = engine.run()[0]
+    assert distribution[(0, 0)] + distribution[(1, 1)] == pytest.approx(1.0)

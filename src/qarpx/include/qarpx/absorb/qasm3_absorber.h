@@ -11,22 +11,26 @@ namespace qarpx {
 
 /// Parses an OpenQASM 3.0 program string into a flat command sequence.
 ///
-/// Supports the subset of QASM 3 produced by QASM3Emitter:
+/// Supports the subset of QASM 3 produced by QASM3Emitter, and the register
+/// forms other writers use:
 ///   - ``OPENQASM 3.0;`` + ``include "stdgates.inc";`` header (ignored)
-///   - ``qubit[N] q;`` quantum register
-///   - ``bit[M] c;``   classical register
+///   - ``qubit[N] q;`` quantum registers and ``bit[M] c;`` classical
+///     registers, under any names; several registers concatenate in
+///     declaration order into the flat qubit / bit indices
 ///   - ``input float[64] <name>;``  symbolic parameter declarations
 ///   - All gates from stdgates.inc that map to GateType entries
-///   - ``c[i] = measure q[j];`` measurement
-///   - ``reset q[i];`` reset
+///   - ``c[i] = measure q[j];`` measurement; ``c = measure q;`` over two
+///     registers of the same size
+///   - ``reset q[i];`` reset; ``reset q;`` over a register
 ///   - ``if (cond) { … } else { … }`` classical conditionals
 ///     (condition = single ``c[i] == 0|1`` or AND-chain thereof)
 ///   - ``ctrl(n) @ z q[…];`` for MCZ
 ///   - ``inv @ iswap q[a], q[b];`` for iSWAPdg
 ///   - ``gphase(θ);`` global phase
-///   - ``barrier q[…];``
+///   - ``barrier q[…];`` with indexed qubits or whole registers
 ///
 /// Does NOT support:
+///   - A gate applied to a whole register (``h q;``)
 ///   - Gate/subroutine definitions
 ///   - For/while loops
 ///   - Box / delay modifiers

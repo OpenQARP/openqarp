@@ -170,12 +170,26 @@ private:
 // Parser
 // ============================================================================
 
+/// A declared register: where its bit 0 sits in qarp's flat index space.
+struct RegInfo {
+    uint32_t base = 0;
+    uint32_t size = 0;
+};
+
+/// One operand: `reg[i]` (indexed) or `reg` (whole).
+struct Arg {
+    std::string name;
+    std::optional<uint32_t> index;  ///< nullopt = the whole register
+};
+
 class Parser {
     Lexer               lex_;
     Token               cur_;
     QASM3Absorber::Result& result_;
     // symbol name → true (just tracks which names are declared as input)
     std::set<std::string> declared_symbols_;
+    std::map<std::string, RegInfo> qregs_;
+    std::map<std::string, RegInfo> cregs_;
 
 public:
     explicit Parser(const std::string& src, QASM3Absorber::Result& out)
@@ -253,8 +267,8 @@ private:
         if (cur_.kind == TokKind::Eof) return;
 
         if (peek_ident("gate"))   { skip_gate_def();     return; }
-        if (peek_ident("qubit"))  { parse_qubit_decl();  return; }
-        if (peek_ident("bit"))    { parse_bit_decl();    return; }
+        if (peek_ident("qubit"))  { parse_reg_decl(true);  return; }
+        if (peek_ident("bit"))    { parse_reg_decl(false); return; }
         if (peek_ident("input"))  { parse_input_decl();  return; }
         if (peek_ident("if"))     { parse_if_stmt();     return; }
         if (peek_ident("barrier")){ parse_barrier();     return; }
@@ -263,15 +277,15 @@ private:
         if (peek_ident("ctrl"))   { parse_ctrl_gate();   return; }
         if (peek_ident("inv"))    { parse_inv_gate();    return; }
 
-        // Classical assignment: ``c[i] = measure q[j];``
-        if (cur_.kind == TokKind::Ident && cur_.text == "c") {
-            parse_measure_assign();
-            return;
-        }
-
         // Named gate statement
         if (cur_.kind == TokKind::Ident && is_gate_keyword(cur_.text)) {
             parse_named_gate();
+            return;
+        }
+
+        // Classical assignment: ``c[i] = measure q[j];``
+        if (cur_.kind == TokKind::Ident && cregs_.count(cur_.text)) {
+            parse_measure_assign();
             return;
         }
 
@@ -316,24 +330,24 @@ private:
 
     // ── Register declarations ─────────────────────────────────────────────────
 
-    void parse_qubit_decl() {
-        consume(TokKind::Ident);           // "qubit"
+    void parse_reg_decl(bool quantum) {
+        consume(TokKind::Ident);           // "qubit" | "bit"
         consume(TokKind::LBracket, "'['");
         auto n = consume(TokKind::Int, "integer");
         consume(TokKind::RBracket, "']'");
-        consume(TokKind::Ident, "register name"); // "q"
+        auto name = consume(TokKind::Ident, "register name");
         consume(TokKind::Semicolon, "';'");
-        result_.n_qubits = static_cast<uint32_t>(n.ival);
-    }
 
-    void parse_bit_decl() {
-        consume(TokKind::Ident);           // "bit"
-        consume(TokKind::LBracket, "'['");
-        auto n = consume(TokKind::Int, "integer");
-        consume(TokKind::RBracket, "']'");
-        consume(TokKind::Ident, "register name"); // "c"
-        consume(TokKind::Semicolon, "';'");
-        result_.n_cbits = static_cast<uint32_t>(n.ival);
+        if (qregs_.count(name.text) || cregs_.count(name.text))
+            throw std::runtime_error(
+                "QASM3Absorber: register '" + name.text + "' declared twice");
+
+        // Registers concatenate in declaration order into qarp's flat index
+        // space, as in QASM2Absorber.
+        auto& total = quantum ? result_.n_qubits : result_.n_cbits;
+        (quantum ? qregs_ : cregs_)[name.text] =
+            RegInfo{total, static_cast<uint32_t>(n.ival)};
+        total += static_cast<uint32_t>(n.ival);
     }
 
     void parse_input_decl() {
@@ -351,23 +365,57 @@ private:
 
     // ── Qubit / cbit index parsing ────────────────────────────────────────────
 
-    uint32_t parse_qubit_ref() {
-        // ``q[N]``
-        consume(TokKind::Ident, "'q'");    // "q"
-        consume(TokKind::LBracket, "'['");
-        auto idx = consume(TokKind::Int, "qubit index");
-        consume(TokKind::RBracket, "']'");
-        return static_cast<uint32_t>(idx.ival);
+    Arg parse_arg() {
+        auto name = consume(TokKind::Ident, "register name");
+        Arg arg{name.text, std::nullopt};
+        if (peek(TokKind::LBracket)) {
+            advance();
+            auto idx = consume(TokKind::Int, "index");
+            consume(TokKind::RBracket, "']'");
+            arg.index = static_cast<uint32_t>(idx.ival);
+        }
+        return arg;
     }
 
-    uint32_t parse_cbit_ref() {
-        // ``c[N]``
-        consume(TokKind::Ident, "'c'");    // "c"
-        consume(TokKind::LBracket, "'['");
-        auto idx = consume(TokKind::Int, "cbit index");
-        consume(TokKind::RBracket, "']'");
-        return static_cast<uint32_t>(idx.ival);
+    const RegInfo& lookup(const Arg& arg, bool quantum) const {
+        const auto& table = quantum ? qregs_ : cregs_;
+        auto it = table.find(arg.name);
+        if (it == table.end())
+            throw std::runtime_error(
+                std::string("QASM3Absorber: undeclared ") +
+                (quantum ? "qubit" : "bit") + " register '" + arg.name + "'");
+        return it->second;
     }
+
+    /// Flat index of an indexed operand; a whole register is an error here.
+    uint32_t resolve_bit(const Arg& arg, bool quantum) const {
+        const RegInfo& reg = lookup(arg, quantum);
+        if (!arg.index)
+            throw std::runtime_error(
+                "QASM3Absorber: register '" + arg.name +
+                "' used where a single " + (quantum ? "qubit" : "bit") +
+                " is required");
+        if (*arg.index >= reg.size)
+            throw std::out_of_range(
+                "QASM3Absorber: index " + std::to_string(*arg.index) +
+                " out of range for register '" + arg.name + "' of size " +
+                std::to_string(reg.size));
+        return reg.base + *arg.index;
+    }
+
+    /// Every flat index an operand covers: one bit, or a whole register.
+    std::vector<uint32_t> expand(const Arg& arg, bool quantum) const {
+        const RegInfo& reg = lookup(arg, quantum);
+        if (arg.index) return {resolve_bit(arg, quantum)};
+        std::vector<uint32_t> all;
+        all.reserve(reg.size);
+        for (uint32_t i = 0; i < reg.size; ++i) all.push_back(reg.base + i);
+        return all;
+    }
+
+    uint32_t parse_qubit_ref() { return resolve_bit(parse_arg(), /*quantum=*/true); }
+
+    uint32_t parse_cbit_ref() { return resolve_bit(parse_arg(), /*quantum=*/false); }
 
     // ── Param expression parser ───────────────────────────────────────────────
     // Grammar (simplified):
@@ -646,12 +694,14 @@ private:
 
     void parse_barrier() {
         consume(TokKind::Ident);  // "barrier"
-        auto qubits = parse_qubit_list();
-        consume(TokKind::Semicolon, "';'");
-
         Command cmd;
         cmd.gate = GateType::Barrier;
-        for (auto q : qubits) cmd.qubits.push_back(q);
+        for (;;) {
+            for (auto q : expand(parse_arg(), /*quantum=*/true)) cmd.qubits.push_back(q);
+            if (!peek(TokKind::Comma)) break;
+            advance();
+        }
+        consume(TokKind::Semicolon, "';'");
         result_.commands.push_back(std::move(cmd));
     }
 
@@ -659,32 +709,43 @@ private:
 
     void parse_reset() {
         consume(TokKind::Ident);  // "reset"
-        uint32_t q = parse_qubit_ref();
+        auto qubits = expand(parse_arg(), /*quantum=*/true);
         consume(TokKind::Semicolon, "';'");
 
-        Command cmd;
-        cmd.gate = GateType::Reset;
-        cmd.qubits.push_back(q);
-        result_.commands.push_back(std::move(cmd));
+        for (auto q : qubits) {
+            Command cmd;
+            cmd.gate = GateType::Reset;
+            cmd.qubits.push_back(q);
+            result_.commands.push_back(std::move(cmd));
+        }
     }
 
     // ── c[i] = measure q[j]; ─────────────────────────────────────────────────
 
     void parse_measure_assign() {
-        // ``c[i] = measure q[j];``
-        uint32_t cbit = parse_cbit_ref();
+        // ``c[i] = measure q[j];`` or, register to register, ``c = measure q;``
+        Arg c = parse_arg();
         consume(TokKind::Assign, "'='");
         if (cur_.text != "measure")
             throw std::runtime_error("QASM3Absorber: expected 'measure' after 'c[i] ='");
         advance();  // "measure"
-        uint32_t qbit = parse_qubit_ref();
+        Arg q = parse_arg();
         consume(TokKind::Semicolon, "';'");
 
-        Command cmd;
-        cmd.gate = GateType::Measure;
-        cmd.qubits.push_back(qbit);
-        cmd.cbits.push_back(cbit);
-        result_.commands.push_back(std::move(cmd));
+        auto cbits = expand(c, /*quantum=*/false);
+        auto qbits = expand(q, /*quantum=*/true);
+        if (qbits.size() != cbits.size())
+            throw std::runtime_error(
+                "QASM3Absorber: measure operand sizes differ (" +
+                std::to_string(qbits.size()) + " vs " + std::to_string(cbits.size()) + ")");
+
+        for (size_t i = 0; i < qbits.size(); ++i) {
+            Command cmd;
+            cmd.gate = GateType::Measure;
+            cmd.qubits.push_back(qbits[i]);
+            cmd.cbits.push_back(cbits[i]);
+            result_.commands.push_back(std::move(cmd));
+        }
     }
 
     // ── if (condition) { body } else { body } ────────────────────────────────

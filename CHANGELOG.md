@@ -7,6 +7,19 @@ All notable changes to OpenQARP are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `SimpleBlock.from_qasm3` resolves registers by name.  It ignored the name
+  in `qubit[N] name;` and in every operand, so a program with two qubit
+  registers was read onto the qubits of the last one (`cx a[0], b[0]` became
+  a CX of qubit 0 with itself), an undeclared register was accepted, and a
+  bit register not called `c` was rejected.  Registers now take flat indices
+  in declaration order, as in `from_qasm2`, and an undeclared register, a
+  register declared twice or an index past its register is an error.
+- `SimpleBlock.from_qasm3` accepts `c = measure q;`, `reset q;` and
+  `barrier q;` on whole registers.  A gate on a whole register (`h q;`) is
+  still rejected, now with a message that says so.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added
