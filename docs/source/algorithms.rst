@@ -3088,3 +3088,47 @@ since that context was constructed, including handles created by other users
 of the same lease. It measures shared resource activity, rather than attributing
 each handle to a particular context. The algorithm constructs the provider
 before the evolution context, so its existing handle is outside that baseline.
+
+Selected-pair research readout
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``SelectedPairReadout`` estimates requested ``K[target, source]`` elements for
+``K = U† H U`` with at most two frozen pair rotations. It extracts the identity
+and certified commuting Z terms exactly, prunes impossible terms using structural
+support covers, and measures the residual with QWC grouped transition tests.
+``SelectedPairEstimate`` preserves the signed complex value, per-quadrature
+standard errors, shots and certificate status. Sampled or simulated zeros are
+never structural-zero certificates. Hermitian reverse requests reuse a conjugated
+estimate; repeated cache reads are correlated, not new independent samples.
+
+The provider requires a dedicated noiseless ``QarpEngine`` or ``CudaqEngine``;
+the initial research implementation accepts no device/routing configuration.
+Finite readout requires at least two shots per setting. ``EXACT`` is a simulation
+validation mode, with zero sampling variance and status ``simulated``. Only
+algebraically extracted values have status ``exact``. Unqueried keys remain unknown.
+The Hamiltonian, flattened unitary, angles, engine settings and acquisition budgets
+are frozen; a mutation requires a new provider. Budgets include unique requests,
+term visits, masks, grouping pairs, settings, submitted shots and cache entries.
+Budget exhaustion raises before the excess work; no coefficient is silently dropped.
+
+Pass ``transition_readout=provider`` to ``AggregatedMonteCarlo`` only together with
+``resident_evolution`` and ``track_transition_circuits=False``. The provider must
+match the MC Hamiltonian/unitary and use ``real_only=True`` with a real-H certificate.
+The request path then acquires the initial diagonal, proposed edges and reference
+coefficients through that provider. It neither constructs exact GPU columns nor
+uploads complete rows. Native signed evolution and uniform-sector proposals are
+unchanged. Omitting the provider preserves exact-column acquisition.
+
+Provider diagnostics are lifetime counters, reported separately from hypothetical
+exact-path accounting: logical requests, unique Hermitian keys, certified/measured
+keys, built circuits, measurement settings, engine submissions, submitted/completed
+shots and cache hits. Submissions count ``engine.run`` calls, not QPU jobs. Failed
+submissions leave execution totals incomplete; unknown simulator state reuse is
+``None``. MC trajectory uncertainty does not include coefficient sampling error.
+These are research interfaces, with native selected-pair GPU validation pending.
+
+See ``examples/algorithms/composite/mwe_selected_pair_montecarlo.ipynb`` for a
+small analytic readout example and a stretched-N₂ pair selection workflow.
+The default CPU cells regenerate the RHF/STO-3G inputs. Set
+``QARP_STRETCHED_N2_INTEGRALS`` to the checksummed frozen fixture for exact
+historical replay.

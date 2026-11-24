@@ -29,6 +29,7 @@ from qarp.operators.functions import count_qubits, is_hermitian
 
 from .._primitives import GroupedTransitionHadamardTest
 from .composite_algorithm import CompositeAlgorithm
+from .selected_pair_readout import SelectedPairReadout
 
 
 def _positive_integer(value, name: str, *, allow_zero: bool = False) -> None:
@@ -52,7 +53,7 @@ def _resident_step_count(total_time: float, time_step: float) -> int:
 
 @dataclass(frozen=True)
 class ResidentEvolutionConfig:
-    """Uniform-sector walker proposals with exact cuStateVec coefficients."""
+    """Uniform-sector walker proposals, independent of coefficient acquisition."""
 
     sector: ComputationalBasisSector
     proposal: Literal["uniform_sector"] = "uniform_sector"
@@ -180,7 +181,8 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
     """Evolve one signed integer population per occupied computational-basis label.
 
     The supplied engine owns the resident simulator capability. Coefficients
-    are exact FP64 transitions; this algorithm executes no measurement circuits.
+    default to exact FP64 transitions. Optional ``transition_readout`` supplies
+    measured requested coefficients, without constructing complete rows.
     ``run`` pools signed contributions from all requested trajectories. Its
     independent-trajectory error is in ``diagnostics['estimator']``; an explicit
     block size additionally enables within-trajectory uncertainty.
@@ -213,6 +215,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         sector: Optional[ComputationalBasisSector] = None,
         resident_evolution: Optional[ResidentEvolutionConfig] = None,
         track_transition_circuits: bool = False,
+        transition_readout: Optional[SelectedPairReadout] = None,
     ) -> None:
         if isinstance(hamiltonian, np.ndarray):
             raise CapabilityError("AggregatedMonteCarlo requires a Pauli QubitOperator")
@@ -314,6 +317,12 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         self.sector = sector
         self.resident_evolution = resident_evolution
         self.track_transition_circuits = track_transition_circuits
+        if transition_readout is not None and not isinstance(
+            transition_readout, SelectedPairReadout
+        ):
+            raise TypeError("transition_readout must be SelectedPairReadout")
+        self.transition_readout = transition_readout
+        self._validate_transition_readout()
         self._resource_counters: dict[str, int | float] = defaultdict(int)
         self._root_seed = int(np.random.SeedSequence(seed).generate_state(1, dtype=np.uint64)[0])
         self._gpu_built = False
@@ -376,6 +385,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         if not isinstance(self.hamiltonian, QubitOperator) or not isinstance(self.U, qx.Block):
             raise RuntimeError("Bound Hamiltonian/unitary type changed; rebuild GPU contexts")
         self.U.build()
+        self._validate_transition_readout()
         commands = [
             (
                 str(c.gate),
@@ -423,11 +433,32 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
             "block_size": self.estimator_block_size,
             "track_transition_circuits": self.track_transition_circuits,
         }
+        if self.transition_readout is not None:
+            payload["provider"] = self.transition_readout.validate_problem(self.hamiltonian, self.U)
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
         ).hexdigest()
 
+    def _validate_transition_readout(self) -> None:
+        readout = self.transition_readout
+        if getattr(self, "_gpu_built", False) and readout is not self._built_transition_readout:
+            raise RuntimeError("Transition readout instance changed; rebuild GPU contexts")
+        if readout is None:
+            return
+        if self.resident_evolution is None or self.track_transition_circuits:
+            raise CapabilityError(
+                "Measured coefficients require resident_evolution and no hypothetical circuit accounting"
+            )
+        if self.transition_prefetch != "none":
+            raise CapabilityError("Measured requests cannot prefetch complete rows")
+        if not readout.real_only:
+            raise CapabilityError("Resident signed evolution requires real-only pair readout")
+        if readout.engine is self.engine:
+            raise CapabilityError("Use separate measurement and resident engines")
+        readout.validate_problem(self.hamiltonian, self.U)
+
     def _build_resident(self):
+        self._built_transition_readout = self.transition_readout
         if not 1 <= self.n_qubits < 63 or count_qubits(self.hamiltonian) > self.n_qubits:
             raise ValueError("GPU MC requires 1 <= register width < 63 and H within the register")
         ref = self.reference_walker_label[0]
@@ -451,9 +482,17 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         elif self.sector is not None:
             targets = self._certify_computational_basis_sector(self.sector, enumerate_labels=True)
         self._configuration_hash = self._resident_identity()
-        self._gpu_rows = _PersistentGpuRows(
-            self.U, self.hamiltonian, self._simulator, self.column_batch_size, targets
-        )
+        if self.transition_readout is None:
+            self._gpu_rows = _PersistentGpuRows(
+                self.U, self.hamiltonian, self._simulator, self.column_batch_size, targets
+            )
+            self._evolution_context = self._gpu_rows.context
+        else:
+            if hasattr(self, "_gpu_rows"):
+                del self._gpu_rows
+            self._evolution_context = qx.make_resident_evolution_context(
+                self._simulator, self.n_qubits
+            )
         limit = self.resident_evolution.cache_max_bytes if self.resident_evolution else 16 * 2**30
         self._coefficient_cache = _ExactCoefficientCache(limit, self._configuration_hash)
         self._uploaded_rows: set[int] = set()
@@ -540,6 +579,8 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         self._resource_counters["circuit_accounting_wall_seconds"] += perf_counter() - started
 
     def _acquire_columns(self, sources: Sequence[int]):
+        if self.transition_readout is not None:
+            raise CapabilityError("Measured requests do not acquire complete columns")
         started = perf_counter()
         try:
             return self._gpu_rows.compact(sources)
@@ -548,6 +589,14 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
 
     def _transition_coefficients(self, pairs: Sequence[Tuple[int, int]]) -> list[complex]:
         self._resource_counters["logical_coefficient_requests"] += len(pairs)
+        if self.transition_readout is not None:
+            self._validate_transition_readout()
+            estimates = self.transition_readout.estimate(pairs)
+            # The resident adapter consumes K[source,target]; readout returns columns.
+            values = [item.value.conjugate() for item in estimates]
+            for (source, target), value in zip(pairs, values, strict=True):
+                self._require_real(value, source, target)
+            return values
         acquired: Dict[Tuple[int, int], complex] = {}
         missing: Dict[int, set[int]] = {}
         for source, target in pairs:
@@ -584,6 +633,8 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
     def _upload_complete_rows(
         self, sources: Sequence[int], *, speculative: bool = False
     ) -> set[int]:
+        if self.transition_readout is not None:
+            raise CapabilityError("Measured requests cannot upload complete rows")
         if self.resident_evolution is None and not self.track_transition_circuits:
             return self._upload_complete_rows_bulk(sources, speculative=speculative)
         neighbors: set[int] = set()
@@ -883,7 +934,7 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         self._resident_histories = {}
         self._resident_status = None
         self._reset_projected_energy_estimator()
-        context = self._gpu_rows.context
+        context = self._evolution_context
         reference = self.reference_walker_label[0]
         coefficient = self._transition_coefficients([(reference, reference)])[0]
         initial = (
@@ -1174,8 +1225,21 @@ class AggregatedMonteCarlo(CompositeAlgorithm):
         if self._gpu_built:
             data.update(
                 python_coefficient_cache_entries=len(self._coefficient_cache.entries),
-                column_provider=MappingProxyType(dict(self._gpu_rows.provider.diagnostics)),
-                evolution=MappingProxyType(dict(self._gpu_rows.context.diagnostics)),
+                column_provider=None
+                if self.transition_readout is not None
+                else MappingProxyType(dict(self._gpu_rows.provider.diagnostics)),
+                evolution=MappingProxyType(dict(self._evolution_context.diagnostics)),
                 estimator=MappingProxyType(self._combined_estimator()),
+            )
+        if self.transition_readout is not None:
+            readout = self.transition_readout.diagnostics
+            data.update(
+                coefficient_source="selected_pair_qwc",
+                readout=readout,
+                measurement_circuits_executed=readout["simulator_circuit_evaluations"],
+                actual_shots_executed=readout["shots"]
+                if readout["execution_counts_complete"]
+                else None,
+                acquisition_counter_scope="provider_lifetime",
             )
         return MappingProxyType(data)

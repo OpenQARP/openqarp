@@ -113,6 +113,15 @@ def test_identity_term_uses_overlap_circuit():
     assert _run_exact(primitive) == pytest.approx(2.5 + 0.0j)
 
 
+def test_identity_for_nonorthogonal_states_is_not_a_classical_offset():
+    ket = SimpleBlock(1)
+    ket.h(0)
+    primitive = GroupedTransitionHadamardTest(
+        bra=_basis(0), ket=ket, operator=QubitOperator((), 2.5), n_shots=qarp.EXACT
+    )
+    assert _run_exact(primitive) == pytest.approx(2.5 / 2**0.5)
+
+
 def test_grouping_rejects_general_commuting_strategy():
     primitive = GroupedTransitionHadamardTest(
         bra=_basis(0),
@@ -144,3 +153,23 @@ def test_wrong_result_count_is_rejected():
     ).build()
     with pytest.raises(ValueError, match="grouped transition results"):
         primitive.run([])
+
+
+def test_joint_group_uncertainty_includes_covariance():
+    from types import SimpleNamespace
+
+    primitive = GroupedTransitionHadamardTest(
+        bra=ComputationalBasisStateBlock([0, 0]),
+        ket=ComputationalBasisStateBlock([0, 0]),
+        operator=QubitOperator("Z0") + QubitOperator("Z1"),
+        imaginary=False,
+    ).build()
+    # Joint values +2,+2,-2,-2: sample variance 16/3, variance of mean 4/3.
+    result = SimpleNamespace(n_shots=4, counts={0: 2, 6: 2})
+    assert primitive.run([result]) == 0
+    assert primitive.standard_error_real == pytest.approx((4 / 3) ** 0.5)
+    assert primitive.standard_error_imaginary is None
+    primitive.run([SimpleNamespace(n_shots=1, counts={0: 1})])
+    assert primitive.standard_error_real is None
+    primitive.run([SimpleNamespace(n_shots=1, counts={0: 0.5, 6: 0.5}, is_exact=True)])
+    assert primitive.standard_error_real == 0

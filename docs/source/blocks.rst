@@ -3169,3 +3169,21 @@ the block's real/imaginary-generator convention. The Pauli tuple is in local
 LSB qubit order; symbol names are not a positional parameter vector. Use
 ``parameter_map`` for binding. This accessor supports conservation checks
 without depending on a private grouping method.
+
+Frozen selected-pair rotations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``selected_pair_unitary(n_qubits, rotations, max_pairs=2)`` returns a fully bound
+``TrotterAnsatzBlock`` implementing ordered ``exp(-i theta G)`` pair rotations.
+Each rotation is ``(p, q, theta_radians)`` with spatial indices ``p < q`` in an
+interleaved alpha/beta register. The generator is ``pair_generator(p, q)``.
+The factory handles the ansatz builder's sign and factor-of-two convention;
+callers pass the original angles unchanged. Commuting terms within each generator
+are exponentiated exactly, with absolute phase preserved. Rotations are applied
+first to last: two entries mean ``U = R2 R1``.
+
+The factory accepts at most two rotations, including an empty identity sequence.
+It returns U alone. To prepare a trial, prepend the chosen computational reference
+with ``CompositeBlock``; the trial is ``U|reference>``, not necessarily ``U|0>``.
+MC takes U and its reference label separately. Three-pair preparations require a
+future explicitly reviewed extension.

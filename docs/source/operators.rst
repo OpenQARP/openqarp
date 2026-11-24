@@ -747,3 +747,20 @@ interleaved alpha/beta convention: even qubits are alpha and odd qubits beta.
 ``configuration_payload()`` returns JSON-compatible field values. The sector
 itself does not certify charge conservation; the MC adapter checks H and every
 emitted generator group before enabling compact sector gathering.
+
+Selected-pair algebra
+~~~~~~~~~~~~~~~~~~~~~
+
+``pair_projector(p, q)`` and ``pair_generator(p, q)`` construct, for
+``a=2p, b=2p+1, c=2q, d=2q+1``, the operators
+``P=(I+Za Zb)(I+Zc Zd)(I-Za Zc)/8`` and ``G=-P Ya Xb Xc Xd``.
+They satisfy ``G²=P``. With LSB indexing, ``exp(-i theta G)`` transfers local
+label 3 to ``cos(theta)|3> + sin(theta)|12>``; the reverse transfer has a minus
+sign, and inactive occupations are unchanged.
+
+``selected_pair_amplitudes(n_qubits, rotations, reference, max_pairs=2)`` applies
+the same ordered rotations sparsely. Registers are even-width, at most 64 qubits;
+native MC retains its stricter register limit. No basis enumeration is needed.
+At depth k the support is bounded by ``2**k`` and a requested bra/ket contraction
+can require ``4**k`` bare contractions. This is a fixed-depth bound, not a claim
+of polynomial scaling with unrestricted pair depth. Connectivity may change.
