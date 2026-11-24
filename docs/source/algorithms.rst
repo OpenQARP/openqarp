@@ -3128,7 +3128,7 @@ submissions leave execution totals incomplete; unknown simulator state reuse is
 These are research interfaces, with native selected-pair GPU validation pending.
 
 See ``examples/algorithms/composite/mwe_selected_pair_montecarlo.ipynb`` for a
-small analytic example. The bounded command
-``scripts/validate_selected_pair_preparations.py`` consumes external handoff
-fixtures and reproduces frozen sparse energies without FCI, circuit or GPU runs.
-Its outputs are new reproductions, not recovered historical fidelity evidence.
+small analytic readout example and a stretched-N₂ pair selection workflow.
+The default CPU cells regenerate the RHF/STO-3G inputs. Set
+``QARP_STRETCHED_N2_INTEGRALS`` to the checksummed frozen fixture for exact
+historical replay.

@@ -56,7 +56,9 @@ installs/rebuilds, extra submissions, staging, commits, pushes or PR creation.
 Stop before submission if the existing build is incompatible. Stage 4 additionally
 requires verified frozen inputs and all required stage-3 checks passing;
 required skips are incomplete. Stage 5 and long-run scaling remain unauthorized.
-**Historical research scope:** Files below cover the local implementation and validation.
+**Historical research scope:** Files below record the local implementation and
+validation. The retired frozen-package harness and its tests are preserved at
+`175d7fdc98a44abef3f4cd9f4bf86570ce8e35a0`.
 
 - `docs/contributions/selected_pair_rotations_plan.md`
 - `docs/contributions/README.md`
@@ -339,8 +341,9 @@ The two historical validation scripts `scripts/validate_selected_pair_preparatio
 and `scripts/validate_selected_pair_scaling.py`, and their tests
 `tests/test_algorithms/test_composite/test_selected_pair_molecular.py` and
 `tests/test_algorithms/test_composite/test_selected_pair_scaling.py`, remain
-research artifacts. These are the four paths in the existing 26-file
-research diff outside the proposed contribution scope.
+research artifacts available at
+`175d7fdc98a44abef3f4cd9f4bf86570ce8e35a0`. The contribution uses the
+self-contained notebook for the stretched-N2 workflow.
 
 The review bundle includes `plan-first.patch` for the plan and index only.
 Apply it from the approved `develop` base for the first commit. The
@@ -743,11 +746,12 @@ scalability, long-time finite-shot stability or quantum advantage.
 
 ### Approved stages 1–2 evidence (2026-11-15)
 
-Implemented `scripts/validate_selected_pair_scaling.py`, with independent small
-oracle and watchdog tests in `test_selected_pair_scaling.py`. The original cheap
-script now exposes its audited fixture loader for reuse. The new supervisor runs
-serial workers, caps native numerical threads at two, enforces 6/4 GiB address-space
-ceilings and monitors process-tree RSS every 0.1 s. Wall ceilings are 600/1800/300 s
+The harness at `175d7fd` includes `scripts/validate_selected_pair_scaling.py`,
+with independent small oracle and watchdog tests in `test_selected_pair_scaling.py`.
+The original cheap script exposes its audited fixture loader for reuse. The
+supervisor runs serial workers, caps native numerical threads at two, enforces
+6/4 GiB address-space ceilings and monitors process-tree RSS every 0.1 s.
+Wall ceilings are 600/1800/300 s
 for molecular H2O/N2/LiH (2700 s total), then 900 s total for QWC planning.
 PySCF is separately configured for 1024 MiB. Neither the harness nor its tests
 install, rebuild, execute GPU code, run quantum circuits or stage files.
