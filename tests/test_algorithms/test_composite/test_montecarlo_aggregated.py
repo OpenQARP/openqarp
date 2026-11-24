@@ -53,7 +53,7 @@ def _ansatz():
     return block.set_symbols({theta: 0.2})
 
 
-def _measured_pair_mc(**kwargs):
+def _measured_pair_mc(*, readout_max_requests=128, **kwargs):
     from qarp import EXACT
     from qarp.algorithms import SelectedPairReadout
     from qarp.blocks import selected_pair_unitary
@@ -62,7 +62,13 @@ def _measured_pair_mc(**kwargs):
     hamiltonian = QubitOperator("Z0")
     rotations = ((0, 1, 0.31),)
     readout = SelectedPairReadout(
-        hamiltonian, 4, rotations, engine=QarpEngine(seed=19), n_shots=EXACT, real_only=True
+        hamiltonian,
+        4,
+        rotations,
+        engine=QarpEngine(seed=19),
+        n_shots=EXACT,
+        real_only=True,
+        max_requests=readout_max_requests,
     )
     arguments = dict(
         hamiltonian=hamiltonian,
@@ -135,6 +141,38 @@ def test_pair_provider_column_to_row_conversion_is_complex_conjugation(monkeypat
     monkeypatch.setattr(mc, "_require_real", lambda value, source, target: checked.append(value))
     assert mc._transition_coefficients([(3, 12)]) == [1 - 2j]
     assert checked == [1 - 2j]
+
+
+def test_pair_provider_rejects_oversized_resident_request_before_native_submission(monkeypatch):
+    class Context(_ScriptedContext):
+        def request_transitions(self, attempts):
+            self.readout_before_request = dict(mc.transition_readout.diagnostics)
+            return SimpleNamespace(
+                request_id=1,
+                trajectory_index=self.reset[-1],
+                step_index=0,
+                attempts_per_walker=attempts,
+                sources=np.array([3], dtype=np.uint64),
+                proposal_attempts=np.array([1], dtype=np.uint64),
+            )
+
+        def apply_transition_batch(self, *args):
+            pytest.fail("An oversized request reached native evolution")
+
+    context = Context()
+    monkeypatch.setattr(qx, "make_resident_evolution_context", lambda *args: context)
+    monkeypatch.setattr(module, "_PersistentGpuRows", lambda *args: pytest.fail("exact columns"))
+    mc = _measured_pair_mc(readout_max_requests=2).build()
+
+    # One proposal, one diagonal and the reverse reference coefficient are
+    # three directed entries even though they form only two Hermitian keys.
+    with pytest.raises(RuntimeError, match="Readout request batch budget exceeded") as exc:
+        mc.run()
+
+    assert isinstance(exc.value.__cause__, ValueError)
+    assert context.readout_before_request["logical_requests"] == 1
+    assert dict(mc.transition_readout.diagnostics) == context.readout_before_request
+    assert context.uploads == []
 
 
 @pytest.mark.parametrize(

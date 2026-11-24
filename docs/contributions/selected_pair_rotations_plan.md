@@ -185,10 +185,10 @@ for the energy-only angle. The owner deferred a new convergence run for the
 energy-only angle. Raw trajectories, caches, Slurm scripts, FCI vectors and
 research job snapshots remain local.
 
-The follow-up review inspected `ede6d67cd7fdf8480e08a7a1748d402e4eb0d3a9`
-and checked the printed gain arithmetic. The checksummed local bundle for
-the next review is `private/validation/selected-pair-gate1-followup-Lpohv3x2.tar.gz`.
-Share the archive separately with the reviewer for the CPU spectral replay,
+The follow-up review of `b7240e7` checked the printed gain arithmetic. The
+checksummed local bundle for the next review is
+`private/validation/selected-pair-gate1-resident-hGDupSzX.tar.gz`.
+Attach the archive directly to the review for the CPU spectral replay,
 the job 121911 fixture and saved FCI vector, and the source receipts. It
 identifies job 122076 as the two-pair baseline, job 122869 as the exact QMC
 comparison, and job 129415 as the sealed exact preflight for job 129732.
@@ -216,6 +216,7 @@ readout = SelectedPairReadout(
     engine=None,
     n_shots=EXACT,
     max_pairs=3,
+    max_requests=32_768,
     real_only=True,
 )
 # Pass unitary_block=unitary and transition_readout=readout to the
@@ -271,10 +272,31 @@ reuse. Reuse includes cache hits and repeated keys served by a value
 already acquired in that batch. Record cumulative term visits and zero
 measurement settings, submissions and shots.
 
-These defaults are for bounded use. Job 123637 indexed 3,087 Pauli words
-and retained 337,507 covered coefficients for its three-pair arm. The
-larger cache, key and work ceilings leave room for workloads on that
-scale with deliberate configuration.
+The 128-entry default is for small calls such as a toy QMC smoke. Resident
+QMC assembles one directed list containing the distinct proposal edges,
+a diagonal for each source, and a reference coefficient for each
+non-reference label in the source and target union. All entries count,
+including Hermitian reversals. The reviewer reported 14,437 directed
+entries for one source with 10,000 attempts in the N2 sector. The local
+CPU shape replay produced 14,411 entries with seed 7. With a single
+source at the reference, 10,000 attempts give at most 20,001 entries
+even with 10,000 distinct targets. The resident example therefore sets
+`max_requests=32_768` explicitly. That setting covers this request shape.
+For a longer run, size the batch budget for its expected resident
+requests and the cumulative budgets for its coefficient work.
+
+`ResidentEvolutionConfig.transition_batch_size` sets the proposal draw
+chunk size. The adapter sends the assembled coefficient list to
+`estimate` in one call, and `max_requests` controls admission of that
+list. If it exceeds the configured cap, `run()` reports the provider's
+budget error before `apply_transition_batch` advances the walkers.
+The caller chooses the cap before the run. Preserve the single-call
+admission and atomic sparse-exact cache semantics on overflow.
+
+Job 123637 indexed 3,087 Pauli words and retained 337,507 covered
+coefficients for its three-pair arm. The larger cache, key and work
+ceilings leave room for workloads on that scale with deliberate
+configuration.
 
 ### Plan-first branch and file scope
 
@@ -333,6 +355,7 @@ research branch remains the evidence branch.
 | Explicit rotation cap | Require `max_pairs=3` in the preparation factories and sparse-exact provider. Reject a third rotation under the default, a third circuit-readout rotation, and a fourth rotation even with the opt-in. Check rejection before any acquisition. |
 | Exact requested coefficients and cache | Compare diagonal, nonzero off-diagonal, Hermitian reversal and structural-zero requests against a small independent `U†HU`. Check independent batch and lifetime boundaries, term visits, LRU eviction and recomputation, admission at the limits, atomic overflow with a primed cache, and engine/shot admission. |
 | Resident QMC transport | Compare supplied values and a seeded bounded GPU run with the existing exact path and literal toy coefficients. Count logical requests, exact evaluations, zero skips, cache reuse and runtime. Record zero measurement settings, submissions and shots for sparse exact acquisition. |
+| Resident batch overflow | Script one resident proposal, diagonal and reverse reference coefficient with `max_requests=2`. The three directed entries exceed the batch cap even though they represent only two canonical keys. Verify the readout state stays at its pre-request values and the native apply function receives no call. Run this guard for sparse exact and the existing circuit readout in `test_montecarlo_aggregated.py`. |
 | Molecular notebook | Run default CPU cells with the fixture path unset. Check the bare determinant against converged RHF and the signed selection against direct Hamiltonian action. Use the checksummed archive for the separate historical angle and energy replay. |
 | Historical overlap-gain certificate | Verify the all-sector spectral witness and replay the gain arithmetic from the signed Hamiltonian. The receipt checker rejects missing spectral witnesses and nonpositive separations. Certificate code stays in the review evidence bundle. |
 | Delivery | Execute the example, update the reference docs and run the required lint, formatting, types, regression and coverage checks on the contribution revision. |
