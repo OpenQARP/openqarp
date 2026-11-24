@@ -185,17 +185,15 @@ for the energy-only angle. The owner deferred a new convergence run for the
 energy-only angle. Raw trajectories, caches, Slurm scripts, FCI vectors and
 research job snapshots remain local.
 
-The external review inspected `2ac91ad`. The two-file revision
-`9b2e169c00191b418c98cbd0bdaa2c654fd30759` already contains the fixture-free
-CPU workflow and the stretched-N2 evidence above. For a repeat review, use
-that revision with the follow-up working-tree changes. The local review
-bundle at `private/validation/selected-pair-gate1-review-fRHVDxqA/` includes
-the two review files, checksummed run summaries and a CPU-only replay of the
-gain certificate. It identifies job 122076 as the two-pair baseline,
-job 122869 as the exact QMC comparison, and job 129415 as the sealed exact
-preflight for the finite-shot job 129732. Its archived FCI vector belongs
-to the 2.00 Å input from job 121911. The earlier 91.73% RHF overlap in this
-plan belongs to a different N2 benchmark.
+The follow-up review inspected `ede6d67cd7fdf8480e08a7a1748d402e4eb0d3a9`
+and checked the printed gain arithmetic. The checksummed local bundle for
+the next review is `private/validation/selected-pair-gate1-followup-Lpohv3x2.tar.gz`.
+Share the archive separately with the reviewer for the CPU spectral replay,
+the job 121911 fixture and saved FCI vector, and the source receipts. It
+identifies job 122076 as the two-pair baseline, job 122869 as the exact QMC
+comparison, and job 129415 as the sealed exact preflight for job 129732.
+The earlier 91.73% RHF overlap in this plan belongs to a different N2
+benchmark.
 
 ### Proposed interface and implementation scope
 
@@ -215,6 +213,7 @@ readout = SelectedPairReadout(
     n_qubits,
     rotations,
     coefficient_mode="sparse_exact",
+    engine=None,
     n_shots=EXACT,
     max_pairs=3,
     real_only=True,
@@ -224,14 +223,58 @@ readout = SelectedPairReadout(
 ```
 
 The proposed `coefficient_mode` defaults to the existing circuit path.
-Sparse exact mode needs no measurement engine. Use a bounded Pauli
-flip-mask index and the signed preparation supports to contract
-`K[target, source]` directly. Keep indexed terms and cache entries under
-explicit limits, and reject an over-budget request before publishing a
-result. Return exact and structurally certified-zero estimates with zero
-executions and shots. Preserve the existing resident request convention
-and validation of the bound H/U before using cached data. Retain circuit
-readout limits at two rotations. Follow conventions §§13–15 and 17–19.
+In `sparse_exact` mode, require `engine=None` and `n_shots=EXACT`. Reject
+a measurement engine or finite shot count at construction. The circuit
+path continues to require a dedicated noiseless `QarpEngine` or supported
+default CUDA-Q StateVector/FP64 engine. It accepts `EXACT` for simulated
+circuits or integer shots of at least two, and retains its two-rotation cap
+and its existing `max_requests` limit on both batch size and lifetime
+unique keys. Resident MC still uses a separate capable
+`CudaqEngine` and a matching readout with `real_only=True`. Follow
+conventions §§13–15 and 17–19.
+
+#### Sparse-exact resource limits
+
+Use a Pauli flip-mask index and the signed preparation supports to contract
+`K[target, source]` directly. The following are proposed defaults and hard
+ceilings for one sparse-exact provider. Each setting accepts positive
+integers up to its ceiling.
+
+| Setting | Default | Hard ceiling | Charge |
+| --- | ---: | ---: | --- |
+| `max_indexed_terms` | 8,192 | 65,536 | Nonzero Pauli words indexed at construction. |
+| `max_masks` | 16,384 | 65,536 | Masks in the conservative transformed cover, checked at construction. |
+| `max_requests` | 128 | 65,536 | Directed entries in one `estimate` call, including repetitions and reversal. One resident coefficient request is one call. |
+| `max_unique_keys` | 16,384 | 1,048,576 | Distinct covered canonical Hermitian keys over the provider lifetime, including evicted keys. |
+| `max_term_visits` | 80,000 | 8,000,000,000 | Cumulative term visits for admitted calls. Charge matching indexed Pauli records for each nonzero bra/ket support product of a cache miss. |
+| `cache_max_entries` | 4,096 | 524,288 | Retained covered coefficients in the provider's LRU cache. |
+
+Sparse-exact mode uses `max_requests` for batch size; `max_unique_keys`
+places the lifetime limit. An out-of-cover directed request returns
+a structural zero and counts toward batch size and the structural-zero
+counter. It consumes no lifetime key, term visits or cache slot. A zero
+from a covered contraction is an exact evaluated coefficient. Within an
+admitted batch, evaluate each missing canonical key once and reuse its
+value for repeats and conjugate reversals. A miss that was evicted since
+an earlier call incurs new term visits. Publish results in input order,
+apply cache touches in input order, and evict the least recently used
+entry when needed.
+
+Check H/U identity, directed count, lifetime key count and cumulative
+work from the pre-call cache and index before contraction. A rejected
+batch raises `ValueError` for the exhausted budget and publishes no
+coefficients or native proposal batch. Its cache contents, recency, keys
+and acquisition counters remain at their pre-call values. Previously
+admitted calls stay recorded. For a successful batch, each directed
+request counts once as a structural zero, a new exact evaluation, or a
+reuse. Reuse includes cache hits and repeated keys served by a value
+already acquired in that batch. Record cumulative term visits and zero
+measurement settings, submissions and shots.
+
+These defaults are for bounded use. Job 123637 indexed 3,087 Pauli words
+and retained 337,507 covered coefficients for its three-pair arm. The
+larger cache, key and work ceilings leave room for workloads on that
+scale with deliberate configuration.
 
 ### Plan-first branch and file scope
 
@@ -277,13 +320,18 @@ and `scripts/validate_selected_pair_scaling.py`, and their tests
 research artifacts. These are the four paths in the existing 26-file
 research diff outside the proposed contribution scope.
 
+The review bundle includes `plan-first.patch` for the plan and index only.
+Apply it from the approved `develop` base for the first commit. The
+research branch remains the evidence branch.
+
 ### Acceptance for the proposed production path
 
 | Behaviour | Independent check |
 | --- | --- |
 | Signed three-rotation action and circuit | Compare ordered, shared-orbital rotations with a product of dense SciPy exponentials using literal signed generators. Check LSB amplitudes and absolute phase before and under control at `atol=1e-12`, `rtol=0`. |
+| End-to-end controlled phase | In `test_selected_pair_unitary.py`, run `QPEBlock` and CPU `Sampler` with six state qubits and three ancillas. Use `(0,1,π/2), (1,2,π/2), (0,1,π/2)` in that order and the pair in orbital 1 (LSB label 12). The signed transfer gives eigenvalue −1, so the exact phase distribution has unit mass in bin 4 at absolute tolerance 1e-12. |
 | Explicit rotation cap | Require `max_pairs=3` in the preparation factories and sparse-exact provider. Reject a third rotation under the default, a third circuit-readout rotation, and a fourth rotation even with the opt-in. Check rejection before any acquisition. |
-| Exact requested coefficients and cache | Compare diagonal, nonzero off-diagonal, Hermitian reversal and structural-zero requests against a small independent `U†HU`. Check budgets, identity changes and counters. |
+| Exact requested coefficients and cache | Compare diagonal, nonzero off-diagonal, Hermitian reversal and structural-zero requests against a small independent `U†HU`. Check independent batch and lifetime boundaries, term visits, LRU eviction and recomputation, admission at the limits, atomic overflow with a primed cache, and engine/shot admission. |
 | Resident QMC transport | Compare supplied values and a seeded bounded GPU run with the existing exact path and literal toy coefficients. Count logical requests, exact evaluations, zero skips, cache reuse and runtime. Record zero measurement settings, submissions and shots for sparse exact acquisition. |
 | Molecular notebook | Run default CPU cells with the fixture path unset. Check the bare determinant against converged RHF and the signed selection against direct Hamiltonian action. Use the checksummed archive for the separate historical angle and energy replay. |
 | Historical overlap-gain certificate | Verify the all-sector spectral witness and replay the gain arithmetic from the signed Hamiltonian. The receipt checker rejects missing spectral witnesses and nonpositive separations. Certificate code stays in the review evidence bundle. |
