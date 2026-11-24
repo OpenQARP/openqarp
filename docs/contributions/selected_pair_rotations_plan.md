@@ -185,6 +185,18 @@ for the energy-only angle. The owner deferred a new convergence run for the
 energy-only angle. Raw trajectories, caches, Slurm scripts, FCI vectors and
 research job snapshots remain local.
 
+The external review inspected `2ac91ad`. The two-file revision
+`9b2e169c00191b418c98cbd0bdaa2c654fd30759` already contains the fixture-free
+CPU workflow and the stretched-N2 evidence above. For a repeat review, use
+that revision with the follow-up working-tree changes. The local review
+bundle at `private/validation/selected-pair-gate1-review-fRHVDxqA/` includes
+the two review files, checksummed run summaries and a CPU-only replay of the
+gain certificate. It identifies job 122076 as the two-pair baseline,
+job 122869 as the exact QMC comparison, and job 129415 as the sealed exact
+preflight for the finite-shot job 129732. Its archived FCI vector belongs
+to the 2.00 Å input from job 121911. The earlier 91.73% RHF overlap in this
+plan belongs to a different N2 benchmark.
+
 ### Proposed interface and implementation scope
 
 Reuse the preparation factories, readout and `AggregatedMonteCarlo`
@@ -221,30 +233,60 @@ executions and shots. Preserve the existing resident request convention
 and validation of the bound H/U before using cached data. Retain circuit
 readout limits at two rotations. Follow conventions §§13–15 and 17–19.
 
-The three-rotation extension is scoped against research commit
-`2ac91ad8104a7af6ffbe606f094051c7546c8f34`, which already contains the
-two-rotation foundation. At Gate 1, confirm how that foundation will be
-reviewed on the destination branch. The proposed extension touches the
-review files above and these existing library, test and reference files:
+### Plan-first branch and file scope
 
-- `src/qarp/operators/_selected_pairs.py`
-- `src/qarp/blocks/_primitives/selected_pair_unitary.py`
-- `src/qarp/algorithms/_composite/selected_pair_readout.py`
-- `src/qarp/algorithms/_composite/aggregated_montecarlo.py`
-- `tests/test_operators/test_selected_pairs.py`
-- `tests/test_blocks/test_primitives/test_selected_pair_unitary.py`
-- `tests/test_algorithms/test_composite/test_selected_pair_readout.py`
-- `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`
-- `tests/test_algorithms/test_composite/test_montecarlo_gpu.py`
-- `docs/source/operators.rst`, `docs/source/blocks.rst`, `docs/source/algorithms.rst`
+Propose `feature/selected-pair-rotations` from `develop`, currently recorded
+locally at `8e110af38927002d67fa0a582915faf7eaa850d3`. Its first commit
+contains this plan and its index row in `docs/contributions/README.md`.
+The notebook is a local review preview until Gate 1. Disclose the prior
+local research exception in the Draft PR. Keep the status Planned and
+the green-light field empty until the reviewer's comment.
+
+After Gate 1, port the required two-rotation foundation from research
+commit `2ac91ad8104a7af6ffbe606f094051c7546c8f34` and implement the bounded
+three-rotation extension in the same PR. The proposed file scope against
+`develop` is the plan, index, notebook and the following paths:
+
+- Pair algebra and circuit factory — `src/qarp/operators/_selected_pairs.py`,
+  `src/qarp/operators/__init__.py`,
+  `src/qarp/blocks/_primitives/selected_pair_unitary.py`, and
+  `src/qarp/blocks/__init__.py`.
+- Readout, resident transport and exports —
+  `src/qarp/algorithms/_composite/selected_pair_readout.py`,
+  `src/qarp/algorithms/_composite/aggregated_montecarlo.py`,
+  `src/qarp/algorithms/_primitives/grouped_transition_hadamard_test.py`,
+  `src/qarp/algorithms/_composite/__init__.py`, and
+  `src/qarp/algorithms/__init__.py`. The current CPU notebook uses the
+  readout and grouped uncertainty contracts as well as the pair factories.
+  Its opt-in GPU cell demonstrates the existing exact-column QMC call.
+- Tests — `tests/selected_pair_oracles.py`,
+  `tests/test_operators/test_selected_pairs.py`,
+  `tests/test_blocks/test_primitives/test_selected_pair_unitary.py`,
+  `tests/test_algorithms/test_composite/test_selected_pair_readout.py`,
+  `tests/test_algorithms/test_composite/test_montecarlo_aggregated.py`,
+  `tests/test_algorithms/test_composite/test_montecarlo_gpu.py`, and
+  `tests/test_algorithms/test_primitives/test_grouped_transition_hadamard_test.py`.
+- Reference docs — `docs/source/operators.rst`, `docs/source/blocks.rst`,
+  and `docs/source/algorithms.rst`. Point readers to the self-contained
+  notebook for the molecular example.
+
+The two historical validation scripts `scripts/validate_selected_pair_preparations.py`
+and `scripts/validate_selected_pair_scaling.py`, and their tests
+`tests/test_algorithms/test_composite/test_selected_pair_molecular.py` and
+`tests/test_algorithms/test_composite/test_selected_pair_scaling.py`, remain
+research artifacts. These are the four paths in the existing 26-file
+research diff outside the proposed contribution scope.
 
 ### Acceptance for the proposed production path
 
 | Behaviour | Independent check |
 | --- | --- |
-| Signed three-rotation action and circuit | Compare ordered, shared-orbital rotations with a product of dense SciPy exponentials using literal signed generators. Compare absolute phase and LSB amplitudes. |
-| Exact requested coefficients and cache | Compare diagonal, nonzero off-diagonal, Hermitian reversal and structural-zero requests against a small independent `U†HU`. Check budgets, identity changes, counters and default two-rotation admission. |
+| Signed three-rotation action and circuit | Compare ordered, shared-orbital rotations with a product of dense SciPy exponentials using literal signed generators. Check LSB amplitudes and absolute phase before and under control at `atol=1e-12`, `rtol=0`. |
+| Explicit rotation cap | Require `max_pairs=3` in the preparation factories and sparse-exact provider. Reject a third rotation under the default, a third circuit-readout rotation, and a fourth rotation even with the opt-in. Check rejection before any acquisition. |
+| Exact requested coefficients and cache | Compare diagonal, nonzero off-diagonal, Hermitian reversal and structural-zero requests against a small independent `U†HU`. Check budgets, identity changes and counters. |
 | Resident QMC transport | Compare supplied values and a seeded bounded GPU run with the existing exact path and literal toy coefficients. Count logical requests, exact evaluations, zero skips, cache reuse and runtime. Record zero measurement settings, submissions and shots for sparse exact acquisition. |
+| Molecular notebook | Run default CPU cells with the fixture path unset. Check the bare determinant against converged RHF and the signed selection against direct Hamiltonian action. Use the checksummed archive for the separate historical angle and energy replay. |
+| Historical overlap-gain certificate | Verify the all-sector spectral witness and replay the gain arithmetic from the signed Hamiltonian. The receipt checker rejects missing spectral witnesses and nonpositive separations. Certificate code stays in the review evidence bundle. |
 | Delivery | Execute the example, update the reference docs and run the required lint, formatting, types, regression and coverage checks on the contribution revision. |
 
 Review the opt-in API, the exact resource limits and the proposed test oracles
@@ -4681,14 +4723,38 @@ $$
 $$
 
 The residual bounds the trace norm of the difference between the Ritz and
-ground-state projectors by $2r/(\beta-\mu)$. The operator norm of the
-difference between the two trial-state projectors is the square-root
-factor. To verify $\beta$, the CPU check established positivity of
-$H-\beta I$ after a rank-one positive shift, which bounds the first excited
-energy by the min–max principle. For N2, the separation $\beta-\mu$ was
-4.1556 mHa and the square-root factor was 0.360677. The estimated gain of
-8.7401 percentage points less the error allowance of 5.4349 percentage
-points yielded the 3.3052 percentage-point lower bound.
+ground-state projectors by $2r/(\beta-\mu)$. Apply that bound to the
+expectation of the difference between the two trial-state projectors,
+whose operator norm is the square-root factor. This certifies the gain
+directly using the common ground-state estimate.
+
+The spectral witness covered all 14,400 determinants in the (7 alpha,
+7 beta) sector. For $\beta=-107.451$ Ha the CPU check verified positive
+definiteness of $H-\beta I+|w\rangle\langle w|$ using a unit-strength
+positive shift in Ha and a normalized 1,024-determinant witness $w$. By
+min–max, restricting to the orthogonal complement of $w$ gives
+$E_1\ge\beta$. Cholesky factor defects and triangular inverse residuals
+gave lower eigenvalue bounds of `0.00027689241384836497` Ha and
+`0.008766482346815777` Ha in the two assembled blocks, of sizes 7,232
+and 7,168. Both bounds exceeded the full assembly error allowance
+`4.3647534294952815e-05` Ha plus the `1e-9` Ha arithmetic margin.
+The refined Ritz energy plus the assembly allowance is below $\beta$,
+which verifies a unique ground level in this sector.
+
+| Certificate input or result | Recorded value |
+| --- | ---: |
+| Refined Ritz energy $\mu$ (Ha) | `-107.45515559303084` |
+| Assembled full-space residual (Ha) | `0.000269446096471118` |
+| $r$ including assembly error and arithmetic margin (Ha) | `0.0003130946307660708` |
+| Trial-state distance | `0.3606766570196663` |
+| Ritz-estimated gain | `0.08740130962417603` |
+| Final allowance for gain arithmetic | `1e-10` |
+| Certified gain lower bound | `0.03305242409804148` |
+| Separately measured FCI gain | `0.0874012930525707` |
+
+The receipt checker verifies the spectral witness coverage and the error
+budget before evaluating the gain. The replay source and the original
+certificate receipts are in the local Gate 1 bundle.
 
 The historical 10,000-walker QMC result used the overlap-fitted third angle
 −0.385350410721 radians. Its squared overlap was 61.9774%, about 0.017
@@ -4700,6 +4766,9 @@ candidates remains open. Local receipts are in
 `private/validation/selected-pair-n2-gain-certificate-57rq2GWo/`.
 
 ## API sketch
+
+This sketch records the two-rotation research baseline. The proposed
+three-rotation sparse-exact opt-in is defined in [Gate 1 review](#gate-1-review).
 
 ```python
 # Public exports follow each destination package's sorted __all__.
@@ -4757,6 +4826,9 @@ runs a small synthetic independent oracle by default; molecular/GPU cells requir
 explicit opt-in and report skipped gates as unverified.
 
 ## Test plan
+
+The table below records the historical research validation. The production
+extension uses the acceptance criteria in [Gate 1 review](#gate-1-review).
 
 | Test | Independent oracle / acceptance | Location |
 |---|---|---|
