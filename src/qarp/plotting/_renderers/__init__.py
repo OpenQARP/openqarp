@@ -1,3 +1,4 @@
+from .barrier import BarrierRenderer
 from .base import LabelInfo
 from .factory import RendererFactory
 from .label_manager import LabelManager, LabelInfo as LabelInfoClass
@@ -19,4 +20,5 @@ __all__ = [
     "ControlledBlockRenderer",
     "MultiGateRenderer",
     "GlobalPhaseRenderer",
+    "BarrierRenderer",
 ]

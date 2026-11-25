@@ -1,4 +1,5 @@
 from .._config import PlotConfig
+from .barrier import BarrierRenderer
 from .boxed import BoxedGateRenderer
 from .controlled import ControlledGateRenderer
 from .controlled_block import ControlledBlockRenderer
@@ -21,6 +22,7 @@ class RendererFactory:
             "controlled_block": ControlledBlockRenderer(config, self.label_manager),
             "multi": MultiGateRenderer(config, self.label_manager),
             "global_phase": GlobalPhaseRenderer(config, self.label_manager),
+            "barrier": BarrierRenderer(config, self.label_manager),
         }
 
     def reset_label_manager(self) -> None:
@@ -57,8 +59,13 @@ class RendererFactory:
         # Parameterized labels arrive as "crz(0.3)"; match on the stem alone.
         name = str(cmd.op).lower().split("(")[0]
 
+        # Barrier is checked ahead of the qubit-count fallback below: a
+        # whole-register barrier also has no qubits, and would otherwise be
+        # misclassified as a global phase gate (and dropped from rendering).
+        if name == "barrier":
+            return "barrier"
         # Handle global phase gates (no qubits)
-        if len(cmd.qubits) == 0:
+        elif len(cmd.qubits) == 0:
             return "global_phase"
         elif name in self._CONTROLLED:
             return "controlled"

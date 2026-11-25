@@ -120,6 +120,21 @@ class TestRendererFactory:
 
         assert factory.classify_gate(cmd) == "controlled"
 
+    def test_classify_barrier_as_barrier_not_global_phase(self):
+        """A whole-register Barrier is also qubit-less (``qx.Command()``'s
+        default), but must route to the barrier renderer, not be
+        misclassified as (and silently dropped as) a global phase gate."""
+        import qarpx as qx
+
+        config = PlotConfig()
+        factory = RendererFactory(config)
+
+        b = SimpleBlock(2, name="barrier_only")
+        b.set_commands([qx.Command()])
+        cmd = _first_command(b)
+
+        assert factory.classify_gate(cmd) == "barrier"
+
 
 class TestSingleGateRenderer:
     """Tests for SingleGateRenderer."""
