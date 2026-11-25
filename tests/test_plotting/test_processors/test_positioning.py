@@ -64,3 +64,12 @@ def test_qubitless_commands_are_skipped():
     """A global-phase command carries no wire and must not consume a column."""
     cmds = [_Cmd("gphase", []), _Cmd("h", [0])]
     assert get_x_positions_list(cmds, [0]) == [0.25]
+
+
+def test_a_qubitless_barrier_fences_every_wire():
+    """Unlike a global-phase command, a qubit-less Barrier (the whole-register
+    fence convention) must still consume a column across every wire. It gets
+    half a layer's width (it draws as a thin line, not a gate-sized box), so
+    the following gate sits closer than a full layer away."""
+    cmds = [_Cmd("h", [0]), _Cmd("barrier", []), _Cmd("h", [1])]
+    assert get_x_positions_list(cmds, [0, 1]) == [0.25, 1.125, 1.75]

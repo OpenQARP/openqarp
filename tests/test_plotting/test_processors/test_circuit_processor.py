@@ -77,6 +77,18 @@ def test_global_phase_commands_are_excluded_from_the_layout(processor):
     assert data.global_phase == 0.5
 
 
+def test_barrier_commands_are_kept_unlike_global_phase(processor):
+    """A whole-register Barrier is also qubit-less, but unlike a global phase
+    gate it is a real fence to render: it must stay visible and still fence
+    a column, instead of being silently dropped by the qubit-less filter."""
+    circ = _Circuit([0, 1], [_Cmd("h", [0]), _Cmd("Barrier", []), _Cmd("h", [1])])
+    data = _process(processor, circ)
+    assert [str(cmd.op) for cmd in data.non_measure_cmds] == ["h", "Barrier", "h"]
+    # h(1) cannot share column 0 with h(0): the barrier fences the whole
+    # register, but only takes half a layer's width (a thin line, not a box).
+    assert data.x_positions == [0.25, 1.125, 1.75]
+
+
 def test_unflattened_layout_gives_one_column_per_visible_command(processor):
     circ = _Circuit([0, 1], [_Cmd("h", [0]), _Cmd("h", [1]), _Cmd("x", [0])])
     data = _process(processor, circ, flatten_layers=False)

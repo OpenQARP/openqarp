@@ -20,7 +20,12 @@ def get_y_positions(qubits, invert_order: bool = False) -> Dict:
 
 
 def get_x_positions_list(commands, qubits):
-    """Calculate x positions for gates with layer flattening."""
+    """Calculate x positions for gates with layer flattening.
+
+    A Barrier draws as a thin dashed line rather than a gate-sized box, so it
+    is given half a layer's width instead of a full one -- a full width reads
+    as an empty gate-sized gap on either side of it.
+    """
     qubit_x = {q: 0 for q in qubits}
     x_positions = []
 
@@ -32,9 +37,10 @@ def get_x_positions_list(commands, qubits):
             continue
 
         involved_qubits = sorted(set(flatten_qubits(cmd.qubits)), key=lambda q: qubit_to_index[q])
+        is_barrier = str(cmd.op).lower() == "barrier"
 
         if not involved_qubits:
-            if str(cmd.op).lower() != "barrier":
+            if not is_barrier:
                 # Skip other gates with no qubits (e.g., global phase gate).
                 # These should already be filtered out, but handle defensively.
                 continue
@@ -45,10 +51,11 @@ def get_x_positions_list(commands, qubits):
             max_idx = max(qubit_to_index[q] for q in involved_qubits)
             q_span = [q for q in qubits if min_idx <= qubit_to_index[q] <= max_idx]
 
+        width = 0.5 if is_barrier else 1.0
         x = max(qubit_x[q] for q in q_span)
-        x_positions.append(x + 1 / 4)  # shift for nicer appearance
+        x_positions.append(x + width / 4)  # shift for nicer appearance
 
         for q in q_span:
-            qubit_x[q] = x + 1
+            qubit_x[q] = x + width
 
     return x_positions
