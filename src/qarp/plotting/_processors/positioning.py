@@ -26,7 +26,7 @@ def get_x_positions_list(commands, qubits):
     is given half a layer's width instead of a full one -- a full width reads
     as an empty gate-sized gap on either side of it.
     """
-    qubit_x = {q: 0 for q in qubits}
+    qubit_x = {q: 0.0 for q in qubits}
     x_positions = []
 
     # mapping for all qubits, named or unnamed
