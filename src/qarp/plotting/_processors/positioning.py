@@ -33,14 +33,17 @@ def get_x_positions_list(commands, qubits):
 
         involved_qubits = sorted(set(flatten_qubits(cmd.qubits)), key=lambda q: qubit_to_index[q])
 
-        # Skip gates with no qubits (e.g., global Phase gate)
-        # These should already be filtered out, but handle defensively
         if not involved_qubits:
-            continue
-
-        min_idx = min(qubit_to_index[q] for q in involved_qubits)
-        max_idx = max(qubit_to_index[q] for q in involved_qubits)
-        q_span = [q for q in qubits if min_idx <= qubit_to_index[q] <= max_idx]
+            if str(cmd.op).lower() != "barrier":
+                # Skip other gates with no qubits (e.g., global phase gate).
+                # These should already be filtered out, but handle defensively.
+                continue
+            # A qubit-less Barrier fences the whole register.
+            q_span = list(qubits)
+        else:
+            min_idx = min(qubit_to_index[q] for q in involved_qubits)
+            max_idx = max(qubit_to_index[q] for q in involved_qubits)
+            q_span = [q for q in qubits if min_idx <= qubit_to_index[q] <= max_idx]
 
         x = max(qubit_x[q] for q in q_span)
         x_positions.append(x + 1 / 4)  # shift for nicer appearance

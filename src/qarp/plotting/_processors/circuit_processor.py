@@ -48,8 +48,14 @@ class CircuitProcessor:
 
         commands = circ.get_commands()
         non_measure_cmds = [cmd for cmd in commands if str(cmd.op).lower() != "measure"]
-        # Filter out global phase gates (no qubits) for positioning purposes
-        visible_cmds = [cmd for cmd in non_measure_cmds if len(cmd.qubits) > 0]
+        # Filter out global phase gates (no qubits) for positioning purposes —
+        # a Barrier is also qubit-less for a whole-register fence, but it is a
+        # real fence to render, not a dropped no-op, so it is kept here.
+        visible_cmds = [
+            cmd
+            for cmd in non_measure_cmds
+            if len(cmd.qubits) > 0 or str(cmd.op).lower() == "barrier"
+        ]
 
         y_positions = get_y_positions(qubits, invert_order)
         n_measures = self._count_and_check_measurements(commands)
